@@ -41,6 +41,18 @@ Add-Type -Namespace MacMakeover -Name NativeWindow -MemberDefinition @"
 
   [System.Runtime.InteropServices.DllImport("user32.dll")]
   public static extern bool SetForegroundWindow(System.IntPtr hWnd);
+
+  [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+  public struct POINT {
+    public int X;
+    public int Y;
+  }
+
+  [System.Runtime.InteropServices.DllImport("user32.dll")]
+  public static extern bool GetCursorPos(out POINT lpPoint);
+
+  [System.Runtime.InteropServices.DllImport("user32.dll")]
+  public static extern short GetAsyncKeyState(int vKey);
 "@
 
 $ErrorActionPreference = "Stop"
@@ -261,6 +273,42 @@ $script:Window.Add_SourceInitialized({
   [MacMakeover.NativeWindow]::SetWindowLongPtr($helper.Handle, $GWL_EXSTYLE, $newStyle) | Out-Null
   [MacMakeover.NativeWindow]::ShowWindow($helper.Handle, 8) | Out-Null
 })
+$script:OpenedAt = Get-Date
+$script:WasLeftMouseDown = $false
+$script:OutsideClickTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:OutsideClickTimer.Interval = [TimeSpan]::FromMilliseconds(45)
+$script:OutsideClickTimer.Add_Tick({
+  $mouseState = [int][MacMakeover.NativeWindow]::GetAsyncKeyState(0x01)
+  $leftMouseDown = ($mouseState -band 0x8000) -ne 0
+  $leftMousePressed = (($mouseState -band 0x0001) -ne 0) -or ($leftMouseDown -and -not $script:WasLeftMouseDown)
+  $script:WasLeftMouseDown = $leftMouseDown
+
+  if (-not $leftMousePressed -or ((Get-Date) - $script:OpenedAt).TotalMilliseconds -lt 250) {
+    return
+  }
+
+  $point = New-Object MacMakeover.NativeWindow+POINT
+  [MacMakeover.NativeWindow]::GetCursorPos([ref]$point) | Out-Null
+
+  $left = [double]$script:Window.Left
+  $top = [double]$script:Window.Top
+  $right = $left + [double]$script:Window.ActualWidth
+  $bottom = $top + [double]$script:Window.ActualHeight
+  $insideWindow = $point.X -ge $left -and $point.X -le $right -and $point.Y -ge $top -and $point.Y -le $bottom
+
+  if (-not $insideWindow) {
+    $script:Window.Close()
+  }
+})
+$script:Window.Add_Closed({
+  if ($script:OutsideClickTimer) {
+    $script:OutsideClickTimer.Stop()
+  }
+  if ($script:MenuMutex) {
+    $script:MenuMutex.ReleaseMutex()
+    $script:MenuMutex.Dispose()
+  }
+})
 $script:Window.Add_KeyDown({
   param($sender, $eventArgs)
   if ($eventArgs.Key -eq [System.Windows.Input.Key]::Escape) {
@@ -268,4 +316,5 @@ $script:Window.Add_KeyDown({
   }
 })
 
+$script:OutsideClickTimer.Start()
 $script:Window.ShowDialog() | Out-Null

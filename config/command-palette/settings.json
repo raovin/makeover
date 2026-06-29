@@ -20,64 +20,19 @@
   "PinnedCommands": [],
   "AllowExternalReload": false,
   "ProviderSettings": {
-    "com.microsoft.cmdpal.builtin.remotedesktop": {
-      "IsEnabled": false,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
-    "Microsoft.PowerToys.SparseApp_8wekyb3d8bbwe!PowerToys.CmdPalExtension!PowerToys": {
-      "IsEnabled": true,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
     "Bookmarks": {
       "IsEnabled": true,
       "FallbackCommands": {},
       "PinnedCommandIds": []
     },
-    "com.microsoft.cmdpal.builtin.datetime": {
-      "IsEnabled": false,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
     "com.microsoft.cmdpal.builtin.calculator": {
       "IsEnabled": true,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
-    "com.microsoft.cmdpal.builtin.windowssettings": {
-      "IsEnabled": true,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
-    "PerformanceMonitor": {
-      "IsEnabled": false,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
-    "com.microsoft.cmdpal.builtin.core": {
-      "IsEnabled": true,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
-    "com.microsoft.cmdpal.builtin.run": {
-      "IsEnabled": true,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
-    "com.microsoft.cmdpal.builtin.websearch": {
-      "IsEnabled": false,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
-    "Windows.Services": {
-      "IsEnabled": false,
-      "FallbackCommands": {},
-      "PinnedCommandIds": []
-    },
-    "Files": {
-      "IsEnabled": true,
-      "FallbackCommands": {},
+      "FallbackCommands": {
+        "com.microsoft.cmdpal.builtin.calculator.fallback": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": false
+        }
+      },
       "PinnedCommandIds": []
     },
     "WinGet": {
@@ -85,8 +40,56 @@
       "FallbackCommands": {},
       "PinnedCommandIds": []
     },
-    "AllApps": {
+    "com.microsoft.cmdpal.builtin.remotedesktop": {
+      "IsEnabled": false,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.core": {
       "IsEnabled": true,
+      "FallbackCommands": {
+        "com.microsoft.cmdpal.log": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": true
+        },
+        "com.microsoft.cmdpal.quit": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": true
+        },
+        "com.microsoft.cmdpal.reload": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": true
+        }
+      },
+      "PinnedCommandIds": []
+    },
+    "Windows.Services": {
+      "IsEnabled": false,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "Microsoft.PowerToys.SparseApp_8wekyb3d8bbwe!PowerToys.CmdPalExtension!PowerToys": {
+      "IsEnabled": true,
+      "FallbackCommands": {
+        "com.microsoft.powertoys.fallback": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": false
+        }
+      },
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.run": {
+      "IsEnabled": true,
+      "FallbackCommands": {
+        "com.microsoft.cmdpal.builtin.shell.fallback": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": true
+        }
+      },
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.datetime": {
+      "IsEnabled": false,
       "FallbackCommands": {},
       "PinnedCommandIds": []
     },
@@ -95,13 +98,18 @@
       "FallbackCommands": {},
       "PinnedCommandIds": []
     },
-    "com.microsoft.cmdpal.builtin.system": {
+    "com.microsoft.cmdpal.builtin.windowssettings": {
       "IsEnabled": true,
-      "FallbackCommands": {},
+      "FallbackCommands": {
+        "com.microsoft.cmdpal.builtin.windows.settings.fallback": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": true
+        }
+      },
       "PinnedCommandIds": []
     },
-    "Windows.Registry": {
-      "IsEnabled": false,
+    "AllApps": {
+      "IsEnabled": true,
       "FallbackCommands": {},
       "PinnedCommandIds": []
     },
@@ -114,33 +122,102 @@
       "IsEnabled": true,
       "FallbackCommands": {},
       "PinnedCommandIds": []
+    },
+    "Files": {
+      "IsEnabled": true,
+      "FallbackCommands": {
+        "com.microsoft.cmdpal.builtin.indexer.fallback": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": false
+        }
+      },
+      "PinnedCommandIds": []
+    },
+    "Windows.Registry": {
+      "IsEnabled": false,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.system": {
+      "IsEnabled": true,
+      "FallbackCommands": {
+        "com.microsoft.cmdpal.builtin.system.fallback": {
+          "IsEnabled": true,
+          "IncludeInGlobalResults": true
+        }
+      },
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.websearch": {
+      "IsEnabled": false,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "PerformanceMonitor": {
+      "IsEnabled": false,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
     }
   },
-  "FallbackRanks": [],
+  "FallbackRanks": [
+    "com.microsoft.cmdpal.builtin.shell.fallback",
+    "com.microsoft.cmdpal.builtin.calculator.fallback",
+    "com.microsoft.cmdpal.builtin.indexer.fallback",
+    "com.microsoft.cmdpal.builtin.windows.settings.fallback",
+    "com.microsoft.cmdpal.quit",
+    "com.microsoft.cmdpal.reload",
+    "com.microsoft.cmdpal.log",
+    "com.microsoft.cmdpal.builtin.system.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback",
+    "com.microsoft.powertoys.fallback"
+  ],
   "Aliases": {
-    "\u003C": {
-      "CommandId": "com.microsoft.cmdpal.windowwalker",
-      "Alias": "\u003C",
-      "IsDirect": true
-    },
-    ")": {
-      "CommandId": "com.microsoft.cmdpal.timedate",
-      "Alias": ")",
-      "IsDirect": true
-    },
-    "file ": {
-      "CommandId": "com.microsoft.indexer.fileSearch",
-      "Alias": "file",
-      "IsDirect": false
-    },
-    "$": {
-      "CommandId": "com.microsoft.cmdpal.windowsSettings",
-      "Alias": "$",
-      "IsDirect": true
-    },
-    "=": {
-      "CommandId": "com.microsoft.cmdpal.calculator",
-      "Alias": "=",
+    "\u003E": {
+      "CommandId": "com.microsoft.cmdpal.shell",
+      "Alias": "\u003E",
       "IsDirect": true
     },
     ":": {
@@ -148,10 +225,30 @@
       "Alias": ":",
       "IsDirect": true
     },
-    "\u003E": {
-      "CommandId": "com.microsoft.cmdpal.shell",
-      "Alias": "\u003E",
+    ")": {
+      "CommandId": "com.microsoft.cmdpal.timedate",
+      "Alias": ")",
       "IsDirect": true
+    },
+    "=": {
+      "CommandId": "com.microsoft.cmdpal.calculator",
+      "Alias": "=",
+      "IsDirect": true
+    },
+    "$": {
+      "CommandId": "com.microsoft.cmdpal.windowsSettings",
+      "Alias": "$",
+      "IsDirect": true
+    },
+    "\u003C": {
+      "CommandId": "com.microsoft.cmdpal.windowwalker",
+      "Alias": "\u003C",
+      "IsDirect": true
+    },
+    "file ": {
+      "CommandId": "com.microsoft.indexer.fileSearch",
+      "Alias": "file",
+      "IsDirect": false
     }
   },
   "CommandHotkeys": [],
@@ -210,7 +307,19 @@
       }
     ],
     "ShowLabels": true,
-    "MonitorConfigs": []
+    "MonitorConfigs": [
+      {
+        "MonitorDeviceId": "\\\\.\\DISPLAY1",
+        "Enabled": true,
+        "Side": null,
+        "IsPrimary": true,
+        "IsCustomized": false,
+        "StartBands": null,
+        "CenterBands": null,
+        "EndBands": null,
+        "LastSeen": "2026-06-27T00:00:00Z"
+      }
+    ]
   },
   "Theme": "Default",
   "ColorizationMode": "None",

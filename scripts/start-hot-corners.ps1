@@ -23,6 +23,9 @@ public static class MacMakeoverHotCornersNative {
   public static extern bool GetCursorPos(out POINT lpPoint);
 
   [DllImport("user32.dll")]
+  public static extern short GetAsyncKeyState(int vKey);
+
+  [DllImport("user32.dll")]
   public static extern void keybd_event(byte bVk, byte bScan, int dwFlags, UIntPtr dwExtraInfo);
 }
 "@
@@ -36,9 +39,16 @@ function Read-HotCornerConfig {
     cornerSize = 14
     dwellMilliseconds = 750
     cooldownMilliseconds = 1800
-    pollMilliseconds = 75
-    topLeft = "TaskView"
-    topRight = "Spotlight"
+    pollMilliseconds = 25
+    clickEnabled = $true
+    clickCornerSize = 16
+    clickCooldownMilliseconds = 650
+    topLeftClick = "ShowDesktop"
+    topRightClick = "ShowDesktop"
+    bottomLeftClick = "None"
+    bottomRightClick = "None"
+    topLeft = "None"
+    topRight = "None"
     bottomLeft = "ShowDesktop"
     bottomRight = "Lock"
     logPath = "%LOCALAPPDATA%\MacMakeover\hot-corners.log"
@@ -134,6 +144,8 @@ Write-HotCornerLog $config "Hot corners started from $PSCommandPath with config 
 $activeCorner = $null
 $enteredAt = Get-Date
 $lastTriggered = @{}
+$lastClickTriggered = @{}
+$wasLeftMouseDown = $false
 
 while ($true) {
   try {
@@ -142,7 +154,33 @@ while ($true) {
 
     $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $corner = Get-CornerAtPoint -X $point.X -Y $point.Y -Bounds $bounds -CornerSize ([int]$config.cornerSize)
+    $clickCorner = Get-CornerAtPoint -X $point.X -Y $point.Y -Bounds $bounds -CornerSize ([int]$config.clickCornerSize)
+    $leftMouseState = [int][MacMakeoverHotCornersNative]::GetAsyncKeyState(0x01)
+    $leftMouseDown = ($leftMouseState -band 0x8000) -ne 0
+    $leftMousePressed = (($leftMouseState -band 0x0001) -ne 0) -or ($leftMouseDown -and -not $wasLeftMouseDown)
     $now = Get-Date
+
+    if ($config.clickEnabled -and $clickCorner -and $leftMousePressed) {
+      $lastClick = if ($lastClickTriggered.ContainsKey($clickCorner)) { $lastClickTriggered[$clickCorner] } else { [datetime]::MinValue }
+      $clickCooldownElapsed = ($now - $lastClick).TotalMilliseconds -ge [int]$config.clickCooldownMilliseconds
+
+      if ($clickCooldownElapsed) {
+        $clickAction = switch ($clickCorner) {
+          "TopLeft" { $config.topLeftClick }
+          "TopRight" { $config.topRightClick }
+          "BottomLeft" { $config.bottomLeftClick }
+          "BottomRight" { $config.bottomRightClick }
+        }
+
+        if ([string]$clickAction -ne "None") {
+          Write-HotCornerLog $config "$clickCorner click -> $clickAction"
+          Invoke-HotCornerAction -Action ([string]$clickAction) -Config $config
+        }
+        $lastClickTriggered[$clickCorner] = $now
+        $lastTriggered[$clickCorner] = $now
+      }
+    }
+    $wasLeftMouseDown = $leftMouseDown
 
     if ($corner -ne $activeCorner) {
       $activeCorner = $corner
@@ -162,8 +200,10 @@ while ($true) {
           "BottomRight" { $config.bottomRight }
         }
 
-        Write-HotCornerLog $config "$corner -> $action"
-        Invoke-HotCornerAction -Action ([string]$action) -Config $config
+        if ([string]$action -ne "None") {
+          Write-HotCornerLog $config "$corner -> $action"
+          Invoke-HotCornerAction -Action ([string]$action) -Config $config
+        }
         $lastTriggered[$corner] = Get-Date
       }
     }

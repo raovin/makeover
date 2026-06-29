@@ -7,8 +7,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$taskName = "Mac Makeover Hot Corners"
-$taskPath = "\"
 $scriptPath = Join-Path $PSScriptRoot "start-hot-corners.ps1"
 $startupShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk"
 $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source

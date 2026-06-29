@@ -26,6 +26,12 @@ function Copy-FileIfExists {
     [string]$Destination
   )
   if (Test-Path -LiteralPath $Source) {
+    $sourceFullPath = [System.IO.Path]::GetFullPath($Source)
+    $destinationFullPath = [System.IO.Path]::GetFullPath($Destination)
+    if ([string]::Equals($sourceFullPath, $destinationFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return
+    }
+
     Ensure-Directory (Split-Path -Parent $Destination)
     Copy-Item -LiteralPath $Source -Destination $Destination -Force
   }
@@ -40,6 +46,12 @@ function Copy-TreeFiltered {
   )
 
   if (-not (Test-Path -LiteralPath $Source)) {
+    return
+  }
+
+  $sourceFullPath = [System.IO.Path]::GetFullPath($Source).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  $destinationFullPath = [System.IO.Path]::GetFullPath($Destination).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  if ([string]::Equals($sourceFullPath, $destinationFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
     return
   }
 
@@ -69,6 +81,15 @@ function Export-RegKeyIfExists {
   }
 }
 
+function Write-Utf8NoBom {
+  param(
+    [string]$Path,
+    [string]$Value
+  )
+
+  [System.IO.File]::WriteAllText($Path, $Value, (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function Sanitize-CopiedTextFile {
   param([string]$Path)
 
@@ -81,7 +102,7 @@ function Sanitize-CopiedTextFile {
   $text = $text -replace 'on the Mac `aether-eclipse`', "on the personal Mac"
   $text = $text -replace "aether-eclipse\.taile[0-9a-z]+\.ts\.net", "<tailnet-host-redacted>"
   $text = $text -replace "100\.88\.171\.108", "<tailnet-ip-redacted>"
-  Set-Content -LiteralPath $Path -Value $text -Encoding utf8
+  Write-Utf8NoBom -Path $Path -Value $text
 }
 
 Ensure-Directory $ConfigRoot
@@ -128,8 +149,10 @@ if (Test-Path -LiteralPath $SourceProject) {
   Copy-FileIfExists (Join-Path $SourceProject "convert.ps1") (Join-Path $AssetsRoot "source-scripts\convert.ps1")
   Copy-FileIfExists (Join-Path $SourceProject "scripts\Show-MacAppleMenu.ps1") (Join-Path $PackageRoot "scripts\Show-MacAppleMenu.ps1")
   Copy-FileIfExists (Join-Path $SourceProject "scripts\Install-AppleMenuHandler.ps1") (Join-Path $PackageRoot "scripts\Install-AppleMenuHandler.ps1")
-  # Legacy launcher kept only as dead reference; conhost (Install-AppleMenuHandler.ps1 -> Show-MacAppleMenu.ps1) is the active path.
-  Copy-FileIfExists (Join-Path $SourceProject "scripts\Launch-MacAppleMenu.vbs") (Join-Path $PackageRoot "scripts\Launch-MacAppleMenu.vbs")
+  $legacyLauncher = Join-Path $PackageRoot "scripts\Launch-MacAppleMenu.vbs"
+  if (Test-Path -LiteralPath $legacyLauncher) {
+    Remove-Item -LiteralPath $legacyLauncher -Force
+  }
   Copy-FileIfExists (Join-Path $SourceProject "mac-wallpaper.jpg") (Join-Path $AssetsRoot "wallpapers\mac-wallpaper.jpg")
   Copy-FileIfExists (Join-Path $SourceProject "mac-wallpaper.png") (Join-Path $AssetsRoot "wallpapers\mac-wallpaper.png")
   Copy-TreeFiltered (Join-Path $SourceProject "cursors") (Join-Path $AssetsRoot "cursors") -ExcludeExtensions @(".zip")
@@ -150,7 +173,7 @@ $manifest = [ordered]@{
   appleMenuProtocol = "macmakeover-apple-menu:"
   appleMenuScript = "scripts\Show-MacAppleMenu.ps1"
   appleMenuHandlerInstaller = "scripts\Install-AppleMenuHandler.ps1"
-  appleMenuLaunchMethod = "conhost.exe --headless (registered by Install-AppleMenuHandler.ps1; legacy wscript/VBS launcher is blocked on this machine)"
+  appleMenuLaunchMethod = "conhost.exe --headless (registered by Install-AppleMenuHandler.ps1; wscript/VBS is blocked on this machine and intentionally not packaged)"
   sourceProject = "local mac-makeover workspace, optional after backup"
   excluded = @(
     "RustDesk credentials/config",
@@ -162,6 +185,6 @@ $manifest = [ordered]@{
   )
 }
 
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $PackageRoot "manifest.json") -Encoding utf8
+Write-Utf8NoBom -Path (Join-Path $PackageRoot "manifest.json") -Value ($manifest | ConvertTo-Json -Depth 5)
 
 Write-Host "Backed up portable mac-makeover package to: $PackageRoot"

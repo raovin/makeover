@@ -17,8 +17,7 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 - Spotlight-style search through PowerToys / Command Palette on `Alt+Space`.
 - Windows Search web/Bing result suppression for the current user.
 - macOS-style hot corners:
-  - top-left: Task View / Mission Control
-  - top-right: Spotlight-style launcher
+  - top-left/top-right outer-corner click: show desktop
   - bottom-left: show desktop
   - bottom-right: lock screen
 - Start-menu backed custom Spotlight commands such as `Mac Visual QA`, `Mac Backup Makeover`, and `Mac Hot Corners Stop`.
@@ -59,7 +58,6 @@ mac-makeover/
     install-hot-corners.ps1
     install-spotlight-shortcuts.ps1
     Install-AppleMenuHandler.ps1  # Registers the Apple-menu protocol (conhost --headless)
-    Launch-MacAppleMenu.vbs       # Legacy launcher, deprecated/unused (wscript blocked here)
     Show-MacAppleMenu.ps1         # The Apple menu UI (WPF)
     start-hot-corners.ps1
     stop-hot-corners.ps1
@@ -134,7 +132,7 @@ Custom commands are installed as normal Start Menu shortcuts under:
 
 Because they are normal shortcuts, they appear naturally in Command Palette / PowerToys search.
 
-Hot corners are managed by a lightweight PowerShell background helper. The installer creates a current-user Startup shortcut, and it may also use a user-level scheduled task on machines that allow it:
+Hot corners are managed by a lightweight PowerShell background helper. The installer creates a current-user Startup shortcut:
 
 ```powershell
 .\scripts\install-hot-corners.ps1 -StartNow
@@ -147,7 +145,7 @@ Change the corner behavior in:
 config\hot-corners.json
 ```
 
-Supported actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, and `None`.
+Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, and `None`. Click actions use the smaller `clickCornerSize` zones, so top-left/top-right show-desktop clicks do not steal the normal Apple icon or right-side menu-bar clicks.
 
 ## Manual Steps After Restore
 
@@ -205,7 +203,7 @@ The launcher behavior is separate from Seelen:
 
 - Clicking the top-left Apple mark opens the compact Apple menu for About This Mac, System Settings, App Store, Recent Items, Force Quit, Sleep, Restart, Shut Down, Lock Screen, and Log Out.
 - Restart, Shut Down, and Log Out ask for confirmation.
-- The Apple menu handler must stay registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1`, set up by `scripts\Install-AppleMenuHandler.ps1`; registering it directly to a visible PowerShell window can show a terminal. The old `wscript.exe` + `Launch-MacAppleMenu.vbs` launcher is deprecated and blocked by this machine's Defender/ASR policy.
+- The Apple menu handler must stay registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1`, set up by `scripts\Install-AppleMenuHandler.ps1`; registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
 - `Alt+Space` opens Microsoft Command Palette / PowerToys-style search.
 - Command Palette web search is disabled.
 - Command Palette is trimmed to local Spotlight-like providers.

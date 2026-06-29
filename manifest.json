@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-27T02:02:08.9245967+01:00",
+  "generatedAt": "2026-06-29T15:40:28.6073654+01:00",
   "seelenRoot": "%APPDATA%\\com.seelen.seelen-ui",
   "powerToysRoot": "%LOCALAPPDATA%\\Microsoft\\PowerToys",
   "commandPaletteRoot": "%LOCALAPPDATA%\\Packages\\Microsoft.CommandPalette_*\\LocalState",
@@ -8,7 +8,7 @@
   "appleMenuProtocol": "macmakeover-apple-menu:",
   "appleMenuScript": "scripts\\Show-MacAppleMenu.ps1",
   "appleMenuHandlerInstaller": "scripts\\Install-AppleMenuHandler.ps1",
-  "appleMenuLaunchMethod": "conhost.exe --headless (wscript blocked on this machine)",
+  "appleMenuLaunchMethod": "conhost.exe --headless (registered by Install-AppleMenuHandler.ps1; wscript/VBS is blocked on this machine and intentionally not packaged)",
   "sourceProject": "local mac-makeover workspace, optional after backup",
   "excluded": [
     "RustDesk credentials/config",

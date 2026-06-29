@@ -183,12 +183,4 @@ center:
     args: null
     workingDir: null
     icon: null
-- type: AppOrFile
-  id: 3e7607d4-2157-4e87-a5c1-31383264f38a
-  displayName: Settings
-  umid: windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel
-  path: C:\Windows\System32\ApplicationFrameHost.exe
-  pinned: false
-  preventPinning: false
-  relaunch: null
 right: []

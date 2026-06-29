@@ -1,22 +1,24 @@
 # Handoff To Claude Code: Continue Beautifying The Windows macOS Makeover
 
-Last updated: 2026-06-28 23:44 Europe/London by Codex.
+Last updated: 2026-06-29 Europe/London by Codex.
 
 You are taking over a Windows 11 desktop-customization project. The user wants this PC to feel more like macOS: a refined top menu bar, bottom dock, Apple-style top-left menu, Spotlight-like search, no Bing clutter, native Alt+Tab, and zero visible overlap/clipping.
 
 The user is very explicit about quality: do not claim a visual task is finished without a real visual QA check. For any visual change, make the change, restart/reload the affected shell, capture screenshots, inspect them, and tell the user what you verified.
 
-## Latest (2026-06-29, Claude)
+## Latest (2026-06-29, Codex Audit Fix)
 
 - Apple menu visually rebuilt to authentic macOS proportions: 244px width, `SizeToContent` so the panel hugs its rows, a top-to-bottom gradient, 9px rounded corners, and a drop shadow.
-- The protocol handler was moved off `wscript.exe` onto `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
+- The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
+- `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
+- Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
 - The three previous locations were consolidated into this single git repo at `C:\Users\VineethRao\source\repos\mac-makeover`. The old brunel copy is kept untouched as a frozen backup.
 
 ## Current State In One Screenful
 
 - Repo (single source of truth): `C:\Users\VineethRao\source\repos\mac-makeover` — a standalone git repo (default branch `main`, no remote yet).
 - Frozen backup only: `C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover` (GitHub `raovin/brunel`). Do not edit; it is historical.
-- Latest relevant commit: `a282446 Fix mac makeover Apple menu launcher`
+- Latest commit: run `git -C C:\Users\VineethRao\source\repos\mac-makeover log -1 --oneline`.
 - Seelen config root: `C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui`
 - Seelen local/log root: `C:\Users\VineethRao\AppData\Local\com.seelen.seelen-ui`
 - Seelen package currently observed: `C:\Program Files\WindowsApps\Seelen.SeelenUI_2.7.3.0_x64__p6yyn03m1894e\seelen-ui.exe`
@@ -63,7 +65,7 @@ Correct handler shape (registered by `scripts\Install-AppleMenuHandler.ps1`):
 "C:\Windows\System32\conhost.exe" --headless "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacAppleMenu.ps1" "%1"
 ```
 
-Note: the old `wscript.exe` -> `Launch-MacAppleMenu.vbs` launcher is blocked on this machine (Defender/ASR throws "Windows Script Host failed - not enough memory resources"). The `.vbs` remains only as dead legacy; do not register it.
+Note: `wscript.exe`/VBS launchers are blocked on this machine (Defender/ASR throws "Windows Script Host failed - not enough memory resources"). They are intentionally not packaged; do not recreate or register one.
 
 Registry path:
 
@@ -105,7 +107,7 @@ The URI launches this WPF menu script via `conhost.exe --headless` (registered b
 C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacAppleMenu.ps1
 ```
 
-The legacy `scripts\Launch-MacAppleMenu.vbs` wrapper is no longer in the chain; `wscript.exe` is blocked by this machine's Defender/ASR policy.
+There is no legacy VBS wrapper in the chain; `wscript.exe` is blocked by this machine's Defender/ASR policy.
 
 Current Apple menu includes:
 
@@ -160,7 +162,7 @@ Dock CSS:
 C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\themes\macos-glass\styles\weg.css
 ```
 
-The toolbar CSS also collapses Seelen's invisible `.ft-corner-button`, because it stole clicks from the Apple glyph and triggered show-desktop behavior.
+The toolbar CSS also collapses Seelen's invisible `.ft-corner-button`, because it stole clicks from the Apple glyph. Top-corner show-desktop clicks are now handled by the hot-corners helper instead.
 
 ## Safe Edit Cycle
 
@@ -223,7 +225,7 @@ Config:
 C:\Users\VineethRao\source\repos\mac-makeover\config\hot-corners.json
 ```
 
-The top-left hot corner and Apple glyph are close together. Be careful when changing hit targets; do not reintroduce invisible click stealing.
+The top-left hot corner and Apple glyph are close together. Top-left/top-right outer-corner clicks use `clickCornerSize` from `config\hot-corners.json` and send Show Desktop. Be careful when changing hit targets; do not reintroduce invisible click stealing.
 
 ## The Repo / Git Backup
 

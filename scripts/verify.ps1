@@ -17,7 +17,11 @@ $LogPath = Join-Path $SeelenLocal "logs\Seelen UI.log"
 $PowerToysSettingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\settings.json"
 $PowerToysRunSettingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\PowerToys Run\settings.json"
 $AppleMenuScriptPath = Join-Path $PackageRoot "scripts\Show-MacAppleMenu.ps1"
+$AppleMenuInstallerPath = Join-Path $PackageRoot "scripts\Install-AppleMenuHandler.ps1"
+$HotCornersScriptPath = Join-Path $PackageRoot "scripts\start-hot-corners.ps1"
+$HotCornersConfigPath = Join-Path $PackageRoot "config\hot-corners.json"
 $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command"
+$VerificationFailed = $false
 
 function Get-ImageAverageLuma {
   param(
@@ -83,8 +87,13 @@ Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPale
 
 Write-Host ""
 Write-Host "Core files:"
-foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuLauncherPath)) {
-  "{0}  {1}" -f ($(if (Test-Path -LiteralPath $path) { "OK " } else { "MISS" })), $path
+foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath)) {
+  if (Test-Path -LiteralPath $path) {
+    "OK   {0}" -f $path
+  } else {
+    "MISS {0}" -f $path
+    $VerificationFailed = $true
+  }
 }
 
 Write-Host ""
@@ -94,11 +103,14 @@ if (Test-Path -Path $AppleMenuCommandPath) {
   Write-Host "  $appleMenuCommand"
   if ($appleMenuCommand -match "wscript\.exe") {
     Write-Warning "Apple menu is registered via wscript.exe, which is blocked by this PC's security policy (the menu will not open). Re-run scripts\Install-AppleMenuHandler.ps1 to switch to conhost."
+    $VerificationFailed = $true
   } elseif (-not ($appleMenuCommand -match "conhost\.exe" -and $appleMenuCommand -match "Show-MacAppleMenu\.ps1")) {
     Write-Warning "Apple menu is not registered to the conhost launcher. Re-run scripts\Install-AppleMenuHandler.ps1."
+    $VerificationFailed = $true
   }
 } else {
   Write-Warning "Apple menu protocol handler is missing: macmakeover-apple-menu:"
+  $VerificationFailed = $true
 }
 
 if (Test-Path -LiteralPath $ShortcutPath) {
@@ -243,4 +255,8 @@ if ($CaptureScreenshot) {
   if ($topLuma -and $topLuma -gt 150) {
     Write-Warning "Top strip is bright. That can mean the Seelen menu bar is missing, hidden, or the capture is the lock screen."
   }
+}
+
+if ($VerificationFailed) {
+  throw "Mac makeover verification found blocking issues. Fix the warnings above and rerun verify.ps1."
 }
