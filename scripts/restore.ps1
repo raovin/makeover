@@ -177,6 +177,17 @@ function Register-MacMakeoverAppleMenu {
   Write-Host "Apple menu protocol registered (conhost --headless launcher): macmakeover-apple-menu:"
 }
 
+function Register-MacMakeoverControlCenter {
+  $installer = Join-Path $PSScriptRoot "Install-MacControlCenterHandler.ps1"
+  if (-not (Test-Path -LiteralPath $installer)) {
+    Write-Warning "Control Center handler installer was not found, so the protocol handler was not registered: $installer"
+    return
+  }
+
+  & $installer
+  Write-Host "Control Center protocol registered (conhost --headless launcher): macmakeover-control-center:"
+}
+
 if (-not (Test-Path -LiteralPath $ConfigRoot)) {
   throw "Backup config was not found. Run scripts\backup-current.ps1 first. Missing: $ConfigRoot"
 }
@@ -209,6 +220,7 @@ $shortcutsPath = Join-Path $SeelenRoot "settings_shortcuts.json"
 [System.IO.File]::WriteAllText($shortcutsPath, '{"enabled":false,"shortcuts":{}}', (New-Object System.Text.UTF8Encoding($false)))
 
 Register-MacMakeoverAppleMenu
+Register-MacMakeoverControlCenter
 
 if ($ApplyAccent) {
   $accentReg = Join-Path $PackageRoot "registry\hkcu-explorer-accent.reg"

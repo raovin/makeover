@@ -47,6 +47,12 @@ function Read-HotCornerConfig {
     topRightClick = "ShowDesktop"
     bottomLeftClick = "None"
     bottomRightClick = "None"
+    controlCenterClickEnabled = $true
+    topBarClickHeight = 40
+    controlCenterRightButtonWidth = 72
+    controlCenterPowerZoneLeftOffset = 245
+    controlCenterPowerZoneRightOffset = 125
+    controlCenterClickCooldownMilliseconds = 650
     topLeft = "None"
     topRight = "None"
     bottomLeft = "ShowDesktop"
@@ -112,6 +118,34 @@ function Invoke-HotCornerAction {
   }
 }
 
+function Test-ControlCenterClickZone {
+  param(
+    [int]$X,
+    [int]$Y,
+    [System.Drawing.Rectangle]$Bounds,
+    [object]$Config
+  )
+
+  if (-not $Config.controlCenterClickEnabled) { return $false }
+  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+
+  $right = $Bounds.Right - 1
+  $top = $Bounds.Top
+  $cornerSize = [int]$Config.clickCornerSize
+
+  # Preserve the exact physical corner for Show Desktop.
+  if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
+    return $false
+  }
+
+  $inRightButton = $X -ge ($right - [int]$Config.controlCenterRightButtonWidth)
+  $powerZoneLeft = $right - [int]$Config.controlCenterPowerZoneLeftOffset
+  $powerZoneRight = $right - [int]$Config.controlCenterPowerZoneRightOffset
+  $inPowerZone = $X -ge $powerZoneLeft -and $X -le $powerZoneRight
+
+  return $inRightButton -or $inPowerZone
+}
+
 function Get-CornerAtPoint {
   param(
     [int]$X,
@@ -145,6 +179,7 @@ $activeCorner = $null
 $enteredAt = Get-Date
 $lastTriggered = @{}
 $lastClickTriggered = @{}
+$lastControlCenterClick = [datetime]::MinValue
 $wasLeftMouseDown = $false
 
 while ($true) {
@@ -159,6 +194,15 @@ while ($true) {
     $leftMouseDown = ($leftMouseState -band 0x8000) -ne 0
     $leftMousePressed = (($leftMouseState -band 0x0001) -ne 0) -or ($leftMouseDown -and -not $wasLeftMouseDown)
     $now = Get-Date
+
+    if ($leftMousePressed -and (Test-ControlCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+      $controlCenterCooldownElapsed = ($now - $lastControlCenterClick).TotalMilliseconds -ge [int]$config.controlCenterClickCooldownMilliseconds
+      if ($controlCenterCooldownElapsed) {
+        Write-HotCornerLog $config "TopBar click -> ControlCenter"
+        Start-Process -FilePath "macmakeover-control-center:" | Out-Null
+        $lastControlCenterClick = $now
+      }
+    }
 
     if ($config.clickEnabled -and $clickCorner -and $leftMousePressed) {
       $lastClick = if ($lastClickTriggered.ContainsKey($clickCorner)) { $lastClickTriggered[$clickCorner] } else { [datetime]::MinValue }

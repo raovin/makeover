@@ -149,6 +149,8 @@ if (Test-Path -LiteralPath $SourceProject) {
   Copy-FileIfExists (Join-Path $SourceProject "convert.ps1") (Join-Path $AssetsRoot "source-scripts\convert.ps1")
   Copy-FileIfExists (Join-Path $SourceProject "scripts\Show-MacAppleMenu.ps1") (Join-Path $PackageRoot "scripts\Show-MacAppleMenu.ps1")
   Copy-FileIfExists (Join-Path $SourceProject "scripts\Install-AppleMenuHandler.ps1") (Join-Path $PackageRoot "scripts\Install-AppleMenuHandler.ps1")
+  Copy-FileIfExists (Join-Path $SourceProject "scripts\Show-MacControlCenter.ps1") (Join-Path $PackageRoot "scripts\Show-MacControlCenter.ps1")
+  Copy-FileIfExists (Join-Path $SourceProject "scripts\Install-MacControlCenterHandler.ps1") (Join-Path $PackageRoot "scripts\Install-MacControlCenterHandler.ps1")
   $legacyLauncher = Join-Path $PackageRoot "scripts\Launch-MacAppleMenu.vbs"
   if (Test-Path -LiteralPath $legacyLauncher) {
     Remove-Item -LiteralPath $legacyLauncher -Force
@@ -174,6 +176,9 @@ $manifest = [ordered]@{
   appleMenuScript = "scripts\Show-MacAppleMenu.ps1"
   appleMenuHandlerInstaller = "scripts\Install-AppleMenuHandler.ps1"
   appleMenuLaunchMethod = "conhost.exe --headless (registered by Install-AppleMenuHandler.ps1; wscript/VBS is blocked on this machine and intentionally not packaged)"
+  controlCenterProtocol = "macmakeover-control-center:"
+  controlCenterScript = "scripts\Show-MacControlCenter.ps1"
+  controlCenterHandlerInstaller = "scripts\Install-MacControlCenterHandler.ps1"
   sourceProject = "local mac-makeover workspace, optional after backup"
   excluded = @(
     "RustDesk credentials/config",

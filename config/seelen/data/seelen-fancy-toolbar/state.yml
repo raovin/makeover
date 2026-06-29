@@ -74,7 +74,7 @@ right:
   template: 'if (typeof batteries === "undefined" || !batteries || !batteries.length) return ""; const b = batteries[0]; const charging = (typeof power !== "undefined" && power.acLineStatus === 1) || b.state === "charging"; if (!charging || b.percentage >= 100) return ""; const w = Math.round(b.energyRate || 0); if (w <= 0) return ""; return (w < 18 ? "slow " : "") + w + "W";'
   tooltip: 'return (typeof batteries !== "undefined" && batteries.length) ? "Charge rate: " + Math.round(batteries[0].energyRate || 0) + " W" : ""'
   badge: null
-  onClick: null
+  onClick: 'open("macmakeover-control-center:")'
   onWheelUp: null
   onWheelDown: null
   style: {}
@@ -85,10 +85,19 @@ right:
   template: 'if (typeof batteries === "undefined" || !batteries.length) return icon("TbPlugConnected"); const pct = Math.round(batteries.reduce((total, battery) => total + battery.percentage, 0) / batteries.length); const charging = (typeof power !== "undefined" && power.acLineStatus === 1) || batteries.some((battery) => battery.state === "charging"); const group = []; if (charging) { group.push(icon("BsLightningChargeFill")); group.push(" "); } group.push(pct > 90 ? icon("PiBatteryFullFill") : pct > 66 ? icon("PiBatteryHighFill") : pct > 33 ? icon("PiBatteryMediumFill") : pct > 5 ? icon("PiBatteryLowFill") : icon("PiBatteryWarning")); group.push(" "); group.push(pct + "%"); return group;'
   tooltip: 'return (typeof batteries !== "undefined" && batteries.length) ? "Battery: " + Math.round(batteries.reduce((total, battery) => total + battery.percentage, 0) / batteries.length) + "%" : "Plugged in";'
   badge: null
-  onClick: null
+  onClick: 'open("macmakeover-control-center:")'
   onWheelUp: null
   onWheelDown: null
   style: {minWidth: 68}
   remoteData: {}
 - '@seelen/tb-notifications'
-- '@seelen/tb-quick-settings'
+- id: macmakeover-control-center
+  scopes: []
+  template: 'return icon("LuSlidersHorizontal");'
+  tooltip: 'return "Control Center";'
+  badge: null
+  onClick: 'open("macmakeover-control-center:")'
+  onWheelUp: null
+  onWheelDown: null
+  style: {width: 28, minWidth: 28, maxWidth: 28, flexShrink: 0}
+  remoteData: {}

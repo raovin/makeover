@@ -17,6 +17,8 @@ Guardrails:
 - Keep `settings_shortcuts.json` disabled unless the user explicitly wants to revisit shortcuts.
 - Leave `Alt+Space` on PowerToys / Command Palette; do not bind it through Seelen.
 - Keep the Apple menu protocol registered to `conhost.exe --headless` running `scripts/Show-MacAppleMenu.ps1` via `scripts/Install-AppleMenuHandler.ps1`; `wscript.exe`/VBS launchers are blocked by Defender/ASR on this PC, and direct PowerShell registration flashes a terminal window.
+- Keep the Control Center protocol registered to `conhost.exe --headless` running `scripts/Show-MacControlCenter.ps1` via `scripts/Install-MacControlCenterHandler.ps1`; the top-right sliders icon and power/battery widgets should open this custom popover, not Seelen's built-in quick-settings/power flyout.
+- Do not re-add `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back.
 - Hot corners are handled by `scripts/start-hot-corners.ps1` through a current-user Startup shortcut. Tiny top-left/top-right click zones send Show Desktop; do not re-enable Seelen's invisible corner buttons because they steal Apple/menu-bar clicks.
 - Do not restore RustDesk/Tailscale secrets from this repo. They are intentionally excluded.
 - Verify visual changes with screenshots at 1280x800. Do not call visual work finished without visual QA.

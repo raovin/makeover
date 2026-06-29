@@ -274,6 +274,7 @@ $script:Window.Add_SourceInitialized({
   [MacMakeover.NativeWindow]::ShowWindow($helper.Handle, 8) | Out-Null
 })
 $script:OpenedAt = Get-Date
+$script:IgnoreMouseUntil = $script:OpenedAt.AddMilliseconds(900)
 $script:WasLeftMouseDown = $false
 $script:OutsideClickTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:OutsideClickTimer.Interval = [TimeSpan]::FromMilliseconds(45)
@@ -283,7 +284,7 @@ $script:OutsideClickTimer.Add_Tick({
   $leftMousePressed = (($mouseState -band 0x0001) -ne 0) -or ($leftMouseDown -and -not $script:WasLeftMouseDown)
   $script:WasLeftMouseDown = $leftMouseDown
 
-  if (-not $leftMousePressed -or ((Get-Date) - $script:OpenedAt).TotalMilliseconds -lt 250) {
+  if (-not $leftMousePressed -or (Get-Date) -lt $script:IgnoreMouseUntil) {
     return
   }
 

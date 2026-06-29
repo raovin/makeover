@@ -10,6 +10,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 
 - Apple menu visually rebuilt to authentic macOS proportions: 244px width, `SizeToContent` so the panel hugs its rows, a top-to-bottom gradient, 9px rounded corners, and a drop shadow.
 - The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
+- Top-right sliders, charge-rate, and battery clicks now open a custom WPF Control Center / power popover through `macmakeover-control-center:` (registered by `scripts\Install-MacControlCenterHandler.ps1`) instead of Seelen's built-in quick-settings/power flyout.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
 - Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
 - The three previous locations were consolidated into this single git repo at `C:\Users\VineethRao\source\repos\mac-makeover`. The old brunel copy is kept untouched as a frozen backup.
@@ -28,6 +29,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 ## User Preferences And Recent Corrections
 
 - The top-left Apple icon should behave like macOS: it should open a compact Apple menu directly, not a big Seelen user drawer and not a terminal.
+- The top-right sliders icon and power/battery widgets should open the custom Control Center directly, not Seelen's old power/options screen.
 - The dock should stay rich; the user previously said there is no need to trim it.
 - The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered clock, status widgets on the right.
 - No visible overlap, clipped text, ghost tooltips, ugly separator lines, or accidental title pollution such as `Windows PowerShell / Apple Menu`.
@@ -73,7 +75,21 @@ Registry path:
 HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command
 ```
 
-7. Treat delayed UI automations as reliability-critical. Do not chain one delayed UI task through another delayed UI task. After creating/updating an automation, verify the saved automation state and report id, status, schedule, target thread, and prompt summary. If the platform only permits one active heartbeat, say so and ask whether to replace it, create a separate thread/job, or do the work now. A delayed UI task is not complete until the requested action produces a visible success/failure report in the thread.
+7. Do not re-add Seelen's `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back. The right-side Control Center entry is custom and is backed by both toolbar `onClick` handlers and the hot-corners top-bar click router.
+
+Correct Control Center handler shape (registered by `scripts\Install-MacControlCenterHandler.ps1`):
+
+```text
+"C:\Windows\System32\conhost.exe" --headless "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -STA -File "C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacControlCenter.ps1" "%1"
+```
+
+Registry path:
+
+```text
+HKCU:\Software\Classes\macmakeover-control-center\shell\open\command
+```
+
+8. Treat delayed UI automations as reliability-critical. Do not chain one delayed UI task through another delayed UI task. After creating/updating an automation, verify the saved automation state and report id, status, schedule, target thread, and prompt summary. If the platform only permits one active heartbeat, say so and ask whether to replace it, create a separate thread/job, or do the work now. A delayed UI task is not complete until the requested action produces a visible success/failure report in the thread.
 
 ## Apple Menu: What Changed
 
@@ -134,6 +150,48 @@ Earlier proof screenshot after polish:
 
 ```text
 C:\tmp\mac-apple-menu-final-polished.png
+```
+
+## Control Center / Power Popover
+
+The old top-right power/settings entry used Seelen's built-in `@seelen/tb-quick-settings`, which opened the clunky power/options screen. That item has been removed from:
+
+```text
+C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\data\seelen-fancy-toolbar\state.yml
+```
+
+The replacement is a custom toolbar item plus click handlers on the charge-rate and battery widgets:
+
+```yaml
+- id: macmakeover-control-center
+  template: 'return icon("LuSlidersHorizontal");'
+  tooltip: 'return "Control Center";'
+  onClick: 'open("macmakeover-control-center:")'
+```
+
+The URI launches this WPF script through `conhost.exe --headless`:
+
+```text
+C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacControlCenter.ps1
+```
+
+The current Control Center includes:
+
+- Power & Battery Settings
+- System Settings
+- Show Desktop
+- Lock Screen
+- Sleep
+- Restart...
+- Shut Down...
+
+Because Seelen custom-item clicks can be inconsistent under real/synthetic top-bar clicks, `scripts\start-hot-corners.ps1` also routes the far-right control zone and power/battery zone to `macmakeover-control-center:`. Keep both layers unless replacing the whole top-bar interaction model.
+
+Recent visual proof screenshots:
+
+```text
+C:\tmp\codex-control-center-right-only.png
+C:\tmp\codex-control-center-battery-click-3.png
 ```
 
 ## Current Top Bar And Dock Files
@@ -227,6 +285,8 @@ C:\Users\VineethRao\source\repos\mac-makeover\config\hot-corners.json
 
 The top-left hot corner and Apple glyph are close together. Top-left/top-right outer-corner clicks use `clickCornerSize` from `config\hot-corners.json` and send Show Desktop. Be careful when changing hit targets; do not reintroduce invisible click stealing.
 
+The same helper owns the top-right Control Center/power hit zones through `controlCenterClickEnabled`, `controlCenterRightButtonWidth`, and the `controlCenterPowerZone*` offsets. The exact physical top-right corner remains reserved for Show Desktop.
+
 ## The Repo / Git Backup
 
 This standalone repo is both the live config home and the restoreable Git-backed package:
@@ -241,6 +301,7 @@ It includes:
 - PowerToys / Command Palette settings
 - Hot corners config and scripts
 - Apple menu scripts
+- Control Center / power popover scripts
 - Restore and verify scripts
 - README and Claude entry point
 
@@ -271,6 +332,7 @@ Top picks:
    - Keep the clock visually centered even when right-side metrics widen.
    - Ensure long app names do not overlap the center clock.
    - Keep right-side status readable but less dense if numbers expand.
+   - Preserve the custom Control Center; do not fall back to Seelen's quick-settings flyout.
 
 3. Dock polish
    - Keep current app set; user said no need to trim.

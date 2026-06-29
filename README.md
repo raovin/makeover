@@ -13,6 +13,7 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 - The custom `macos-glass` theme for the frosted menu bar and dock.
 - The current toolbar layout: Apple-style mark, focused app, centered clock, and right-side status widgets.
 - A Mac-style Apple menu on the top-left Apple mark, launched through a hidden handler so no terminal window appears.
+- A custom Mac-style Control Center / power popover from the top-right sliders icon and power/battery widgets, replacing Seelen's built-in quick-settings flyout.
 - Seelen shortcuts disabled so native Windows Alt+Tab and lock-screen input remain normal.
 - Spotlight-style search through PowerToys / Command Palette on `Alt+Space`.
 - Windows Search web/Bing result suppression for the current user.
@@ -59,6 +60,8 @@ mac-makeover/
     install-spotlight-shortcuts.ps1
     Install-AppleMenuHandler.ps1  # Registers the Apple-menu protocol (conhost --headless)
     Show-MacAppleMenu.ps1         # The Apple menu UI (WPF)
+    Install-MacControlCenterHandler.ps1 # Registers the Control Center protocol
+    Show-MacControlCenter.ps1     # The Control Center / power popover UI (WPF)
     start-hot-corners.ps1
     stop-hot-corners.ps1
     restore.ps1           # Restore config/theme/assets to a machine
@@ -100,7 +103,7 @@ Restore the Seelen layout/theme, Spotlight-style launcher settings, and Bing-fre
 .\scripts\restore.ps1
 ```
 
-That also registers the top-left Apple menu handler, hot corners, and searchable Start Menu shortcuts for the launcher. To restore without those extras:
+That also registers the top-left Apple menu handler, top-right Control Center handler, hot corners, and searchable Start Menu shortcuts for the launcher. To restore without those extras:
 
 ```powershell
 .\scripts\restore.ps1 -SkipHotCorners -SkipSpotlightShortcuts
@@ -146,6 +149,8 @@ config\hot-corners.json
 ```
 
 Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, and `None`. Click actions use the smaller `clickCornerSize` zones, so top-left/top-right show-desktop clicks do not steal the normal Apple icon or right-side menu-bar clicks.
+
+The same helper also routes the top-right sliders icon and the power/battery widgets to `macmakeover-control-center:`. This deliberately bypasses Seelen's built-in quick-settings/power flyout, which looked clunky and required too many clicks.
 
 ## Manual Steps After Restore
 
@@ -204,6 +209,9 @@ The launcher behavior is separate from Seelen:
 - Clicking the top-left Apple mark opens the compact Apple menu for About This Mac, System Settings, App Store, Recent Items, Force Quit, Sleep, Restart, Shut Down, Lock Screen, and Log Out.
 - Restart, Shut Down, and Log Out ask for confirmation.
 - The Apple menu handler must stay registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1`, set up by `scripts\Install-AppleMenuHandler.ps1`; registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
+- Clicking the top-right sliders icon, charge-rate text, or battery widget opens the custom Control Center for Power & Battery Settings, System Settings, Show Desktop, Lock Screen, Sleep, Restart, and Shut Down.
+- The Control Center handler must stay registered through `conhost.exe --headless` running `scripts\Show-MacControlCenter.ps1`, set up by `scripts\Install-MacControlCenterHandler.ps1`.
+- Do not re-add Seelen's `@seelen/tb-quick-settings` item unless the user explicitly asks to restore the old flyout.
 - `Alt+Space` opens Microsoft Command Palette / PowerToys-style search.
 - Command Palette web search is disabled.
 - Command Palette is trimmed to local Spotlight-like providers.
@@ -240,6 +248,16 @@ If clicking the Apple mark opens a terminal, rerun:
 ```
 
 `verify.ps1` prints the registered `macmakeover-apple-menu:` command and warns if it is not using the `conhost.exe --headless` launcher set up by `Install-AppleMenuHandler.ps1`.
+
+If the top-right sliders icon or power/battery widget opens Seelen's old power/options screen, rerun:
+
+```powershell
+.\scripts\restore.ps1 -SkipSeelenRestart -SkipSpotlightShortcuts
+.\scripts\install-hot-corners.ps1 -StartNow
+.\scripts\verify.ps1
+```
+
+`verify.ps1` prints the registered `macmakeover-control-center:` command and warns if it is not using the hidden Control Center launcher.
 
 If wallpaper does not change on a managed device, check whether the organization enforces wallpaper through policy.
 

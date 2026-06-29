@@ -18,9 +18,12 @@ $PowerToysSettingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\settin
 $PowerToysRunSettingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\PowerToys Run\settings.json"
 $AppleMenuScriptPath = Join-Path $PackageRoot "scripts\Show-MacAppleMenu.ps1"
 $AppleMenuInstallerPath = Join-Path $PackageRoot "scripts\Install-AppleMenuHandler.ps1"
+$ControlCenterScriptPath = Join-Path $PackageRoot "scripts\Show-MacControlCenter.ps1"
+$ControlCenterInstallerPath = Join-Path $PackageRoot "scripts\Install-MacControlCenterHandler.ps1"
 $HotCornersScriptPath = Join-Path $PackageRoot "scripts\start-hot-corners.ps1"
 $HotCornersConfigPath = Join-Path $PackageRoot "config\hot-corners.json"
 $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command"
+$ControlCenterCommandPath = "HKCU:\Software\Classes\macmakeover-control-center\shell\open\command"
 $VerificationFailed = $false
 
 function Get-ImageAverageLuma {
@@ -87,7 +90,7 @@ Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPale
 
 Write-Host ""
 Write-Host "Core files:"
-foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath)) {
+foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath)) {
   if (Test-Path -LiteralPath $path) {
     "OK   {0}" -f $path
   } else {
@@ -110,6 +113,23 @@ if (Test-Path -Path $AppleMenuCommandPath) {
   }
 } else {
   Write-Warning "Apple menu protocol handler is missing: macmakeover-apple-menu:"
+  $VerificationFailed = $true
+}
+
+Write-Host ""
+Write-Host "Control Center launcher:"
+if (Test-Path -Path $ControlCenterCommandPath) {
+  $controlCenterCommand = (Get-Item -Path $ControlCenterCommandPath).GetValue("")
+  Write-Host "  $controlCenterCommand"
+  if ($controlCenterCommand -match "wscript\.exe") {
+    Write-Warning "Control Center is registered via wscript.exe, which is blocked by this PC's security policy. Re-run scripts\Install-MacControlCenterHandler.ps1 to switch to conhost."
+    $VerificationFailed = $true
+  } elseif (-not ($controlCenterCommand -match "conhost\.exe" -and $controlCenterCommand -match "Show-MacControlCenter\.ps1")) {
+    Write-Warning "Control Center is not registered to the conhost launcher. Re-run scripts\Install-MacControlCenterHandler.ps1."
+    $VerificationFailed = $true
+  }
+} else {
+  Write-Warning "Control Center protocol handler is missing: macmakeover-control-center:"
   $VerificationFailed = $true
 }
 
