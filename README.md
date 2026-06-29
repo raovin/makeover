@@ -12,8 +12,8 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 - A bottom dock using Seelen WEG.
 - The custom `macos-glass` theme for the frosted menu bar and dock.
 - The current toolbar layout: Apple-style mark, focused app, centered clock, and right-side status widgets.
-- A Mac-style Apple menu on the top-left Apple mark, launched through a hidden handler so no terminal window appears.
-- A custom Mac-style Control Center / power popover from the top-right sliders icon and power/battery widgets, replacing Seelen's built-in quick-settings flyout.
+- A Mac-style Apple menu on the top-left Apple mark, opened by the warmed hot-corners helper so it appears quickly and no terminal window appears.
+- A custom Mac-style Control Center / power popover from the top-right sliders icon and power/battery widgets, replacing Seelen's built-in quick-settings flyout and avoiding slow URI launches.
 - Seelen shortcuts disabled so native Windows Alt+Tab and lock-screen input remain normal.
 - Spotlight-style search through PowerToys / Command Palette on `Alt+Space`.
 - Windows Search web/Bing result suppression for the current user.
@@ -59,14 +59,16 @@ mac-makeover/
     install-hot-corners.ps1
     install-spotlight-shortcuts.ps1
     Install-AppleMenuHandler.ps1  # Registers the Apple-menu protocol (conhost --headless)
-    Show-MacAppleMenu.ps1         # The Apple menu UI (WPF)
+    Show-MacAppleMenu.ps1         # Fallback Apple menu UI (WPF protocol path)
     Install-MacControlCenterHandler.ps1 # Registers the Control Center protocol
-    Show-MacControlCenter.ps1     # The Control Center / power popover UI (WPF)
+    Show-MacControlCenter.ps1     # Fallback Control Center UI (WPF protocol path)
     start-hot-corners.ps1
     stop-hot-corners.ps1
     restore.ps1           # Restore config/theme/assets to a machine
     verify.ps1            # Check files, Seelen process health, logs, screenshot
   CLAUDE.md               # Entry point for Claude Code
+  tools/
+    MacMakeover.MenuHost/  # Resident owner-drawn Apple/Control Center menu host
   manifest.json           # Backup metadata and exclusions
   README.md
 ```
@@ -135,7 +137,7 @@ Custom commands are installed as normal Start Menu shortcuts under:
 
 Because they are normal shortcuts, they appear naturally in Command Palette / PowerToys search.
 
-Hot corners are managed by a lightweight PowerShell background helper. The installer creates a current-user Startup shortcut:
+Hot corners and menu-bar click routing are managed by a lightweight PowerShell background helper. The installer creates a current-user Startup shortcut:
 
 ```powershell
 .\scripts\install-hot-corners.ps1 -StartNow
@@ -150,7 +152,7 @@ config\hot-corners.json
 
 Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, and `None`. Click actions use the smaller `clickCornerSize` zones, so top-left/top-right show-desktop clicks do not steal the normal Apple icon or right-side menu-bar clicks.
 
-The same helper also routes the top-right sliders icon and the power/battery widgets to `macmakeover-control-center:`. This deliberately bypasses Seelen's built-in quick-settings/power flyout, which looked clunky and required too many clicks.
+The same helper also routes Apple, the top-right sliders icon, and the power/battery widgets to the resident .NET MenuHost over a named pipe. This avoids Seelen `onClick` URI/ShellExecute launches, which were measured as visibly laggy. The `macmakeover-apple-menu:` and `macmakeover-control-center:` protocol handlers remain registered as fallback/restore plumbing only.
 
 ## Manual Steps After Restore
 
@@ -208,9 +210,10 @@ The launcher behavior is separate from Seelen:
 
 - Clicking the top-left Apple mark opens the compact Apple menu for About This Mac, System Settings, App Store, Recent Items, Force Quit, Sleep, Restart, Shut Down, Lock Screen, and Log Out.
 - Restart, Shut Down, and Log Out ask for confirmation.
-- The Apple menu handler must stay registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1`, set up by `scripts\Install-AppleMenuHandler.ps1`; registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
+- Normal Apple clicks are handled by `scripts\start-hot-corners.ps1`, which sends `apple` to `tools\MacMakeover.MenuHost`. The `macmakeover-apple-menu:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` as fallback. Registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
+- `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running or if the helper is running under `pwsh.exe`.
 - Clicking the top-right sliders icon, charge-rate text, or battery widget opens the custom Control Center for Power & Battery Settings, System Settings, Show Desktop, Lock Screen, Sleep, Restart, and Shut Down.
-- The Control Center handler must stay registered through `conhost.exe --headless` running `scripts\Show-MacControlCenter.ps1`, set up by `scripts\Install-MacControlCenterHandler.ps1`.
+- Normal Control Center clicks are handled by `scripts\start-hot-corners.ps1`, which sends `control` to `tools\MacMakeover.MenuHost`. The `macmakeover-control-center:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacControlCenter.ps1` as fallback.
 - Do not re-add Seelen's `@seelen/tb-quick-settings` item unless the user explicitly asks to restore the old flyout.
 - `Alt+Space` opens Microsoft Command Palette / PowerToys-style search.
 - Command Palette web search is disabled.
@@ -247,7 +250,7 @@ If clicking the Apple mark opens a terminal, rerun:
 .\scripts\verify.ps1
 ```
 
-`verify.ps1` prints the registered `macmakeover-apple-menu:` command and warns if it is not using the `conhost.exe --headless` launcher set up by `Install-AppleMenuHandler.ps1`.
+`verify.ps1` prints the registered `macmakeover-apple-menu:` command and warns if it is not using the `conhost.exe --headless` launcher set up by `Install-AppleMenuHandler.ps1`. It also fails if the Seelen toolbar is wired directly to the URI handler instead of the resident MenuHost path.
 
 If the top-right sliders icon or power/battery widget opens Seelen's old power/options screen, rerun:
 
@@ -257,7 +260,7 @@ If the top-right sliders icon or power/battery widget opens Seelen's old power/o
 .\scripts\verify.ps1
 ```
 
-`verify.ps1` prints the registered `macmakeover-control-center:` command and warns if it is not using the hidden Control Center launcher.
+`verify.ps1` prints the registered `macmakeover-control-center:` command and warns if it is not using the hidden Control Center launcher. It also fails if the Seelen toolbar is wired directly to the URI handler instead of the resident MenuHost path.
 
 If wallpaper does not change on a managed device, check whether the organization enforces wallpaper through policy.
 

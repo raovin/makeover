@@ -1,5 +1,6 @@
 param(
-  [string]$Uri = ""
+  [string]$Uri = "",
+  [switch]$WarmUp
 )
 
 $scriptPath = $PSCommandPath
@@ -20,12 +21,9 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Thr
   exit
 }
 
-$createdNew = $false
-$script:MenuMutex = New-Object System.Threading.Mutex($true, "Local\MacMakeoverControlCenter", [ref]$createdNew)
-if (-not $createdNew) { exit }
-
 Add-Type -AssemblyName PresentationCore,PresentationFramework,WindowsBase
-Add-Type -Namespace MacMakeover -Name ControlCenterNative -MemberDefinition @"
+if (-not ("MacMakeover.ControlCenterNative" -as [type])) {
+  Add-Type -Namespace MacMakeover -Name ControlCenterNative -MemberDefinition @"
   [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
   public static extern System.IntPtr GetWindowLongPtr(System.IntPtr hWnd, int nIndex);
 
@@ -67,8 +65,15 @@ Add-Type -Namespace MacMakeover -Name ControlCenterNative -MemberDefinition @"
   [System.Runtime.InteropServices.DllImport("user32.dll")]
   public static extern System.IntPtr CallNextHookEx(System.IntPtr hhk, int nCode, System.IntPtr wParam, System.IntPtr lParam);
 "@
+}
 
 $ErrorActionPreference = "Stop"
+
+if ($WarmUp) { return }
+
+$createdNew = $false
+$script:MenuMutex = New-Object System.Threading.Mutex($true, "Local\MacMakeoverControlCenter", [ref]$createdNew)
+if (-not $createdNew) { exit }
 
 function Brush([string]$hex) {
   return [System.Windows.Media.BrushConverter]::new().ConvertFromString($hex)
@@ -170,7 +175,7 @@ $script:Window.Background = [System.Windows.Media.Brushes]::Transparent
 $script:Window.Topmost = $true
 $script:Window.ShowInTaskbar = $false
 $script:Window.Focusable = $true
-$script:Window.ShowActivated = $false
+$script:Window.ShowActivated = $true
 $script:Window.FontFamily = New-Object System.Windows.Media.FontFamily("Segoe UI")
 $script:Window.UseLayoutRounding = $true
 [System.Windows.Media.TextOptions]::SetTextFormattingMode($script:Window, [System.Windows.Media.TextFormattingMode]::Ideal)
@@ -315,8 +320,9 @@ function Test-PointInsideWindow {
 }
 
 $script:OpenedAt = Get-Date
-$script:IgnoreMouseUntil = $script:OpenedAt.AddMilliseconds(900)
-$script:WasLeftMouseDown = $false
+$script:IgnoreMouseUntil = $script:OpenedAt.AddMilliseconds(250)
+$initialMouseState = [int][MacMakeover.ControlCenterNative]::GetAsyncKeyState(0x01)
+$script:WasLeftMouseDown = ($initialMouseState -band 0x8000) -ne 0
 $script:OutsideClickTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:OutsideClickTimer.Interval = [TimeSpan]::FromMilliseconds(20)
 $script:OutsideClickTimer.Add_Tick({
@@ -360,13 +366,13 @@ $script:MouseHook = [MacMakeover.ControlCenterNative]::SetWindowsHookEx(14, $scr
 $script:Window.Add_SourceInitialized({
   $helper = New-Object System.Windows.Interop.WindowInteropHelper($script:Window)
   $GWL_EXSTYLE = -20
-  $WS_EX_NOACTIVATE = 0x08000000
   $WS_EX_TOOLWINDOW = 0x00000080
   $style = [MacMakeover.ControlCenterNative]::GetWindowLongPtr($helper.Handle, $GWL_EXSTYLE).ToInt64()
-  $newStyle = [IntPtr]($style -bor $WS_EX_NOACTIVATE -bor $WS_EX_TOOLWINDOW)
+  $newStyle = [IntPtr]($style -bor $WS_EX_TOOLWINDOW)
   [MacMakeover.ControlCenterNative]::SetWindowLongPtr($helper.Handle, $GWL_EXSTYLE, $newStyle) | Out-Null
-  [MacMakeover.ControlCenterNative]::ShowWindow($helper.Handle, 8) | Out-Null
+  [MacMakeover.ControlCenterNative]::ShowWindow($helper.Handle, 5) | Out-Null
 })
+$script:Window.Add_Deactivated({ $script:Window.Close() })
 $script:Window.Add_Closed({
   if ($script:OutsideClickTimer) {
     $script:OutsideClickTimer.Stop()
@@ -379,6 +385,7 @@ $script:Window.Add_Closed({
     $script:MenuMutex.ReleaseMutex()
     $script:MenuMutex.Dispose()
   }
+  [System.Windows.Threading.Dispatcher]::CurrentDispatcher.BeginInvokeShutdown([System.Windows.Threading.DispatcherPriority]::Background)
 })
 $script:Window.Add_KeyDown({
   param($sender, $eventArgs)
@@ -388,4 +395,6 @@ $script:Window.Add_KeyDown({
 })
 
 $script:OutsideClickTimer.Start()
-$script:Window.ShowDialog() | Out-Null
+$script:Window.Show()
+$script:Window.Activate() | Out-Null
+[System.Windows.Threading.Dispatcher]::Run()

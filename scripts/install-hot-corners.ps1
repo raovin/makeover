@@ -9,12 +9,12 @@ $ErrorActionPreference = "Stop"
 
 $scriptPath = Join-Path $PSScriptRoot "start-hot-corners.ps1"
 $startupShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk"
-$pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
-if (-not $pwsh) {
-  $pwsh = "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe"
+$pwsh = "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe"
+if (-not (Test-Path -LiteralPath $pwsh)) {
+  $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
 }
 
-$arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -ConfigPath `"$ConfigPath`""
+$arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -ConfigPath `"$ConfigPath`""
 
 function Install-StartupShortcut {
   $shortcutDir = Split-Path -Parent $startupShortcut

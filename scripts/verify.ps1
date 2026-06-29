@@ -22,6 +22,8 @@ $ControlCenterScriptPath = Join-Path $PackageRoot "scripts\Show-MacControlCenter
 $ControlCenterInstallerPath = Join-Path $PackageRoot "scripts\Install-MacControlCenterHandler.ps1"
 $HotCornersScriptPath = Join-Path $PackageRoot "scripts\start-hot-corners.ps1"
 $HotCornersConfigPath = Join-Path $PackageRoot "config\hot-corners.json"
+$MenuHostProjectPath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj"
+$MenuHostExePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe"
 $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command"
 $ControlCenterCommandPath = "HKCU:\Software\Classes\macmakeover-control-center\shell\open\command"
 $VerificationFailed = $false
@@ -90,7 +92,7 @@ Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPale
 
 Write-Host ""
 Write-Host "Core files:"
-foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath)) {
+foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath)) {
   if (Test-Path -LiteralPath $path) {
     "OK   {0}" -f $path
   } else {
@@ -131,6 +133,50 @@ if (Test-Path -Path $ControlCenterCommandPath) {
 } else {
   Write-Warning "Control Center protocol handler is missing: macmakeover-control-center:"
   $VerificationFailed = $true
+}
+
+if (Test-Path -LiteralPath $ToolbarPath) {
+  Write-Host ""
+  Write-Host "Top-bar click latency guard:"
+  $toolbarRaw = Get-Content -LiteralPath $ToolbarPath -Raw
+  if ($toolbarRaw -match "@seelen/tb-quick-settings") {
+    Write-Warning "Seelen quick settings is back in the toolbar. That restores the old clunky power/options flyout."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarRaw -match 'open\("macmakeover-(apple-menu|control-center):"\)') {
+    Write-Warning "Toolbar clicks are registered directly to macmakeover URI protocols. Normal Apple/Control Center clicks should be handled by start-hot-corners.ps1 to avoid multi-second ShellExecute/PowerShell launch lag."
+    $VerificationFailed = $true
+  } else {
+    Write-Host "  OK normal Apple/Control Center clicks are helper-owned, not URI-launched from Seelen."
+  }
+
+  if ($toolbarRaw -match 'Battery:|Charge rate:|return "Control Center";') {
+    Write-Warning "Top-bar battery/control tooltips are enabled. They can overlap the custom Control Center popover."
+    $VerificationFailed = $true
+  }
+}
+
+if (Test-Path -LiteralPath $HotCornersConfigPath) {
+  Write-Host ""
+  Write-Host "Hot-corners responsiveness config:"
+  $hotCornersConfig = Get-Content -LiteralPath $HotCornersConfigPath -Raw | ConvertFrom-Json
+  $hotCornersConfig |
+    Select-Object pollMilliseconds,appleMenuClickEnabled,appleMenuZoneLeft,appleMenuZoneRight,controlCenterClickEnabled,topBarClickHeight |
+    Format-List
+
+  if ([int]$hotCornersConfig.pollMilliseconds -lt 25) {
+    Write-Warning "Hot-corners pollMilliseconds is below the measured safe range and can waste CPU. Keep it between 25ms and 40ms."
+    $VerificationFailed = $true
+  } elseif ([int]$hotCornersConfig.pollMilliseconds -gt 40) {
+    Write-Warning "Hot-corners pollMilliseconds is above the measured responsive range and can make Apple/Control Center clicks feel laggy. Keep it between 25ms and 40ms."
+    $VerificationFailed = $true
+  }
+
+  if (-not $hotCornersConfig.appleMenuClickEnabled -or -not $hotCornersConfig.controlCenterClickEnabled) {
+    Write-Warning "Helper-owned Apple/Control Center click routing is disabled."
+    $VerificationFailed = $true
+  }
 }
 
 if (Test-Path -LiteralPath $ShortcutPath) {
@@ -198,10 +244,29 @@ if (Test-Path -LiteralPath $hotCornerStartup) {
 } else {
   Write-Host "Hot corners Startup shortcut not found."
 }
-Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -like "*start-hot-corners.ps1*" } |
-  Select-Object ProcessId,CommandLine |
+$hotCornerProcesses = @(
+  Get-CimInstance Win32_Process |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*start-hot-corners.ps1*" }
+)
+$hotCornerProcesses |
+  Select-Object ProcessId,Name,CommandLine |
   Format-List
+
+$menuHostProcesses = @(Get-Process -Name MacMakeover.MenuHost -ErrorAction SilentlyContinue)
+if ($menuHostProcesses.Count) {
+  Write-Host "MenuHost resident process:"
+  $menuHostProcesses | Select-Object Id,Responding,CPU,StartTime | Format-Table -AutoSize
+} else {
+  Write-Warning "MacMakeover.MenuHost is not running. Start/restart hot corners so Apple/Control Center clicks do not cold-launch."
+  $VerificationFailed = $true
+}
+
+foreach ($hotCornerProcess in $hotCornerProcesses) {
+  if ($hotCornerProcess.Name -ieq "pwsh.exe") {
+    Write-Warning "Hot-corners/top-bar helper is running under pwsh.exe. WPF popovers rendered invisibly from pwsh runspaces during QA; run scripts\install-hot-corners.ps1 -StartNow to use Windows PowerShell."
+    $VerificationFailed = $true
+  }
+}
 
 Write-Host ""
 Write-Host "Spotlight custom shortcuts:"
@@ -232,6 +297,17 @@ if ($CaptureScreenshot) {
   if ($ffmpeg) {
     & $ffmpeg.Source -hide_banner -loglevel error -y -f gdigrab -draw_mouse 0 -framerate 1 -i desktop -vframes 1 $desktop
   } else {
+    $dpiSignature = @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class MacMakeoverVerifyDpi {
+  [DllImport("user32.dll")]
+  public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+}
+"@
+    Add-Type -TypeDefinition $dpiSignature -ErrorAction SilentlyContinue
+    [MacMakeoverVerifyDpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
     $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds

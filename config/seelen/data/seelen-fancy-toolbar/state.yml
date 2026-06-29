@@ -5,7 +5,7 @@ left:
   template: 'return "Apple";'
   tooltip: 'return "";'
   badge: null
-  onClick: 'open("macmakeover-apple-menu:")'
+  onClick: null
   onWheelUp: null
   onWheelDown: null
   style: {width: 30, minWidth: 30, maxWidth: 30, flexShrink: 0}
@@ -13,7 +13,7 @@ left:
 - id: focused-app-name-codex
   scopes:
   - FocusedApp
-  template: 'if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || focusedApp.title || "").trim(); const title = (focusedApp.title || "").trim(); if (name === "Seelen UI" && /^(Fancy Toolbar|Dock\/Taskbar|Flyouts|User Menu|Power Menu)$/.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && title === "Apple Menu") return ""; return name || title;'
+  template: 'if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || focusedApp.title || "").trim(); const title = (focusedApp.title || "").trim(); if (name === "Seelen UI" && /^(Fancy Toolbar|Dock\/Taskbar|Flyouts|User Menu|Power Menu)$/.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center)$/.test(title)) return ""; return name || title;'
   tooltip: 'if (typeof focusedApp === "undefined" || !focusedApp) return ""; return focusedApp.title || focusedApp.name || "";'
   badge: null
   onClick: null
@@ -24,7 +24,7 @@ left:
 - id: focused-window-title-codex
   scopes:
   - FocusedApp
-  template: 'if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); if (name === "Seelen UI" && /^(Fancy Toolbar|Dock\/Taskbar|Flyouts|User Menu|Power Menu)$/.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && title === "Apple Menu") return ""; if (!title || title === name) return ""; return title;'
+  template: 'if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); if (name === "Seelen UI" && /^(Fancy Toolbar|Dock\/Taskbar|Flyouts|User Menu|Power Menu)$/.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center)$/.test(title)) return ""; if (!title || title === name) return ""; return title;'
   tooltip: 'if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; return focusedApp.title;'
   badge: null
   onClick: null
@@ -72,9 +72,9 @@ right:
   scopes:
   - Power
   template: 'if (typeof batteries === "undefined" || !batteries || !batteries.length) return ""; const b = batteries[0]; const charging = (typeof power !== "undefined" && power.acLineStatus === 1) || b.state === "charging"; if (!charging || b.percentage >= 100) return ""; const w = Math.round(b.energyRate || 0); if (w <= 0) return ""; return (w < 18 ? "slow " : "") + w + "W";'
-  tooltip: 'return (typeof batteries !== "undefined" && batteries.length) ? "Charge rate: " + Math.round(batteries[0].energyRate || 0) + " W" : ""'
+  tooltip: 'return "";'
   badge: null
-  onClick: 'open("macmakeover-control-center:")'
+  onClick: null
   onWheelUp: null
   onWheelDown: null
   style: {}
@@ -83,9 +83,9 @@ right:
   scopes:
   - Power
   template: 'if (typeof batteries === "undefined" || !batteries.length) return icon("TbPlugConnected"); const pct = Math.round(batteries.reduce((total, battery) => total + battery.percentage, 0) / batteries.length); const charging = (typeof power !== "undefined" && power.acLineStatus === 1) || batteries.some((battery) => battery.state === "charging"); const group = []; if (charging) { group.push(icon("BsLightningChargeFill")); group.push(" "); } group.push(pct > 90 ? icon("PiBatteryFullFill") : pct > 66 ? icon("PiBatteryHighFill") : pct > 33 ? icon("PiBatteryMediumFill") : pct > 5 ? icon("PiBatteryLowFill") : icon("PiBatteryWarning")); group.push(" "); group.push(pct + "%"); return group;'
-  tooltip: 'return (typeof batteries !== "undefined" && batteries.length) ? "Battery: " + Math.round(batteries.reduce((total, battery) => total + battery.percentage, 0) / batteries.length) + "%" : "Plugged in";'
+  tooltip: 'return "";'
   badge: null
-  onClick: 'open("macmakeover-control-center:")'
+  onClick: null
   onWheelUp: null
   onWheelDown: null
   style: {minWidth: 68}
@@ -94,9 +94,9 @@ right:
 - id: macmakeover-control-center
   scopes: []
   template: 'return icon("LuSlidersHorizontal");'
-  tooltip: 'return "Control Center";'
+  tooltip: 'return "";'
   badge: null
-  onClick: 'open("macmakeover-control-center:")'
+  onClick: null
   onWheelUp: null
   onWheelDown: null
   style: {width: 28, minWidth: 28, maxWidth: 28, flexShrink: 0}

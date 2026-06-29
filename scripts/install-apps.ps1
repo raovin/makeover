@@ -22,6 +22,7 @@ function Install-WingetPackage {
 
 Install-WingetPackage -Id "Microsoft.PowerToys" -Name "Microsoft PowerToys"
 Install-WingetPackage -Id "Seelen.SeelenUI" -Name "Seelen UI"
+Install-WingetPackage -Id "Microsoft.DotNet.SDK.10" -Name ".NET SDK 10"
 
 if ($IncludeRemoteTools) {
   Install-WingetPackage -Id "Tailscale.Tailscale" -Name "Tailscale"

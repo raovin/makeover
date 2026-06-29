@@ -8,9 +8,10 @@ The user is very explicit about quality: do not claim a visual task is finished 
 
 ## Latest (2026-06-29, Codex Audit Fix)
 
-- Apple menu visually rebuilt to authentic macOS proportions: 244px width, `SizeToContent` so the panel hugs its rows, a top-to-bottom gradient, 9px rounded corners, and a drop shadow.
+- Normal Apple and Control Center clicks now open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
 - The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
-- Top-right sliders, charge-rate, and battery clicks now open a custom WPF Control Center / power popover through `macmakeover-control-center:` (registered by `scripts\Install-MacControlCenterHandler.ps1`) instead of Seelen's built-in quick-settings/power flyout.
+- Top-right sliders, charge-rate, and battery clicks open the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. The `macmakeover-control-center:` protocol remains registered by `scripts\Install-MacControlCenterHandler.ps1` only as fallback plumbing.
+- Performance correction: normal Apple and Control Center clicks are no longer launched by Seelen `onClick` URI handlers. `scripts\start-hot-corners.ps1` owns those top-bar click zones and sends `apple` / `control` over the `MacMakeover.MenuHost` named pipe. The resident host must be running so clicks do not cold-launch.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
 - Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
 - The three previous locations were consolidated into this single git repo at `C:\Users\VineethRao\source\repos\mac-makeover`. The old brunel copy is kept untouched as a frozen backup.
@@ -75,7 +76,9 @@ Registry path:
 HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command
 ```
 
-7. Do not re-add Seelen's `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back. The right-side Control Center entry is custom and is backed by both toolbar `onClick` handlers and the hot-corners top-bar click router.
+7. Do not wire Seelen toolbar `onClick` directly to `macmakeover-apple-menu:` or `macmakeover-control-center:`. That URI/ShellExecute path caused multi-second perceived lag. Normal Apple and Control Center clicks must be owned by `scripts\start-hot-corners.ps1`, which sends named-pipe commands to the resident `tools\MacMakeover.MenuHost` process. The URI protocols remain registered only as fallback/restore plumbing.
+
+8. Do not re-add Seelen's `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back. The right-side Control Center entry is custom and is backed by the hot-corners top-bar click router.
 
 Correct Control Center handler shape (registered by `scripts\Install-MacControlCenterHandler.ps1`):
 
@@ -89,7 +92,7 @@ Registry path:
 HKCU:\Software\Classes\macmakeover-control-center\shell\open\command
 ```
 
-8. Treat delayed UI automations as reliability-critical. Do not chain one delayed UI task through another delayed UI task. After creating/updating an automation, verify the saved automation state and report id, status, schedule, target thread, and prompt summary. If the platform only permits one active heartbeat, say so and ask whether to replace it, create a separate thread/job, or do the work now. A delayed UI task is not complete until the requested action produces a visible success/failure report in the thread.
+9. Treat delayed UI automations as reliability-critical. Do not chain one delayed UI task through another delayed UI task. After creating/updating an automation, verify the saved automation state and report id, status, schedule, target thread, and prompt summary. If the platform only permits one active heartbeat, say so and ask whether to replace it, create a separate thread/job, or do the work now. A delayed UI task is not complete until the requested action produces a visible success/failure report in the thread.
 
 ## Apple Menu: What Changed
 
@@ -107,7 +110,7 @@ The current top-left Apple glyph is a custom toolbar item:
 - id: macmakeover-apple-menu
   template: 'return "Apple";'
   tooltip: 'return "";'
-  onClick: 'open("macmakeover-apple-menu:")'
+  onClick: null
   style: {width: 30, minWidth: 30, maxWidth: 30, flexShrink: 0}
 ```
 
@@ -117,7 +120,7 @@ Live toolbar file:
 C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\data\seelen-fancy-toolbar\state.yml
 ```
 
-The URI launches this WPF menu script via `conhost.exe --headless` (registered by `scripts\Install-AppleMenuHandler.ps1`):
+Normal clicks are caught by `scripts\start-hot-corners.ps1` and shown by `tools\MacMakeover.MenuHost`. The fallback URI launches this WPF menu script via `conhost.exe --headless` (registered by `scripts\Install-AppleMenuHandler.ps1`):
 
 ```text
 C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacAppleMenu.ps1
@@ -165,11 +168,11 @@ The replacement is a custom toolbar item plus click handlers on the charge-rate 
 ```yaml
 - id: macmakeover-control-center
   template: 'return icon("LuSlidersHorizontal");'
-  tooltip: 'return "Control Center";'
-  onClick: 'open("macmakeover-control-center:")'
+  tooltip: 'return "";'
+  onClick: null
 ```
 
-The URI launches this WPF script through `conhost.exe --headless`:
+Normal clicks are caught by `scripts\start-hot-corners.ps1` and shown by `tools\MacMakeover.MenuHost`. The fallback URI launches this WPF script through `conhost.exe --headless`:
 
 ```text
 C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacControlCenter.ps1
@@ -185,13 +188,15 @@ The current Control Center includes:
 - Restart...
 - Shut Down...
 
-Because Seelen custom-item clicks can be inconsistent under real/synthetic top-bar clicks, `scripts\start-hot-corners.ps1` also routes the far-right control zone and power/battery zone to `macmakeover-control-center:`. Keep both layers unless replacing the whole top-bar interaction model.
+Because Seelen/Windows URI launches were measured as laggy, `scripts\start-hot-corners.ps1` routes the Apple zone, far-right control zone, and power/battery zone directly to the resident MenuHost. Keep that layer unless replacing the whole top-bar interaction model.
 
-Recent visual proof screenshots:
+Recent visual/performance proof screenshots:
 
 ```text
-C:\tmp\codex-control-center-right-only.png
-C:\tmp\codex-control-center-battery-click-3.png
+C:\Users\VineethRao\source\repos\mac-makeover\qa\live-apple-click-200ms-poll30.png
+C:\Users\VineethRao\source\repos\mac-makeover\qa\live-control-right-click-250ms.png
+C:\Users\VineethRao\source\repos\mac-makeover\qa\live-control-power-zone-after-seelen-restart.png
+C:\Users\VineethRao\source\repos\mac-makeover\qa\alt-tab-sanity.png
 ```
 
 ## Current Top Bar And Dock Files
@@ -285,7 +290,7 @@ C:\Users\VineethRao\source\repos\mac-makeover\config\hot-corners.json
 
 The top-left hot corner and Apple glyph are close together. Top-left/top-right outer-corner clicks use `clickCornerSize` from `config\hot-corners.json` and send Show Desktop. Be careful when changing hit targets; do not reintroduce invisible click stealing.
 
-The same helper owns the top-right Control Center/power hit zones through `controlCenterClickEnabled`, `controlCenterRightButtonWidth`, and the `controlCenterPowerZone*` offsets. The exact physical top-right corner remains reserved for Show Desktop.
+The same helper owns the Apple click zone through `appleMenuClickEnabled` and `appleMenuZone*`, plus the top-right Control Center/power hit zones through `controlCenterClickEnabled`, `controlCenterRightButtonWidth`, and the `controlCenterPowerZone*` offsets. The exact physical top-left/top-right corners remain reserved for Show Desktop.
 
 ## The Repo / Git Backup
 

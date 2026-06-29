@@ -8,3 +8,6 @@ Thumbs.db
 # Local verification screenshots can be regenerated.
 qa/
 
+# Local .NET build outputs for the resident menu host.
+bin/
+obj/
