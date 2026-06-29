@@ -6,7 +6,9 @@
   "hotCornersConfig": "config\\hot-corners.json",
   "spotlightShortcuts": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Mac Makeover",
   "appleMenuProtocol": "macmakeover-apple-menu:",
-  "appleMenuLauncher": "scripts\\Launch-MacAppleMenu.vbs",
+  "appleMenuScript": "scripts\\Show-MacAppleMenu.ps1",
+  "appleMenuHandlerInstaller": "scripts\\Install-AppleMenuHandler.ps1",
+  "appleMenuLaunchMethod": "conhost.exe --headless (wscript blocked on this machine)",
   "sourceProject": "local mac-makeover workspace, optional after backup",
   "excluded": [
     "RustDesk credentials/config",

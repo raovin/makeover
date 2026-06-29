@@ -127,6 +127,8 @@ if (Test-Path -LiteralPath $SourceProject) {
   Copy-FileIfExists (Join-Path $SourceProject "pin-apps.ps1") (Join-Path $AssetsRoot "source-scripts\pin-apps.ps1")
   Copy-FileIfExists (Join-Path $SourceProject "convert.ps1") (Join-Path $AssetsRoot "source-scripts\convert.ps1")
   Copy-FileIfExists (Join-Path $SourceProject "scripts\Show-MacAppleMenu.ps1") (Join-Path $PackageRoot "scripts\Show-MacAppleMenu.ps1")
+  Copy-FileIfExists (Join-Path $SourceProject "scripts\Install-AppleMenuHandler.ps1") (Join-Path $PackageRoot "scripts\Install-AppleMenuHandler.ps1")
+  # Legacy launcher kept only as dead reference; conhost (Install-AppleMenuHandler.ps1 -> Show-MacAppleMenu.ps1) is the active path.
   Copy-FileIfExists (Join-Path $SourceProject "scripts\Launch-MacAppleMenu.vbs") (Join-Path $PackageRoot "scripts\Launch-MacAppleMenu.vbs")
   Copy-FileIfExists (Join-Path $SourceProject "mac-wallpaper.jpg") (Join-Path $AssetsRoot "wallpapers\mac-wallpaper.jpg")
   Copy-FileIfExists (Join-Path $SourceProject "mac-wallpaper.png") (Join-Path $AssetsRoot "wallpapers\mac-wallpaper.png")
@@ -146,7 +148,9 @@ $manifest = [ordered]@{
   hotCornersConfig = "config\hot-corners.json"
   spotlightShortcuts = "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Mac Makeover"
   appleMenuProtocol = "macmakeover-apple-menu:"
-  appleMenuLauncher = "scripts\Launch-MacAppleMenu.vbs"
+  appleMenuScript = "scripts\Show-MacAppleMenu.ps1"
+  appleMenuHandlerInstaller = "scripts\Install-AppleMenuHandler.ps1"
+  appleMenuLaunchMethod = "conhost.exe --headless (registered by Install-AppleMenuHandler.ps1; legacy wscript/VBS launcher is blocked on this machine)"
   sourceProject = "local mac-makeover workspace, optional after backup"
   excluded = @(
     "RustDesk credentials/config",

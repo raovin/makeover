@@ -8,5 +8,5 @@ Most important guardrails:
 - Do not restart Explorer while Seelen is running.
 - Keep `settings_shortcuts.json` disabled so Alt+Tab and lock-screen input stay normal.
 - Leave `Alt+Space` on PowerToys / Command Palette; do not bind it through Seelen.
-- Hot corners are handled by the portable package under `C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover\scripts`.
+- Hot corners are handled by the portable package under `C:\Users\VineethRao\source\repos\mac-makeover\scripts`.
 - Verify every visual change with a fresh screenshot.

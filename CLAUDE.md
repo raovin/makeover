@@ -1,6 +1,6 @@
 # Claude Code Entry Point
 
-This folder is the portable backup for the Windows macOS makeover.
+This folder is the single home and source of truth for the Windows macOS makeover.
 
 Start here:
 
@@ -16,7 +16,7 @@ Guardrails:
 - Stop Seelen before editing or restoring its config.
 - Keep `settings_shortcuts.json` disabled unless the user explicitly wants to revisit shortcuts.
 - Leave `Alt+Space` on PowerToys / Command Palette; do not bind it through Seelen.
-- Keep the Apple menu protocol on hidden `wscript.exe` -> `Launch-MacAppleMenu.vbs`; direct PowerShell registration showed a terminal window.
+- Keep the Apple menu protocol registered to `conhost.exe --headless` running `scripts/Show-MacAppleMenu.ps1` via `scripts/Install-AppleMenuHandler.ps1`; `wscript.exe` -> `Launch-MacAppleMenu.vbs` is blocked by Defender/ASR on this PC, and direct PowerShell registration flashes a terminal window.
 - Hot corners are handled by `scripts/start-hot-corners.ps1` through a user scheduled task or Startup-folder fallback.
 - Do not restore RustDesk/Tailscale secrets from this repo. They are intentionally excluded.
 - Verify visual changes with screenshots at 1280x800. Do not call visual work finished without visual QA.

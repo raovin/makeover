@@ -17,7 +17,6 @@ $LogPath = Join-Path $SeelenLocal "logs\Seelen UI.log"
 $PowerToysSettingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\settings.json"
 $PowerToysRunSettingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\PowerToys Run\settings.json"
 $AppleMenuScriptPath = Join-Path $PackageRoot "scripts\Show-MacAppleMenu.ps1"
-$AppleMenuLauncherPath = Join-Path $PackageRoot "scripts\Launch-MacAppleMenu.vbs"
 $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command"
 
 function Get-ImageAverageLuma {
@@ -95,7 +94,7 @@ if (Test-Path -Path $AppleMenuCommandPath) {
   Write-Host "  $appleMenuCommand"
   if ($appleMenuCommand -match "wscript\.exe") {
     Write-Warning "Apple menu is registered via wscript.exe, which is blocked by this PC's security policy (the menu will not open). Re-run scripts\Install-AppleMenuHandler.ps1 to switch to conhost."
-  } elseif ($appleMenuCommand -notmatch "conhost\.exe" -or $appleMenuCommand -notmatch "Show-MacAppleMenu\.ps1") {
+  } elseif (-not ($appleMenuCommand -match "conhost\.exe" -and $appleMenuCommand -match "Show-MacAppleMenu\.ps1")) {
     Write-Warning "Apple menu is not registered to the conhost launcher. Re-run scripts\Install-AppleMenuHandler.ps1."
   }
 } else {

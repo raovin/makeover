@@ -6,12 +6,17 @@ You are taking over a Windows 11 desktop-customization project. The user wants t
 
 The user is very explicit about quality: do not claim a visual task is finished without a real visual QA check. For any visual change, make the change, restart/reload the affected shell, capture screenshots, inspect them, and tell the user what you verified.
 
+## Latest (2026-06-29, Claude)
+
+- Apple menu visually rebuilt to authentic macOS proportions: 244px width, `SizeToContent` so the panel hugs its rows, a top-to-bottom gradient, 9px rounded corners, and a drop shadow.
+- The protocol handler was moved off `wscript.exe` onto `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
+- The three previous locations were consolidated into this single git repo at `C:\Users\VineethRao\source\repos\mac-makeover`. The old brunel copy is kept untouched as a frozen backup.
+
 ## Current State In One Screenful
 
-- Live workspace: `C:\Users\VineethRao\source\repos\mac-makeover`
-- Git-backed portable package: `C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover`
-- Git repo/branch for the portable package: `C:\Users\VineethRao\source\repos\brunel\workspace`, branch `docs/135849-workspace-qa-map`
-- Latest pushed commit: `a282446 Fix mac makeover Apple menu launcher`
+- Repo (single source of truth): `C:\Users\VineethRao\source\repos\mac-makeover` — a standalone git repo (default branch `main`, no remote yet).
+- Frozen backup only: `C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover` (GitHub `raovin/brunel`). Do not edit; it is historical.
+- Latest relevant commit: `a282446 Fix mac makeover Apple menu launcher`
 - Seelen config root: `C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui`
 - Seelen local/log root: `C:\Users\VineethRao\AppData\Local\com.seelen.seelen-ui`
 - Seelen package currently observed: `C:\Program Files\WindowsApps\Seelen.SeelenUI_2.7.3.0_x64__p6yyn03m1894e\seelen-ui.exe`
@@ -52,11 +57,13 @@ C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\settings_shortcuts.json
 
 6. Do not register the Apple menu protocol directly to PowerShell. That caused a visible terminal window.
 
-Correct handler shape:
+Correct handler shape (registered by `scripts\Install-AppleMenuHandler.ps1`):
 
 ```text
-"C:\windows\System32\wscript.exe" "C:\Users\VineethRao\source\repos\mac-makeover\scripts\Launch-MacAppleMenu.vbs" "%1"
+"C:\Windows\System32\conhost.exe" --headless "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacAppleMenu.ps1" "%1"
 ```
+
+Note: the old `wscript.exe` -> `Launch-MacAppleMenu.vbs` launcher is blocked on this machine (Defender/ASR throws "Windows Script Host failed - not enough memory resources"). The `.vbs` remains only as dead legacy; do not register it.
 
 Registry path:
 
@@ -92,17 +99,13 @@ Live toolbar file:
 C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\data\seelen-fancy-toolbar\state.yml
 ```
 
-The URI launches this hidden VBS wrapper:
-
-```text
-C:\Users\VineethRao\source\repos\mac-makeover\scripts\Launch-MacAppleMenu.vbs
-```
-
-Which launches this WPF menu script:
+The URI launches this WPF menu script via `conhost.exe --headless` (registered by `scripts\Install-AppleMenuHandler.ps1`):
 
 ```text
 C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacAppleMenu.ps1
 ```
+
+The legacy `scripts\Launch-MacAppleMenu.vbs` wrapper is no longer in the chain; `wscript.exe` is blocked by this machine's Defender/ASR policy.
 
 Current Apple menu includes:
 
@@ -182,17 +185,17 @@ Get-Content -LiteralPath "$env:LOCALAPPDATA\com.seelen.seelen-ui\logs\Seelen UI.
   Select-String -Pattern 'SerdeYaml|error|failed|panic|Ready|fancy-toolbar|weg' -CaseSensitive:$false
 ```
 
-Run the portable verifier:
+Run the verifier:
 
 ```powershell
-cd C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover
+cd C:\Users\VineethRao\source\repos\mac-makeover
 .\scripts\verify.ps1 -CaptureScreenshot
 ```
 
 That captures full/top/bottom screenshots under:
 
 ```text
-C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover\qa
+C:\Users\VineethRao\source\repos\mac-makeover\qa
 ```
 
 The verifier uses FFmpeg with `-draw_mouse 0` so the custom cursor does not create black-box capture artifacts.
@@ -211,23 +214,23 @@ Do not re-route `Alt+Space` through Seelen.
 Hot corners are managed by:
 
 ```text
-C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover\scripts\start-hot-corners.ps1
+C:\Users\VineethRao\source\repos\mac-makeover\scripts\start-hot-corners.ps1
 ```
 
 Config:
 
 ```text
-C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover\config\hot-corners.json
+C:\Users\VineethRao\source\repos\mac-makeover\config\hot-corners.json
 ```
 
 The top-left hot corner and Apple glyph are close together. Be careful when changing hit targets; do not reintroduce invisible click stealing.
 
-## Portable Package / Git Backup
+## The Repo / Git Backup
 
-The restoreable Git-backed package lives here:
+This standalone repo is both the live config home and the restoreable Git-backed package:
 
 ```text
-C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover
+C:\Users\VineethRao\source\repos\mac-makeover
 ```
 
 It includes:
@@ -239,15 +242,16 @@ It includes:
 - Restore and verify scripts
 - README and Claude entry point
 
-If you make a lasting visual/setup change, update both the live config and the portable package, then commit only `desktop/mac-makeover`:
+If you make a lasting visual/setup change, update the live config, mirror it into this repo, then commit from the repo root:
 
 ```powershell
-git -C C:\Users\VineethRao\source\repos\brunel\workspace status --short -- desktop/mac-makeover
-git -C C:\Users\VineethRao\source\repos\brunel\workspace diff -- desktop/mac-makeover
-git -C C:\Users\VineethRao\source\repos\brunel\workspace add desktop/mac-makeover
-git -C C:\Users\VineethRao\source\repos\brunel\workspace commit -m "Update mac makeover polish"
-git -C C:\Users\VineethRao\source\repos\brunel\workspace push origin HEAD
+git -C C:\Users\VineethRao\source\repos\mac-makeover status --short
+git -C C:\Users\VineethRao\source\repos\mac-makeover diff
+git -C C:\Users\VineethRao\source\repos\mac-makeover add .
+git -C C:\Users\VineethRao\source\repos\mac-makeover commit -m "Update mac makeover polish"
 ```
+
+There is no remote yet, so there is nothing to push.
 
 ## Beautification Ideas For Claude
 
@@ -313,8 +317,8 @@ C:\tmp\mac-apple-menu-final-polished.png
 Recent normal top/dock QA crops:
 
 ```text
-C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover\qa\visual-qa-20260627-230031\top-130.png
-C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover\qa\visual-qa-20260627-230031\bottom-240.png
+C:\Users\VineethRao\source\repos\mac-makeover\qa\visual-qa-20260627-230031\top-130.png
+C:\Users\VineethRao\source\repos\mac-makeover\qa\visual-qa-20260627-230031\bottom-240.png
 ```
 
 ## Definition Of Done
@@ -326,6 +330,6 @@ For any beautification iteration:
 - Run log/config checks.
 - Capture and inspect screenshots.
 - If behavior is clickable, test the actual click path.
-- Update the Git-backed package if the change should survive migration.
-- Commit and push package changes when appropriate.
+- Mirror any lasting change from the live config into this repo so it survives a restore.
+- Commit changes from the repo root when appropriate (no remote yet, so no push).
 - Tell the user exactly what changed and what visual QA passed.

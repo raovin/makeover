@@ -62,7 +62,10 @@ function Save-JsonFile {
     [string]$Path
   )
 
-  $Object | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $Path -Encoding utf8
+  # Write UTF-8 without a BOM. Windows PowerShell 5.1's `Set-Content -Encoding utf8` prepends a
+  # BOM, which Seelen's serde JSON reader and some Command Palette/PowerToys parsers reject.
+  $json = $Object | ConvertTo-Json -Depth 100
+  [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Set-CommandPaletteSpotlightSettings {
@@ -203,15 +206,15 @@ Copy-TreeContents (Join-Path $ConfigRoot "themes\macos-glass") (Join-Path $Seele
 
 # Hard guardrail: keep Seelen shortcuts disabled for normal Alt+Tab and lock-screen input behavior.
 $shortcutsPath = Join-Path $SeelenRoot "settings_shortcuts.json"
-'{"enabled":false,"shortcuts":{}}' | Set-Content -LiteralPath $shortcutsPath -Encoding utf8
+[System.IO.File]::WriteAllText($shortcutsPath, '{"enabled":false,"shortcuts":{}}', (New-Object System.Text.UTF8Encoding($false)))
 
 Register-MacMakeoverAppleMenu
 
 if ($ApplyAccent) {
   $accentReg = Join-Path $PackageRoot "registry\hkcu-explorer-accent.reg"
   $dwmReg = Join-Path $PackageRoot "registry\hkcu-dwm.reg"
-  if (Test-Path -LiteralPath $accentReg) { reg import $accentReg | Out-Null }
-  if (Test-Path -LiteralPath $dwmReg) { reg import $dwmReg | Out-Null }
+  if (Test-Path -LiteralPath $accentReg) { reg import "$accentReg" | Out-Null }
+  if (Test-Path -LiteralPath $dwmReg) { reg import "$dwmReg" | Out-Null }
 }
 
 if (-not $SkipSearchTweaks) {

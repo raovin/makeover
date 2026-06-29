@@ -2,7 +2,7 @@
 
 Portable backup and restore package for the Windows 11 macOS-style desktop setup.
 
-This folder exists so a new Windows machine can be rebuilt from GitHub instead of relying on the old machine as the migration source. It captures the repeatable parts of the setup: Seelen UI layout/theme, dock and menu-bar configuration, wallpaper assets, cursor assets, user-level appearance exports, and restore scripts.
+This repo is the single home and source of truth for the macOS makeover, so a new Windows machine can be rebuilt from here instead of relying on the old machine as the migration source. A frozen historical copy still lives under `brunel\workspace\desktop\mac-makeover`, but that is a backup only and is no longer the working location. This repo captures the repeatable parts of the setup: Seelen UI layout/theme, dock and menu-bar configuration, wallpaper assets, cursor assets, user-level appearance exports, and restore scripts.
 
 Keep this repo private unless you have reviewed the app paths and registry exports. No credentials are intentionally stored here, but the package does include local app names, install paths, appearance settings, and dock pins.
 
@@ -38,7 +38,7 @@ This package deliberately excludes machine/account state:
 ## Folder Layout
 
 ```text
-desktop/mac-makeover/
+mac-makeover/
   assets/
     cursors/              # Optional macOS-style cursor files
     source-scripts/       # Original helper scripts from the first setup
@@ -51,14 +51,16 @@ desktop/mac-makeover/
   docs/
     migration-checklist.md
     CODEX-HANDOVER.md     # Historical project handover, sanitized
+    CLAUDE.mac-makeover.md # Seelen/Apple-menu guardrails for Claude Code
   registry/               # User-level appearance registry exports
   scripts/
     backup-current.ps1    # Refresh this package from the current machine
     install-apps.ps1      # Install Seelen, optionally RustDesk/Tailscale
     install-hot-corners.ps1
     install-spotlight-shortcuts.ps1
-    Launch-MacAppleMenu.vbs
-    Show-MacAppleMenu.ps1
+    Install-AppleMenuHandler.ps1  # Registers the Apple-menu protocol (conhost --headless)
+    Launch-MacAppleMenu.vbs       # Legacy launcher, deprecated/unused (wscript blocked here)
+    Show-MacAppleMenu.ps1         # The Apple menu UI (WPF)
     start-hot-corners.ps1
     stop-hot-corners.ps1
     restore.ps1           # Restore config/theme/assets to a machine
@@ -73,7 +75,7 @@ desktop/mac-makeover/
 Clone the repo, then open PowerShell in this folder:
 
 ```powershell
-cd C:\path\to\brunel\workspace\desktop\mac-makeover
+cd C:\path\to\mac-makeover
 ```
 
 If local script execution is blocked, allow it for this PowerShell session only:
@@ -118,7 +120,7 @@ Verify the restored setup:
 .\scripts\verify.ps1 -CaptureScreenshot
 ```
 
-The QA run saves a full desktop capture plus top and bottom crops under `desktop/mac-makeover/qa/`. It prefers FFmpeg desktop capture because that sees layered Seelen UI more reliably than the basic Windows screenshot API.
+The QA run saves a full desktop capture plus top and bottom crops under `qa/`. It prefers FFmpeg desktop capture because that sees layered Seelen UI more reliably than the basic Windows screenshot API.
 
 ## Spotlight And Hot Corners
 
@@ -172,17 +174,18 @@ After making visual changes on a machine you trust, refresh the portable snapsho
 Review exactly what changed:
 
 ```powershell
-git status --short desktop/mac-makeover
-git diff -- desktop/mac-makeover
+git status --short
+git diff
 ```
 
-Commit only this folder unless you deliberately want to include other repo changes:
+Commit the refreshed snapshot from the repo root:
 
 ```powershell
-git add desktop/mac-makeover
+git add .
 git commit -m "Update mac makeover backup"
-git push
 ```
+
+There is no remote configured yet, so there is nothing to push. If you later add one, `git push` after committing.
 
 ## Safety Notes
 
@@ -202,7 +205,7 @@ The launcher behavior is separate from Seelen:
 
 - Clicking the top-left Apple mark opens the compact Apple menu for About This Mac, System Settings, App Store, Recent Items, Force Quit, Sleep, Restart, Shut Down, Lock Screen, and Log Out.
 - Restart, Shut Down, and Log Out ask for confirmation.
-- The Apple menu handler must stay registered through `wscript.exe` and `Launch-MacAppleMenu.vbs`; registering it directly to PowerShell can show a terminal window.
+- The Apple menu handler must stay registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1`, set up by `scripts\Install-AppleMenuHandler.ps1`; registering it directly to a visible PowerShell window can show a terminal. The old `wscript.exe` + `Launch-MacAppleMenu.vbs` launcher is deprecated and blocked by this machine's Defender/ASR policy.
 - `Alt+Space` opens Microsoft Command Palette / PowerToys-style search.
 - Command Palette web search is disabled.
 - Command Palette is trimmed to local Spotlight-like providers.
@@ -238,7 +241,7 @@ If clicking the Apple mark opens a terminal, rerun:
 .\scripts\verify.ps1
 ```
 
-`verify.ps1` prints the registered `macmakeover-apple-menu:` command and warns if it is not using the hidden VBS launcher.
+`verify.ps1` prints the registered `macmakeover-apple-menu:` command and warns if it is not using the `conhost.exe --headless` launcher set up by `Install-AppleMenuHandler.ps1`.
 
 If wallpaper does not change on a managed device, check whether the organization enforces wallpaper through policy.
 

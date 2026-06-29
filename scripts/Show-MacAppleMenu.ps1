@@ -20,6 +20,14 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Thr
   exit
 }
 
+# Single-instance guard: a second Apple-logo click (or a click while the menu is still spinning
+# up) must not stack a second window. Held by this STA process for the menu's lifetime; the OS
+# releases it when the process exits. Placed AFTER the STA relaunch so the long-lived STA
+# process owns the mutex, not the short-lived MTA parent that relaunches and exits.
+$createdNew = $false
+$script:MenuMutex = New-Object System.Threading.Mutex($true, "Local\MacMakeoverAppleMenu", [ref]$createdNew)
+if (-not $createdNew) { exit }
+
 Add-Type -AssemblyName PresentationCore,PresentationFramework,WindowsBase
 Add-Type -Namespace MacMakeover -Name NativeWindow -MemberDefinition @"
   [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]

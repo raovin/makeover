@@ -9,10 +9,11 @@
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-- Install Seelen UI, RustDesk, and Tailscale:
+- Install the core desktop apps (Seelen UI). Add `-IncludeRemoteTools` to also install RustDesk and Tailscale:
 
 ```powershell
 .\scripts\install-apps.ps1
+.\scripts\install-apps.ps1 -IncludeRemoteTools
 ```
 
 ## Restore
