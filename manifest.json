@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-06-27T02:02:08.9245967+01:00",
+  "seelenRoot": "%APPDATA%\\com.seelen.seelen-ui",
+  "powerToysRoot": "%LOCALAPPDATA%\\Microsoft\\PowerToys",
+  "commandPaletteRoot": "%LOCALAPPDATA%\\Packages\\Microsoft.CommandPalette_*\\LocalState",
+  "hotCornersConfig": "config\\hot-corners.json",
+  "spotlightShortcuts": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Mac Makeover",
+  "appleMenuProtocol": "macmakeover-apple-menu:",
+  "appleMenuLauncher": "scripts\\Launch-MacAppleMenu.vbs",
+  "sourceProject": "local mac-makeover workspace, optional after backup",
+  "excluded": [
+    "RustDesk credentials/config",
+    "Tailscale account/device keys",
+    "Seelen logs",
+    "Seelen .bak files",
+    "Windows Security settings",
+    "Browser/app sessions and tokens"
+  ]
+}

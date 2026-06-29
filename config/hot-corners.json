@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "cornerSize": 14,
+  "dwellMilliseconds": 750,
+  "cooldownMilliseconds": 1800,
+  "pollMilliseconds": 75,
+  "topLeft": "TaskView",
+  "topRight": "Spotlight",
+  "bottomLeft": "ShowDesktop",
+  "bottomRight": "Lock",
+  "logPath": "%LOCALAPPDATA%\\MacMakeover\\hot-corners.log"
+}

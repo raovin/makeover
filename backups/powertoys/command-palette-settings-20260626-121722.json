@@ -1,0 +1,238 @@
+{
+  "Hotkey": {
+    "win": false,
+    "ctrl": false,
+    "alt": true,
+    "shift": false,
+    "code": 32,
+    "key": ""
+  },
+  "UseLowLevelGlobalHotkey": true,
+  "ShowAppDetails": false,
+  "BackspaceGoesBack": false,
+  "SingleClickActivates": false,
+  "HighlightSearchOnActivate": true,
+  "KeepPreviousQuery": false,
+  "ShowSystemTrayIcon": true,
+  "IgnoreShortcutWhenFullscreen": true,
+  "IgnoreShortcutWhenBusy": false,
+  "AllowBreakthroughShortcut": false,
+  "PinnedCommands": [],
+  "AllowExternalReload": false,
+  "ProviderSettings": {
+    "Windows.Registry": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.websearch": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "WindowWalker": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.datetime": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.calculator": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.windowssettings": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "Bookmarks": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "Windows.Services": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.run": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.core": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.remotedesktop": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "PerformanceMonitor": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "AllApps": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "WinGet": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "com.microsoft.cmdpal.builtin.system": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "Windows.ClipboardHistory": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "WindowsTerminalProfiles": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "Files": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    },
+    "Microsoft.PowerToys.SparseApp_8wekyb3d8bbwe!PowerToys.CmdPalExtension!PowerToys": {
+      "IsEnabled": true,
+      "FallbackCommands": {},
+      "PinnedCommandIds": []
+    }
+  },
+  "FallbackRanks": [],
+  "Aliases": {
+    ":": {
+      "CommandId": "com.microsoft.cmdpal.registry",
+      "Alias": ":",
+      "IsDirect": true
+    },
+    ")": {
+      "CommandId": "com.microsoft.cmdpal.timedate",
+      "Alias": ")",
+      "IsDirect": true
+    },
+    "??": {
+      "CommandId": "com.microsoft.cmdpal.websearch",
+      "Alias": "??",
+      "IsDirect": true
+    },
+    "file ": {
+      "CommandId": "com.microsoft.indexer.fileSearch",
+      "Alias": "file",
+      "IsDirect": false
+    },
+    "$": {
+      "CommandId": "com.microsoft.cmdpal.windowsSettings",
+      "Alias": "$",
+      "IsDirect": true
+    },
+    "\u003C": {
+      "CommandId": "com.microsoft.cmdpal.windowwalker",
+      "Alias": "\u003C",
+      "IsDirect": true
+    },
+    "\u003E": {
+      "CommandId": "com.microsoft.cmdpal.shell",
+      "Alias": "\u003E",
+      "IsDirect": true
+    },
+    "=": {
+      "CommandId": "com.microsoft.cmdpal.calculator",
+      "Alias": "=",
+      "IsDirect": true
+    }
+  },
+  "CommandHotkeys": [],
+  "SummonOn": "ToMouse",
+  "DisableAnimations": true,
+  "LastWindowPosition": null,
+  "AutoGoHomeInterval": "-00:00:00.0010000",
+  "EscapeKeyBehaviorSetting": "ClearSearchFirstThenGoBack",
+  "EnableDock": false,
+  "DockSettings": {
+    "Side": "Top",
+    "DockSize": "Default",
+    "AlwaysOnTop": true,
+    "Backdrop": "Acrylic",
+    "Theme": "Default",
+    "ColorizationMode": "None",
+    "CustomThemeColor": {
+      "A": 0,
+      "R": 255,
+      "G": 255,
+      "B": 255
+    },
+    "CustomThemeColorIntensity": 100,
+    "BackgroundImageOpacity": 20,
+    "BackgroundImageBlurAmount": 0,
+    "BackgroundImageBrightness": 0,
+    "BackgroundImageFit": "Fill",
+    "BackgroundImagePath": null,
+    "StartBands": [
+      {
+        "ProviderId": "com.microsoft.cmdpal.builtin.core",
+        "CommandId": "com.microsoft.cmdpal.home",
+        "ShowTitles": null,
+        "ShowSubtitles": null
+      },
+      {
+        "ProviderId": "WinGet",
+        "CommandId": "com.microsoft.cmdpal.winget",
+        "ShowTitles": false,
+        "ShowSubtitles": null
+      }
+    ],
+    "CenterBands": [],
+    "EndBands": [
+      {
+        "ProviderId": "PerformanceMonitor",
+        "CommandId": "com.microsoft.cmdpal.performanceWidget",
+        "ShowTitles": null,
+        "ShowSubtitles": null
+      },
+      {
+        "ProviderId": "com.microsoft.cmdpal.builtin.datetime",
+        "CommandId": "com.microsoft.cmdpal.timedate.dockBand",
+        "ShowTitles": null,
+        "ShowSubtitles": null
+      }
+    ],
+    "ShowLabels": true,
+    "MonitorConfigs": []
+  },
+  "Theme": "Default",
+  "ColorizationMode": "None",
+  "CustomThemeColor": {
+    "A": 0,
+    "R": 255,
+    "G": 255,
+    "B": 255
+  },
+  "CustomThemeColorIntensity": 100,
+  "BackgroundImageTintIntensity": 0,
+  "BackgroundImageOpacity": 20,
+  "BackgroundImageBlurAmount": 0,
+  "BackgroundImageBrightness": 0,
+  "BackgroundImageFit": "Fill",
+  "BackgroundImagePath": null,
+  "BackdropStyle": "Acrylic",
+  "BackdropOpacity": 100,
+  "GalleryFeedUrl": null
+}

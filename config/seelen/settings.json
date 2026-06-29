@@ -1,0 +1,146 @@
+{
+  "activeIconPacks": [
+    "@system/icon-pack"
+  ],
+  "activeThemes": [
+    "@default/theme",
+    "@vineeth/macos-glass"
+  ],
+  "backupSyncEnabled": true,
+  "byTheme": {},
+  "byWallpaper": {},
+  "byWidget": {
+    "@seelen/fancy-toolbar": {
+      "$shortcuts": null,
+      "delayToHide": 800,
+      "delayToShow": 100,
+      "enabled": true,
+      "hideMode": "Never",
+      "itemSize": 16,
+      "margin": 0,
+      "padding": 8,
+      "position": "Top"
+    },
+    "@seelen/launcher": {
+      "enabled": true,
+      "monitor": "MouseOver",
+      "runners": [
+        {
+          "id": "RUN",
+          "label": "t:app_launcher.runners.explorer",
+          "program": "explorer.exe",
+          "readonly": true
+        },
+        {
+          "id": "CMD",
+          "label": "t:app_launcher.runners.cmd",
+          "program": "cmd.exe",
+          "readonly": true
+        }
+      ]
+    },
+    "@seelen/task-switcher": {
+      "enabled": false
+    },
+    "@seelen/wallpaper-manager": {
+      "$shortcuts": null,
+      "coveragePauseThreshold": 0.8,
+      "defaultCollection": "d4c8e9bd-30fb-4994-abf3-45b9f3d89ad3",
+      "deprecatedBgs": null,
+      "enabled": true,
+      "interval": 60,
+      "multimonitorBehaviour": "PerMonitor",
+      "randomize": false,
+      "useAccentColor": false
+    },
+    "@seelen/weg": {
+      "$shortcuts": null,
+      "delayToHide": 800,
+      "delayToShow": 100,
+      "enabled": true,
+      "hideMode": "Never",
+      "margin": 8,
+      "middleClickAction": "OpenNewInstance",
+      "mode": "MinContent",
+      "padding": 8,
+      "pinnedItemsVisibility": "Always",
+      "position": "Bottom",
+      "showEndTask": false,
+      "showInstanceCounter": true,
+      "showWindowTitle": false,
+      "size": 40,
+      "spaceBetweenItems": 8,
+      "splitWindows": false,
+      "temporalItemsVisibility": "All",
+      "visibleSeparators": true,
+      "zoomSize": 70
+    },
+    "@seelen/window-manager": {
+      "$shortcuts": null,
+      "animations": {
+        "durationMs": 200,
+        "easeFunction": "EaseOut",
+        "enabled": false
+      },
+      "autoStackingByCategory": true,
+      "border": {
+        "enabled": true,
+        "offset": 0.0,
+        "width": 3.0
+      },
+      "defaultLayout": "@default/wm-bspwm",
+      "dragBehavior": "Sort",
+      "enabled": false,
+      "floating": {
+        "height": 500.0,
+        "width": 800.0
+      },
+      "resizeDelta": 10.0,
+      "workspaceGap": 10,
+      "workspaceMargin": {
+        "bottom": 0,
+        "left": 0,
+        "right": 0,
+        "top": 0
+      },
+      "workspacePadding": 10
+    }
+  },
+  "dateFormat": "ddd HH:mm",
+  "devTools": false,
+  "drpc": false,
+  "hardwareAcceleration": true,
+  "language": "en",
+  "monitorsV3": {
+    "LGD07BF65441_00_07E8_84": {
+      "byWidget": {},
+      "byWorkspace": {},
+      "wallpaperCollection": null
+    }
+  },
+  "oldActiveThemes": [],
+  "performanceMode": {
+    "default": "Disabled",
+    "onBattery": "Minimal",
+    "onEnergySaver": "Extreme"
+  },
+  "pollingInterval": 3,
+  "startOfWeek": "Monday",
+  "streamingMode": false,
+  "suspendOnGameMode": false,
+  "unlockShortcuts": false,
+  "unstableOptimizations": false,
+  "updater": {
+    "channel": "Release"
+  },
+  "wallpaperCollections": [
+    {
+      "hidden": true,
+      "id": "d4c8e9bd-30fb-4994-abf3-45b9f3d89ad3",
+      "name": "Big Sur (Day)",
+      "wallpapers": [
+        "@user/xb03aed1f24f545fb9a6afb2b00139414"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+isReorderDisabled: false
+left:
+- id: macmakeover-apple-menu
+  scopes: []
+  template: 'return "Apple";'
+  tooltip: 'return "";'
+  badge: null
+  onClick: 'open("macmakeover-apple-menu:")'
+  onWheelUp: null
+  onWheelDown: null
+  style: {width: 30, minWidth: 30, maxWidth: 30, flexShrink: 0}
+  remoteData: {}
+- id: focused-app-name-codex
+  scopes:
+  - FocusedApp
+  template: 'if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || focusedApp.title || "").trim(); const title = (focusedApp.title || "").trim(); if (name === "Seelen UI" && /^(Fancy Toolbar|Dock\/Taskbar|Flyouts|User Menu|Power Menu)$/.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && title === "Apple Menu") return ""; return name || title;'
+  tooltip: 'if (typeof focusedApp === "undefined" || !focusedApp) return ""; return focusedApp.title || focusedApp.name || "";'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {maxWidth: 180}
+  remoteData: {}
+- id: focused-window-title-codex
+  scopes:
+  - FocusedApp
+  template: 'if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); if (name === "Seelen UI" && /^(Fancy Toolbar|Dock\/Taskbar|Flyouts|User Menu|Power Menu)$/.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && title === "Apple Menu") return ""; if (!title || title === name) return ""; return title;'
+  tooltip: 'if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; return focusedApp.title;'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {maxWidth: 250}
+  remoteData: {}
+center:
+- '@seelen/tb-calendar-popup'
+right:
+- id: 5f28a9a4-83d4-44ac-b7dd-69a651a44db1
+  scopes:
+  - Cpu
+  template: 'if (typeof cores === "undefined" || !cores.length) return ""; const used = cores.reduce((total, core) => total + core.usage, 0) / cores.length; return [icon("LuCpu"), " ", used.toFixed(0) + "%"];'
+  tooltip: 'if (typeof cores === "undefined" || !cores.length) return ""; const used = cores.reduce((total, core) => total + core.usage, 0) / cores.length; return "CPU: " + used.toFixed(0) + "%";'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {minWidth: 50}
+  remoteData: {}
+- id: 42f54665-c379-4f6b-86e4-9b42cbfc1e2d
+  scopes:
+  - Memory
+  template: 'if (typeof memory === "undefined") return ""; const units = ["B", "K", "M", "G", "T"]; let total = memory.total; let used = memory.total - memory.free; let unit = 0; while (total >= 1024 && unit < units.length - 1) { total /= 1024; used /= 1024; unit++; } return [icon("FaMemory"), " ", used.toFixed(0) + "/" + total.toFixed(0) + units[unit]];'
+  tooltip: 'if (typeof memory === "undefined") return ""; return "Memory: " + ((memory.total - memory.free) / 1073741824).toFixed(1) + " GB / " + (memory.total / 1073741824).toFixed(1) + " GB";'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {minWidth: 68}
+  remoteData: {}
+- id: 772bb39f-7bbb-4417-98ef-8150b798cd61
+  scopes:
+  - NetworkStatistics
+  template: 'if (typeof networkStatistics === "undefined") return ""; const fmt = (bits) => { const units = ["", "K", "M", "G"]; let value = bits; let unit = 0; while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++; } return value.toFixed(value >= 10 || unit === 0 ? 0 : 1) + units[unit]; }; const down = networkStatistics.reduce((total, net) => total + net.received, 0) * 8; const up = networkStatistics.reduce((total, net) => total + net.transmitted, 0) * 8; return ["↓" + fmt(down), " ", "↑" + fmt(up)];'
+  tooltip: 'if (typeof networkStatistics === "undefined") return ""; const down = networkStatistics.reduce((total, net) => total + net.received, 0) * 8; const up = networkStatistics.reduce((total, net) => total + net.transmitted, 0) * 8; return "Network: ↓ " + down.toFixed(0) + " bps, ↑ " + up.toFixed(0) + " bps";'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {minWidth: 72}
+  remoteData: {}
+- id: f3a7c1e2-9b4d-4e6a-8c1f-2d5e7a9b0c11
+  scopes:
+  - Power
+  template: 'if (typeof batteries === "undefined" || !batteries || !batteries.length) return ""; const b = batteries[0]; const charging = (typeof power !== "undefined" && power.acLineStatus === 1) || b.state === "charging"; if (!charging || b.percentage >= 100) return ""; const w = Math.round(b.energyRate || 0); if (w <= 0) return ""; return (w < 18 ? "slow " : "") + w + "W";'
+  tooltip: 'return (typeof batteries !== "undefined" && batteries.length) ? "Charge rate: " + Math.round(batteries[0].energyRate || 0) + " W" : ""'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {}
+  remoteData: {}
+- id: c947837b-128a-450c-a634-f215d5935aac
+  scopes:
+  - Power
+  template: 'if (typeof batteries === "undefined" || !batteries.length) return icon("TbPlugConnected"); const pct = Math.round(batteries.reduce((total, battery) => total + battery.percentage, 0) / batteries.length); const charging = (typeof power !== "undefined" && power.acLineStatus === 1) || batteries.some((battery) => battery.state === "charging"); const group = []; if (charging) { group.push(icon("BsLightningChargeFill")); group.push(" "); } group.push(pct > 90 ? icon("PiBatteryFullFill") : pct > 66 ? icon("PiBatteryHighFill") : pct > 33 ? icon("PiBatteryMediumFill") : pct > 5 ? icon("PiBatteryLowFill") : icon("PiBatteryWarning")); group.push(" "); group.push(pct + "%"); return group;'
+  tooltip: 'return (typeof batteries !== "undefined" && batteries.length) ? "Battery: " + Math.round(batteries.reduce((total, battery) => total + battery.percentage, 0) / batteries.length) + "%" : "Plugged in";'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {minWidth: 68}
+  remoteData: {}
+- '@seelen/tb-notifications'
+- '@seelen/tb-quick-settings'

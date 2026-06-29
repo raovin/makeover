@@ -1,0 +1,56 @@
+/* macOS Glass - frosted dock */
+.taskbar {
+  background-color: rgba(22, 26, 34, 0.58) !important;
+  backdrop-filter: blur(30px) saturate(1.9);
+  -webkit-backdrop-filter: blur(30px) saturate(1.9);
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  box-shadow:
+    0 20px 48px -16px rgba(0, 0, 0, 0.68),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.18);
+}
+
+.taskbar[data-has-margin="true"],
+.taskbar[data-size="min-content"] {
+  border-radius: 22px;
+}
+
+.taskbar[data-has-margin="true"] > .weg-items-container,
+.taskbar[data-size="min-content"] > .weg-items-container {
+  border-radius: 22px;
+}
+
+.weg-item {
+  background-color: transparent !important;
+  border-radius: 12px;
+  box-shadow: none !important;
+  overflow: visible !important;
+  transition:
+    background-color 0.16s ease,
+    filter 0.16s ease,
+    transform 0.16s ease !important;
+}
+
+.weg-item:hover {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  transform: translateY(-2px);
+}
+
+.weg-item:active {
+  transform: scale(0.94);
+}
+
+.weg-item:hover .weg-item-icon {
+  filter: brightness(1.08) saturate(1.12);
+}
+
+.weg-separator {
+  opacity: 0.42;
+}
+
+.weg-item-open-sign.weg-item-open-sign-active {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-radius: 999px;
+  height: 4px;
+  width: 4px;
+}

@@ -1,0 +1,194 @@
+isReorderDisabled: false
+left:
+- type: StartMenu
+  id: 05b9b140-0c4c-412f-a683-b71c21e9a174
+center:
+- type: AppOrFile
+  id: 8a5abe7d-fe1c-47fd-86ba-3fdccc67f7d7
+  displayName: Explorer
+  umid: null
+  path: C:\Windows\explorer.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Windows\explorer.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 528d95a0-3e1f-4aab-b85c-bebe63400132
+  displayName: Microsoft Teams
+  umid: MSTeams_8wekyb3d8bbwe!MSTeams
+  path: C:\Program Files\WindowsApps\MSTeams_26149.1205.4798.6437_x64__8wekyb3d8bbwe\ms-teams.exe
+  pinned: true
+  preventPinning: false
+  relaunch: null
+- type: AppOrFile
+  id: 6899418c-c5b3-4499-9b26-4e9e3585e0fe
+  displayName: Codex
+  umid: OpenAI.Codex_2p2nqsd0c76g0!App
+  path: C:\Program Files\WindowsApps\OpenAI.Codex_26.623.5546.0_x64__2p2nqsd0c76g0\app/Codex.exe
+  pinned: true
+  preventPinning: false
+  relaunch: null
+- type: AppOrFile
+  id: 227cf55f-ea92-42a5-8e39-0d1a724863ad
+  displayName: Claude
+  umid: Claude_pzs8sxrjxfjjc!Claude
+  path: C:\Program Files\WindowsApps\Claude_1.15962.1.0_x64__pzs8sxrjxfjjc\app\Claude.exe
+  pinned: true
+  preventPinning: false
+  relaunch: null
+- type: AppOrFile
+  id: cc956638-7369-45f8-94ab-dd35b87c6484
+  displayName: Brave
+  umid: null
+  path: C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: b99545c8-06ee-4b44-b6c7-8162b4bdcb90
+  displayName: Firefox
+  umid: null
+  path: C:\Program Files\Mozilla Firefox\firefox.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Program Files\Mozilla Firefox\firefox.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 5fdcc6f9-7d0a-47a1-87a0-daefdc474281
+  displayName: Google Chrome
+  umid: Chrome
+  path: C:\Program Files\Google\Chrome\Application\chrome.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Program Files\Google\Chrome\Application\chrome.exe
+    args: --profile-directory=Default
+    workingDir: null
+    icon: C:\Users\VineethRao\AppData\Local\Google\Chrome\User Data\Default\Google Profile.ico,0
+- type: AppOrFile
+  id: bf0d2784-7415-402f-bf9f-757242a8458e
+  displayName: Cursor
+  umid: null
+  path: C:\Users\VineethRao\AppData\Local\Programs\cursor\Cursor.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Users\VineethRao\AppData\Local\Programs\cursor\Cursor.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 5907e664-7a91-4ed2-92c5-4471031f467d
+  displayName: Sublime Text
+  umid: null
+  path: C:\Program Files\Sublime Text\sublime_text.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Program Files\Sublime Text\sublime_text.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: fe48f9ea-a03f-4b36-a17d-e8b1fb123049
+  displayName: JetBrains Rider 2026.1.1
+  umid: null
+  path: C:\Program Files\JetBrains\JetBrains Rider 2026.1.1\bin\rider64.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Program Files\JetBrains\JetBrains Rider 2026.1.1\bin\rider64.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 70052c32-914c-4a12-be06-0717fb577d78
+  displayName: Visual Studio
+  umid: null
+  path: C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\devenv.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\devenv.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 3144f5b7-d005-427b-a7af-872cae70f2ac
+  displayName: SQL Server Management Studio 22
+  umid: null
+  path: C:\Program Files\Microsoft SQL Server Management Studio 22\Release\Common7\IDE\SSMS.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Program Files\Microsoft SQL Server Management Studio 22\Release\Common7\IDE\SSMS.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 538247d9-97c0-4e35-b96f-8686893de342
+  displayName: Azure Storage Explorer
+  umid: null
+  path: C:\Users\VineethRao\AppData\Local\Programs\Microsoft Azure Storage Explorer\StorageExplorer.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Users\VineethRao\AppData\Local\Programs\Microsoft Azure Storage Explorer\StorageExplorer.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 6254435c-38e6-4f58-b4bb-1a6b624f7368
+  displayName: Service Bus Explorer
+  umid: null
+  path: C:\Users\VineethRao\Tools\ServiceBusExplorer\ServiceBusExplorer.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Users\VineethRao\Tools\ServiceBusExplorer\ServiceBusExplorer.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 9f9ae2d9-bef0-4bd8-993f-300684489c2a
+  displayName: Bruno
+  umid: null
+  path: C:\Users\VineethRao\AppData\Local\Programs\Bruno\Bruno.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Users\VineethRao\AppData\Local\Programs\Bruno\Bruno.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 6423be96-ea79-454a-9a1e-01973e5bf485
+  displayName: WireGuard
+  umid: null
+  path: C:\Program Files\WireGuard\wireguard.exe
+  pinned: true
+  preventPinning: false
+  relaunch:
+    command: C:\Program Files\WireGuard\wireguard.exe
+    args: null
+    workingDir: null
+    icon: null
+- type: AppOrFile
+  id: 3e7607d4-2157-4e87-a5c1-31383264f38a
+  displayName: Settings
+  umid: windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel
+  path: C:\Windows\System32\ApplicationFrameHost.exe
+  pinned: false
+  preventPinning: false
+  relaunch: null
+right: []

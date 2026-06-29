@@ -1,0 +1,10 @@
+# Keep the portable bundle clean.
+*.zip
+*.log
+*.bak
+*.bak*
+Thumbs.db
+
+# Local verification screenshots can be regenerated.
+qa/
+

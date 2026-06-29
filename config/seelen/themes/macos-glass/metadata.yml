@@ -1,0 +1,10 @@
+id: "@vineeth/macos-glass"
+metadata:
+  displayName: macOS Glass
+  description: Translucent frosted dock and menu bar, macOS style
+  tags:
+    - weg
+    - toolbar
+styles:
+  "@seelen/fancy-toolbar": !include styles/fancy-toolbar.css
+  "@seelen/weg": !include styles/weg.css
