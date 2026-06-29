@@ -191,14 +191,21 @@ internal sealed class MenuForm : Form
     private readonly Font _boldFont;
     private readonly Font _smallFont;
     private readonly Font _smallBoldFont;
+    private readonly int _logicalWidth;
+    private bool _anchorRight;
+    private int _logicalTop = 38;
+    private int _logicalMargin = 8;
     private DateTime _shownAt;
     private bool _wasLeftMouseDown;
     private int _hoverIndex = -1;
 
     private MenuForm(int width)
     {
-        AutoScaleMode = AutoScaleMode.Dpi;
+        // We scale every owner-drawn constant ourselves via LogicalToDeviceUnits, so the
+        // framework must NOT also auto-scale (that would double-apply DPI).
+        AutoScaleMode = AutoScaleMode.None;
         BackColor = _panel;
+        // Fonts are in points, so GDI already renders them at the correct physical size per DPI.
         _regularFont = new Font("Segoe UI", 9.7F, FontStyle.Regular, GraphicsUnit.Point);
         _boldFont = new Font("Segoe UI", 9.8F, FontStyle.Bold, GraphicsUnit.Point);
         _smallFont = new Font("Segoe UI", 8.3F, FontStyle.Regular, GraphicsUnit.Point);
@@ -208,8 +215,7 @@ internal sealed class MenuForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        Width = width;
-        Padding = new Padding(10);
+        _logicalWidth = width;
         KeyPreview = true;
         DoubleBuffered = true;
 
@@ -230,6 +236,22 @@ internal sealed class MenuForm : Form
         };
     }
 
+    // All size/position math depends on DeviceDpi, which is only correct once the handle exists.
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Padding = new Padding(LogicalToDeviceUnits(10));
+        Width = LogicalToDeviceUnits(_logicalWidth);
+        FitHeight();
+
+        var screen = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1200);
+        var x = _anchorRight
+            ? screen.Right - Width - LogicalToDeviceUnits(_logicalMargin)
+            : screen.Left + LogicalToDeviceUnits(_logicalMargin);
+        var top = screen.Top + LogicalToDeviceUnits(_logicalTop);
+        Location = new Point(x, top);
+    }
+
     protected override void OnPaintBackground(PaintEventArgs e)
     {
         using var brush = new SolidBrush(_panel);
@@ -246,7 +268,8 @@ internal sealed class MenuForm : Form
         for (var i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i];
-            var rect = new Rectangle(Padding.Left, y, ClientSize.Width - Padding.Horizontal, row.Height);
+            var height = LogicalToDeviceUnits(row.Height);
+            var rect = new Rectangle(Padding.Left, y, ClientSize.Width - Padding.Horizontal, height);
 
             switch (row.Kind)
             {
@@ -260,7 +283,7 @@ internal sealed class MenuForm : Form
                     using (var pen = new Pen(_separator))
                     {
                         var lineY = rect.Top + (rect.Height / 2);
-                        e.Graphics.DrawLine(pen, rect.Left + 8, lineY, rect.Right - 8, lineY);
+                        e.Graphics.DrawLine(pen, rect.Left + LogicalToDeviceUnits(8), lineY, rect.Right - LogicalToDeviceUnits(8), lineY);
                     }
                     break;
                 default:
@@ -268,7 +291,7 @@ internal sealed class MenuForm : Form
                     break;
             }
 
-            y += row.Height;
+            y += height;
         }
     }
 
@@ -308,9 +331,8 @@ internal sealed class MenuForm : Form
 
     public static MenuForm CreateApple()
     {
-        var form = new MenuForm(352);
+        var form = new MenuForm(248);
         form.Text = "Apple Menu";
-        form.Location = new Point(8, 38);
         form.AddItem("About This Mac", () => Start("msinfo32.exe"));
         form.AddSeparator();
         form.AddItem("System Settings...", () => Start("ms-settings:"));
@@ -325,17 +347,15 @@ internal sealed class MenuForm : Form
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
         form.AddSeparator();
         form.AddItem("Lock Screen", () => Start("rundll32.exe", "user32.dll,LockWorkStation"));
-        form.AddItem($"Log Out {Environment.UserName}...", () => Confirm("Log Out", "Sign out now?", "shutdown.exe", "/l"));
-        form.FitHeight();
+        form.AddItem($"Log Out {FriendlyUserName()}...", () => Confirm("Log Out", "Sign out now?", "shutdown.exe", "/l"));
         return form;
     }
 
     public static MenuForm CreateControlCenter()
     {
-        var form = new MenuForm(348);
+        var form = new MenuForm(264);
         form.Text = "Control Center";
-        var screen = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1280, 800);
-        form.Location = new Point(screen.Right - form.Width - 8, 38);
+        form._anchorRight = true;
         form.AddHeader("Control Center", GetBatterySummary());
         form.AddCard("Power & Battery Settings", "Open Windows power settings", () => Start("ms-settings:powersleep"));
         form.AddCard("System Settings", "Open Windows settings", () => Start("ms-settings:"));
@@ -344,18 +364,23 @@ internal sealed class MenuForm : Form
         form.AddItem("Sleep", () => Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
-        form.FitHeight();
         return form;
+    }
+
+    private static string FriendlyUserName()
+    {
+        var name = Environment.UserName;
+        return name.Equals("VineethRao", StringComparison.OrdinalIgnoreCase) ? "Vineeth Rao" : name;
     }
 
     private void AddHeader(string title, string detail)
     {
-        _rows.Add(new MenuRow(MenuRowKind.Header, title, detail, string.Empty, null, 48));
+        _rows.Add(new MenuRow(MenuRowKind.Header, title, detail, string.Empty, null, 52));
     }
 
     private void AddCard(string label, string detail, Action action)
     {
-        _rows.Add(new MenuRow(MenuRowKind.Card, label, detail, string.Empty, action, 48));
+        _rows.Add(new MenuRow(MenuRowKind.Card, label, detail, string.Empty, action, 52));
     }
 
     private void AddItem(string label, Action? action, string shortcut = "")
@@ -365,12 +390,12 @@ internal sealed class MenuForm : Form
 
     private void AddSeparator()
     {
-        _rows.Add(new MenuRow(MenuRowKind.Separator, string.Empty, string.Empty, string.Empty, null, 10));
+        _rows.Add(new MenuRow(MenuRowKind.Separator, string.Empty, string.Empty, string.Empty, null, 11));
     }
 
     private void FitHeight()
     {
-        ClientSize = new Size(Width, _rows.Sum(row => row.Height) + Padding.Vertical);
+        ClientSize = new Size(Width, _rows.Sum(row => LogicalToDeviceUnits(row.Height)) + Padding.Vertical);
     }
 
     private int HitTest(Point point)
@@ -379,9 +404,10 @@ internal sealed class MenuForm : Form
         for (var i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i];
-            var rect = new Rectangle(Padding.Left, y, ClientSize.Width - Padding.Horizontal, row.Height);
+            var height = LogicalToDeviceUnits(row.Height);
+            var rect = new Rectangle(Padding.Left, y, ClientSize.Width - Padding.Horizontal, height);
             if (rect.Contains(point)) return i;
-            y += row.Height;
+            y += height;
         }
 
         return -1;
@@ -389,43 +415,43 @@ internal sealed class MenuForm : Form
 
     private void DrawHeader(Graphics graphics, Rectangle rect, MenuRow row)
     {
-        var titleRect = new Rectangle(rect.Left + 10, rect.Top + 4, rect.Width - 20, 22);
-        var detailRect = new Rectangle(rect.Left + 10, rect.Top + 25, rect.Width - 20, 18);
+        var titleRect = new Rectangle(rect.Left + LogicalToDeviceUnits(10), rect.Top + LogicalToDeviceUnits(5), rect.Width - LogicalToDeviceUnits(20), LogicalToDeviceUnits(24));
+        var detailRect = new Rectangle(rect.Left + LogicalToDeviceUnits(10), rect.Top + LogicalToDeviceUnits(28), rect.Width - LogicalToDeviceUnits(20), LogicalToDeviceUnits(20));
         TextRenderer.DrawText(graphics, row.Label, _boldFont, titleRect, _primaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         TextRenderer.DrawText(graphics, row.Detail, _smallFont, detailRect, _secondaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
     }
 
     private void DrawCard(Graphics graphics, Rectangle rect, MenuRow row, bool hovered)
     {
-        var cardRect = Rectangle.Inflate(rect, -2, -3);
+        var cardRect = Rectangle.Inflate(rect, -LogicalToDeviceUnits(2), -LogicalToDeviceUnits(3));
         using (var brush = new SolidBrush(hovered ? _cardHover : _card))
-        using (var path = RoundedRect(cardRect, 8))
+        using (var path = RoundedRect(cardRect, LogicalToDeviceUnits(8)))
         {
             graphics.FillPath(brush, path);
         }
 
-        var titleRect = new Rectangle(cardRect.Left + 12, cardRect.Top + 6, cardRect.Width - 24, 18);
-        var detailRect = new Rectangle(cardRect.Left + 12, cardRect.Top + 24, cardRect.Width - 24, 16);
+        var titleRect = new Rectangle(cardRect.Left + LogicalToDeviceUnits(12), cardRect.Top + LogicalToDeviceUnits(6), cardRect.Width - LogicalToDeviceUnits(24), LogicalToDeviceUnits(20));
+        var detailRect = new Rectangle(cardRect.Left + LogicalToDeviceUnits(12), cardRect.Top + LogicalToDeviceUnits(26), cardRect.Width - LogicalToDeviceUnits(24), LogicalToDeviceUnits(18));
         TextRenderer.DrawText(graphics, row.Label, _smallBoldFont, titleRect, _primaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         TextRenderer.DrawText(graphics, row.Detail, _smallFont, detailRect, _secondaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
     }
 
     private void DrawItem(Graphics graphics, Rectangle rect, MenuRow row, bool hovered)
     {
-        var rowRect = Rectangle.Inflate(rect, -2, -2);
+        var rowRect = Rectangle.Inflate(rect, -LogicalToDeviceUnits(2), -LogicalToDeviceUnits(2));
         if (hovered && row.Action is not null)
         {
             using var brush = new SolidBrush(_hover);
-            using var path = RoundedRect(rowRect, 6);
+            using var path = RoundedRect(rowRect, LogicalToDeviceUnits(6));
             graphics.FillPath(brush, path);
         }
 
-        var textRect = new Rectangle(rowRect.Left + 12, rowRect.Top, rowRect.Width - 24, rowRect.Height);
+        var textRect = new Rectangle(rowRect.Left + LogicalToDeviceUnits(12), rowRect.Top, rowRect.Width - LogicalToDeviceUnits(24), rowRect.Height);
         if (!string.IsNullOrWhiteSpace(row.Shortcut))
         {
-            var shortcutWidth = row.Shortcut == ">" ? 24 : 136;
-            var shortcutRect = new Rectangle(rowRect.Right - shortcutWidth - 12, rowRect.Top, shortcutWidth, rowRect.Height);
-            textRect.Width -= shortcutWidth + 18;
+            var shortcutWidth = LogicalToDeviceUnits(row.Shortcut == ">" ? 24 : 96);
+            var shortcutRect = new Rectangle(rowRect.Right - shortcutWidth - LogicalToDeviceUnits(12), rowRect.Top, shortcutWidth, rowRect.Height);
+            textRect.Width -= shortcutWidth + LogicalToDeviceUnits(18);
             TextRenderer.DrawText(graphics, row.Shortcut, _smallFont, shortcutRect, _secondaryText, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
 
