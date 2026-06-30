@@ -6,6 +6,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Single-instance guard: only one hot-corners helper may poll the mouse. A second copy
+# (e.g. the Startup shortcut plus a manual launch) makes every menu/corner click fire
+# twice, which flickers the Apple/Control Center popovers open-then-closed. Held for the
+# process lifetime; Windows releases the named mutex when this process exits.
+$hotCornerCreatedNew = $false
+$script:HotCornerMutex = New-Object System.Threading.Mutex($true, "Local\MacMakeoverHotCorners", [ref]$hotCornerCreatedNew)
+if (-not $hotCornerCreatedNew) { exit }
+
 Add-Type -AssemblyName System.Windows.Forms
 
 $signature = @"
