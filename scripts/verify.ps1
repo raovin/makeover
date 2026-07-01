@@ -166,6 +166,16 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
+  if ($toolbarRaw -notmatch 'macmakeover-notifications' -or $toolbarRaw -notmatch 'LuBell') {
+    Write-Warning "Top-bar notification bell is missing. It should be a separate click target from Control Center."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarRaw -notmatch '@seelen/tb-calendar-popup' -or $toolbarRaw -notmatch '(?s)right:\s*.*@seelen/tb-calendar-popup') {
+    Write-Warning "Date/time should live on the right side of the menu bar, macOS-style."
+    $VerificationFailed = $true
+  }
+
   if ($toolbarRaw -match 'return \[icon\("LuWifi"\), " ", "↓"') {
     Write-Warning "Top-bar Wi-Fi has expanded back into a throughput readout. Keep the MacBook-style right-side cluster compact."
     $VerificationFailed = $true
@@ -174,7 +184,7 @@ if (Test-Path -LiteralPath $ToolbarPath) {
 
 if (Test-Path -LiteralPath $ThemePath) {
   $toolbarCss = Get-Content -LiteralPath $ThemePath -Raw
-  if ($toolbarCss -notmatch '\.ft-bar-right:hover' -or $toolbarCss -notmatch 'Single MacBook-style status strip') {
+  if ($toolbarCss -notmatch 'One shared Control Center affordance' -or $toolbarCss -notmatch '\.ft-bar-right:has') {
     Write-Warning "Right-side status items should be styled as one shared status strip, not separate button-like icons."
     $VerificationFailed = $true
   }
@@ -212,6 +222,16 @@ if (Test-Path -LiteralPath $HotCornersConfigPath) {
 
   if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("controlCenterStatusZoneLeftOffset")) {
     Write-Warning "Top-right status strip click zone is missing. The visible grouped status strip should open one shared Control Center."
+    $VerificationFailed = $true
+  }
+
+  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("notificationCenterZoneLeftOffset")) {
+    Write-Warning "Notification Center click zone is missing. The bell should not open Control Center."
+    $VerificationFailed = $true
+  }
+
+  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("calendarPopupZoneLeftOffset")) {
+    Write-Warning "Calendar/date click zone is missing. Date clicks should dismiss custom panels before opening the calendar."
     $VerificationFailed = $true
   }
 }

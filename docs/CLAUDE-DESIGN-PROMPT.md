@@ -40,7 +40,8 @@ Current intended behavior:
 - Top-left Apple mark opens a compact Apple menu quickly.
 - Clicking the Apple mark must not open a terminal window.
 - Top-right status strip opens the custom MenuHost Control Center, not Seelen's old quick-settings or power-options flyout.
-- The right-side status strip is one shared information/control area, so it should visually read as one combined control rather than several separate fake buttons.
+- The compact Wi-Fi/battery/sliders status strip is one shared Control Center area, so those three items should visually read as one combined control rather than several separate fake buttons.
+- The notification bell and date/time are separate controls and should not visually merge into the Control Center strip.
 - Wi-Fi/network belongs in the MacBook-style right-side status area.
 - Battery and charging should be presented as one combined status item, not two unrelated icons.
 - Throughput/readout clutter should not live in the top bar unless the design makes it genuinely elegant.
@@ -83,7 +84,9 @@ Verification requirements before saying done:
 - Inspect the saved full screenshot plus the top and bottom crops under qa\.
 - Test real interactions, not just static screenshots:
   - Apple mark opens the Apple menu quickly and without a terminal.
-  - Left, center, and right parts of the status strip open the same custom Control Center.
+  - Wi-Fi, battery, and sliders open the same custom Control Center.
+  - The bell opens Notification Center instead of Control Center.
+  - Date/time opens the calendar popup and does not leave Control Center underneath it.
   - The top-right Control Center does not show Seelen's old power/options flyout.
   - Top-left and top-right physical corner clicks still Show Desktop.
   - Alt+Tab is still native Windows Alt+Tab.
@@ -105,4 +108,3 @@ Expected final response:
 
 Do not claim the task is done unless the live visual and interaction QA above has actually been performed.
 ```
-

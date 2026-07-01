@@ -48,9 +48,8 @@ Check:
 - Top menu bar is visible.
 - Apple-style mark appears on the left.
 - Focused app name does not overlap.
-- Clock is centered.
-- Right-side stats are legible.
+- CPU/memory/network telemetry is centered.
+- The right-side Wi-Fi/battery/Control Center strip, notification bell, and date/time are legible and distinct.
 - Dock is visible at the bottom.
 - Native Windows Alt+Tab works normally.
 - Lock screen PIN entry works normally.
-

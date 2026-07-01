@@ -33,8 +33,6 @@ left:
   style: {maxWidth: 250}
   remoteData: {}
 center:
-- '@seelen/tb-calendar-popup'
-right:
 - id: 5f28a9a4-83d4-44ac-b7dd-69a651a44db1
   scopes:
   - Cpu
@@ -60,8 +58,19 @@ right:
 - id: 772bb39f-7bbb-4417-98ef-8150b798cd61
   scopes:
   - NetworkStatistics
-  template: 'return icon("LuWifi");'
+  template: 'if (typeof networkStatistics === "undefined") return [icon("LuArrowDownUp"), " 0"]; const down = networkStatistics.reduce((total, net) => total + net.received, 0) * 8; const up = networkStatistics.reduce((total, net) => total + net.transmitted, 0) * 8; const fmt = (value) => { const units = ["b", "K", "M", "G"]; let n = value; let unit = 0; while (n >= 1000 && unit < units.length - 1) { n /= 1000; unit++; } return (unit === 0 || n >= 10 ? n.toFixed(0) : n.toFixed(1)) + units[unit]; }; return [icon("LuArrowDownUp"), " ", "↓" + fmt(down) + " ↑" + fmt(up)];'
   tooltip: 'if (typeof networkStatistics === "undefined") return "Network"; const down = networkStatistics.reduce((total, net) => total + net.received, 0) * 8; const up = networkStatistics.reduce((total, net) => total + net.transmitted, 0) * 8; return "Network: ↓ " + down.toFixed(0) + " bps, ↑ " + up.toFixed(0) + " bps";'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {minWidth: 104}
+  remoteData: {}
+right:
+- id: macmakeover-network-status
+  scopes: []
+  template: 'return icon("LuWifi");'
+  tooltip: 'return "";'
   badge: null
   onClick: null
   onWheelUp: null
@@ -79,7 +88,6 @@ right:
   onWheelDown: null
   style: {minWidth: 68}
   remoteData: {}
-- '@seelen/tb-notifications'
 - id: macmakeover-control-center
   scopes: []
   template: 'return icon("LuSlidersHorizontal");'
@@ -90,3 +98,14 @@ right:
   onWheelDown: null
   style: {width: 28, minWidth: 28, maxWidth: 28, flexShrink: 0}
   remoteData: {}
+- id: macmakeover-notifications
+  scopes: []
+  template: 'return icon("LuBell");'
+  tooltip: 'return "";'
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style: {width: 28, minWidth: 28, maxWidth: 28, flexShrink: 0}
+  remoteData: {}
+- '@seelen/tb-calendar-popup'

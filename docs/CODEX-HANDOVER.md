@@ -32,7 +32,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 - The top-left Apple icon should behave like macOS: it should open a compact Apple menu directly, not a big Seelen user drawer and not a terminal.
 - The top-right status strip should open the custom Control Center directly, not Seelen's old power/options screen.
 - The dock should stay rich; the user previously said there is no need to trim it.
-- The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered clock, and a single MacBook-style status strip on the right.
+- The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered CPU/memory/network telemetry, and a MacBook-style right side with Wi-Fi/battery/Control Center, a separate notification bell, and date/time at the far right.
 - No visible overlap, clipped text, ghost tooltips, ugly separator lines, or accidental title pollution such as `Windows PowerShell / Apple Menu`.
 - Alt+Tab should remain native Windows Alt+Tab. Do not revive Seelen task-switcher shortcuts.
 - Lock-screen PIN entry previously broke during shortcut/task-switcher experiments. Keep Seelen shortcuts disabled.
@@ -335,9 +335,9 @@ Top picks:
 
 2. Top bar polish
    - Make the focused app label more Mac-like: app name only, no noisy title unless useful.
-   - Keep the clock visually centered even when right-side metrics widen.
-   - Ensure long app names do not overlap the center clock.
-   - Keep right-side status readable but less dense if numbers expand.
+   - Keep the centered CPU/memory/network telemetry visually centered even when right-side items widen.
+   - Ensure long app names do not overlap the center telemetry.
+   - Keep right-side Wi-Fi/battery/Control Center, notification bell, and date/time visually distinct because they now have different click behavior.
    - Preserve the custom Control Center; do not fall back to Seelen's quick-settings flyout.
 
 3. Dock polish

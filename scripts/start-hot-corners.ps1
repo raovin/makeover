@@ -70,14 +70,22 @@ function Read-HotCornerConfig {
     appleMenuClickCooldownMilliseconds = 300
     controlCenterClickEnabled = $true
     topBarClickHeight = 40
-    controlCenterStatusZoneLeftOffset = 500
-    controlCenterStatusZoneRightOffset = 8
+    controlCenterStatusZoneLeftOffset = 355
+    controlCenterStatusZoneRightOffset = 188
     controlCenterRightButtonWidth = 72
     controlCenterNetworkZoneLeftOffset = 370
     controlCenterNetworkZoneRightOffset = 245
     controlCenterPowerZoneLeftOffset = 245
     controlCenterPowerZoneRightOffset = 125
     controlCenterClickCooldownMilliseconds = 300
+    notificationCenterClickEnabled = $true
+    notificationCenterZoneLeftOffset = 186
+    notificationCenterZoneRightOffset = 140
+    notificationCenterClickCooldownMilliseconds = 300
+    calendarPopupClickEnabled = $true
+    calendarPopupZoneLeftOffset = 138
+    calendarPopupZoneRightOffset = 24
+    calendarPopupClickCooldownMilliseconds = 300
     topLeft = "None"
     topRight = "None"
     bottomLeft = "ShowDesktop"
@@ -139,6 +147,7 @@ function Invoke-HotCornerAction {
     "Lock" { Start-Process -FilePath "$env:windir\System32\rundll32.exe" -ArgumentList "user32.dll,LockWorkStation" }
     "Sleep" { Start-Process -FilePath "$env:windir\System32\rundll32.exe" -ArgumentList "powrprof.dll,SetSuspendState 0,1,0" }
     "ClipboardHistory" { Send-Hotkey ([byte[]](0x5B, 0x56)) }
+    "NotificationCenter" { Send-Hotkey ([byte[]](0x5B, 0x4E)) }
     default { Write-HotCornerLog $Config "Unknown action '$Action' ignored." }
   }
 }
@@ -279,9 +288,15 @@ function Start-MacMakeoverMenuHost {
   param([object]$Config)
 
   if (-not (Build-MacMakeoverMenuHost -Config $Config)) { return $false }
+  if (Get-Process -Name "MacMakeover.MenuHost" -ErrorAction SilentlyContinue) { return $true }
 
   try {
-    Start-Process -FilePath $script:MenuHostExePath -WindowStyle Hidden | Out-Null
+    $process = Start-Process -FilePath $script:MenuHostExePath -WindowStyle Hidden -PassThru
+    Start-Sleep -Milliseconds 180
+    if ($process.HasExited) {
+      Write-HotCornerLog $Config "MenuHost exited during startup with code $($process.ExitCode)."
+      return $false
+    }
     return $true
   } catch {
     Write-HotCornerLog $Config "MenuHost start failed: $($_.Exception.Message)"
@@ -291,7 +306,7 @@ function Start-MacMakeoverMenuHost {
 
 function Send-MacMakeoverMenuHostCommand {
   param(
-    [ValidateSet("apple", "control")]
+    [ValidateSet("apple", "control", "close")]
     [string]$Command,
     [object]$Config
   )
@@ -324,6 +339,12 @@ function Send-MacMakeoverMenuHostCommand {
 
   Write-HotCornerLog $Config "MenuHost command '$Command' failed after retries."
   return $false
+}
+
+function Close-MacMakeoverMenuHostPanels {
+  param([object]$Config)
+
+  Send-MacMakeoverMenuHostCommand -Command "close" -Config $Config | Out-Null
 }
 
 function Start-MacMakeoverMenu {
@@ -394,16 +415,57 @@ function Test-ControlCenterClickZone {
 
   $statusZoneLeft = $right - [int]$Config.controlCenterStatusZoneLeftOffset
   $statusZoneRight = $right - [int]$Config.controlCenterStatusZoneRightOffset
-  $inStatusZone = $X -ge $statusZoneLeft -and $X -le $statusZoneRight
-  $inRightButton = $X -ge ($right - [int]$Config.controlCenterRightButtonWidth)
-  $networkZoneLeft = $right - [int]$Config.controlCenterNetworkZoneLeftOffset
-  $networkZoneRight = $right - [int]$Config.controlCenterNetworkZoneRightOffset
-  $inNetworkZone = $X -ge $networkZoneLeft -and $X -le $networkZoneRight
-  $powerZoneLeft = $right - [int]$Config.controlCenterPowerZoneLeftOffset
-  $powerZoneRight = $right - [int]$Config.controlCenterPowerZoneRightOffset
-  $inPowerZone = $X -ge $powerZoneLeft -and $X -le $powerZoneRight
+  return $X -ge $statusZoneLeft -and $X -le $statusZoneRight
+}
 
-  return $inStatusZone -or $inRightButton -or $inNetworkZone -or $inPowerZone
+function Test-NotificationCenterClickZone {
+  param(
+    [int]$X,
+    [int]$Y,
+    [System.Drawing.Rectangle]$Bounds,
+    [object]$Config
+  )
+
+  if (-not $Config.notificationCenterClickEnabled) { return $false }
+  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+
+  $right = $Bounds.Right - 1
+  $top = $Bounds.Top
+  $cornerSize = [int]$Config.clickCornerSize
+
+  # Preserve the exact physical corner for Show Desktop.
+  if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
+    return $false
+  }
+
+  $notificationZoneLeft = $right - [int]$Config.notificationCenterZoneLeftOffset
+  $notificationZoneRight = $right - [int]$Config.notificationCenterZoneRightOffset
+  return $X -ge $notificationZoneLeft -and $X -le $notificationZoneRight
+}
+
+function Test-CalendarPopupClickZone {
+  param(
+    [int]$X,
+    [int]$Y,
+    [System.Drawing.Rectangle]$Bounds,
+    [object]$Config
+  )
+
+  if (-not $Config.calendarPopupClickEnabled) { return $false }
+  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+
+  $right = $Bounds.Right - 1
+  $top = $Bounds.Top
+  $cornerSize = [int]$Config.clickCornerSize
+
+  # Preserve the exact physical corner for Show Desktop.
+  if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
+    return $false
+  }
+
+  $calendarZoneLeft = $right - [int]$Config.calendarPopupZoneLeftOffset
+  $calendarZoneRight = $right - [int]$Config.calendarPopupZoneRightOffset
+  return $X -ge $calendarZoneLeft -and $X -le $calendarZoneRight
 }
 
 function Get-CornerAtPoint {
@@ -441,6 +503,8 @@ $enteredAt = Get-Date
 $lastTriggered = @{}
 $lastClickTriggered = @{}
 $lastControlCenterClick = [datetime]::MinValue
+$lastNotificationCenterClick = [datetime]::MinValue
+$lastCalendarPopupClick = [datetime]::MinValue
 $lastAppleMenuClick = [datetime]::MinValue
 $wasLeftMouseDown = $false
 
@@ -463,6 +527,25 @@ while ($true) {
         Write-HotCornerLog $config "TopBar click -> AppleMenu"
         Start-MacMakeoverMenu -Command "apple" -Config $config
         $lastAppleMenuClick = $now
+      }
+    }
+
+    if ($leftMousePressed -and (Test-NotificationCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+      $notificationCenterCooldownElapsed = ($now - $lastNotificationCenterClick).TotalMilliseconds -ge [int]$config.notificationCenterClickCooldownMilliseconds
+      if ($notificationCenterCooldownElapsed) {
+        Write-HotCornerLog $config "TopBar click -> NotificationCenter"
+        Close-MacMakeoverMenuHostPanels -Config $config
+        Invoke-HotCornerAction -Action "NotificationCenter" -Config $config
+        $lastNotificationCenterClick = $now
+      }
+    }
+
+    if ($leftMousePressed -and (Test-CalendarPopupClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+      $calendarPopupCooldownElapsed = ($now - $lastCalendarPopupClick).TotalMilliseconds -ge [int]$config.calendarPopupClickCooldownMilliseconds
+      if ($calendarPopupCooldownElapsed) {
+        Write-HotCornerLog $config "TopBar click -> CalendarPopup"
+        Close-MacMakeoverMenuHostPanels -Config $config
+        $lastCalendarPopupClick = $now
       }
     }
 
