@@ -30,7 +30,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 ## User Preferences And Recent Corrections
 
 - The top-left Apple icon should behave like macOS: it should open a compact Apple menu directly, not a big Seelen user drawer and not a terminal.
-- The top-right sliders icon and power/battery widgets should open the custom Control Center directly, not Seelen's old power/options screen.
+- The top-right network, sliders, and power/battery widgets should open the custom Control Center directly, not Seelen's old power/options screen.
 - The dock should stay rich; the user previously said there is no need to trim it.
 - The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered clock, status widgets on the right.
 - No visible overlap, clipped text, ghost tooltips, ugly separator lines, or accidental title pollution such as `Windows PowerShell / Apple Menu`.
@@ -181,6 +181,7 @@ C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacControlCenter.ps1
 The current Control Center includes:
 
 - Power & Battery Settings
+- Network Settings
 - System Settings
 - Show Desktop
 - Lock Screen

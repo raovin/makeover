@@ -358,6 +358,7 @@ internal sealed class MenuForm : Form
         form._anchorRight = true;
         form.AddHeader("Control Center", GetBatterySummary());
         form.AddCard("Power & Battery Settings", "Open Windows power settings", () => Start("ms-settings:powersleep"));
+        form.AddCard("Network Settings", "Open Network & Internet settings", () => Start("ms-settings:network-status"));
         form.AddCard("System Settings", "Open Windows settings", () => Start("ms-settings:"));
         form.AddItem("Show Desktop", ToggleDesktop);
         form.AddItem("Lock Screen", () => Start("rundll32.exe", "user32.dll,LockWorkStation"));

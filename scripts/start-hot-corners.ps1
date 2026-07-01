@@ -71,6 +71,8 @@ function Read-HotCornerConfig {
     controlCenterClickEnabled = $true
     topBarClickHeight = 40
     controlCenterRightButtonWidth = 72
+    controlCenterNetworkZoneLeftOffset = 370
+    controlCenterNetworkZoneRightOffset = 245
     controlCenterPowerZoneLeftOffset = 245
     controlCenterPowerZoneRightOffset = 125
     controlCenterClickCooldownMilliseconds = 300
@@ -389,11 +391,14 @@ function Test-ControlCenterClickZone {
   }
 
   $inRightButton = $X -ge ($right - [int]$Config.controlCenterRightButtonWidth)
+  $networkZoneLeft = $right - [int]$Config.controlCenterNetworkZoneLeftOffset
+  $networkZoneRight = $right - [int]$Config.controlCenterNetworkZoneRightOffset
+  $inNetworkZone = $X -ge $networkZoneLeft -and $X -le $networkZoneRight
   $powerZoneLeft = $right - [int]$Config.controlCenterPowerZoneLeftOffset
   $powerZoneRight = $right - [int]$Config.controlCenterPowerZoneRightOffset
   $inPowerZone = $X -ge $powerZoneLeft -and $X -le $powerZoneRight
 
-  return $inRightButton -or $inPowerZone
+  return $inRightButton -or $inNetworkZone -or $inPowerZone
 }
 
 function Get-CornerAtPoint {

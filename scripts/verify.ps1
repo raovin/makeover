@@ -155,6 +155,20 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     Write-Warning "Top-bar battery/control tooltips are enabled. They can overlap the custom Control Center popover."
     $VerificationFailed = $true
   }
+
+  if ($toolbarRaw -notmatch 'LuWifi') {
+    Write-Warning "Top-bar network affordance is missing. Keep the Wi-Fi/network glyph visible beside throughput numbers."
+    $VerificationFailed = $true
+  }
+}
+
+$menuHostSourcePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\Program.cs"
+if (Test-Path -LiteralPath $menuHostSourcePath) {
+  $menuHostSource = Get-Content -LiteralPath $menuHostSourcePath -Raw
+  if ($menuHostSource -notmatch 'Network Settings' -or $menuHostSource -notmatch 'ms-settings:network-status') {
+    Write-Warning "MenuHost Control Center is missing the Network Settings action."
+    $VerificationFailed = $true
+  }
 }
 
 if (Test-Path -LiteralPath $HotCornersConfigPath) {

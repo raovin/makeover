@@ -135,6 +135,7 @@ function Invoke-ControlAction {
     switch ($Action) {
       "settings" { Start-Uri "ms-settings:" }
       "battery" { Start-Uri "ms-settings:powersleep" }
+      "network" { Start-Uri "ms-settings:network-status" }
       "desktop" { (New-Object -ComObject Shell.Application).ToggleDesktop() }
       "lock" { Start-Tool "$env:SystemRoot\System32\rundll32.exe" @("user32.dll,LockWorkStation") }
       "sleep" { Start-Tool "$env:SystemRoot\System32\rundll32.exe" @("powrprof.dll,SetSuspendState", "0,1,0") }
@@ -298,6 +299,7 @@ function Add-CompactAction {
 Add-Text "Control Center" 15 ([System.Windows.FontWeights]::SemiBold) $textBrush
 Add-Text (Get-BatterySummary) 11 ([System.Windows.FontWeights]::Normal) $mutedBrush
 Add-ActionRow "Power & Battery Settings" "Open Windows power settings" "battery"
+Add-ActionRow "Network Settings" "Open Network & Internet settings" "network"
 Add-ActionRow "System Settings" "Open Windows settings" "settings"
 Add-CompactAction "Show Desktop" "desktop"
 Add-CompactAction "Lock Screen" "lock"

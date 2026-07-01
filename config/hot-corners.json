@@ -18,6 +18,8 @@
   "controlCenterClickEnabled": true,
   "topBarClickHeight": 40,
   "controlCenterRightButtonWidth": 72,
+  "controlCenterNetworkZoneLeftOffset": 370,
+  "controlCenterNetworkZoneRightOffset": 245,
   "controlCenterPowerZoneLeftOffset": 245,
   "controlCenterPowerZoneRightOffset": 125,
   "controlCenterClickCooldownMilliseconds": 300,
