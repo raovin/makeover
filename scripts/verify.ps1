@@ -157,7 +157,12 @@ if (Test-Path -LiteralPath $ToolbarPath) {
   }
 
   if ($toolbarRaw -notmatch 'LuWifi') {
-    Write-Warning "Top-bar network affordance is missing. Keep the Wi-Fi/network glyph visible beside throughput numbers."
+    Write-Warning "Top-bar network affordance is missing. Keep the Wi-Fi glyph visible in the compact right-side cluster."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarRaw -match 'return \[icon\("LuWifi"\), " ", "↓"') {
+    Write-Warning "Top-bar Wi-Fi has expanded back into a throughput readout. Keep the MacBook-style right-side cluster compact."
     $VerificationFailed = $true
   }
 }
