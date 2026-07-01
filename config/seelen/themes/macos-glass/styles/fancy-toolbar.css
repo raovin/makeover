@@ -70,10 +70,10 @@
   max-width: max-content !important;
   gap: 5px !important;
   height: 26px;
-  padding: 0 6px !important;
-  border-radius: 0;
-  background-color: transparent;
-  border: 0;
+  padding: 0 4px !important;
+  border-radius: 13px;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   box-sizing: border-box;
 }
 
@@ -143,34 +143,33 @@
   opacity: 0.9;
 }
 
+/* Right status cluster reads as ONE cohesive unit (like the center stats pill):
+   flat, transparent items inside a single soft container - no per-item chips. */
 .ft-bar-right .ft-bar-item {
-  background-color: rgba(255, 255, 255, 0.075);
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  border-radius: 12px;
+  background-color: transparent;
+  border: 0;
+  border-radius: 7px;
   margin: 0;
-  padding: 0 6px;
+  padding: 0 5px;
   box-sizing: border-box;
-  transition:
-    background-color 0.16s ease,
-    border-color 0.16s ease;
-}
-
-.ft-bar-right > .ft-bar-item:nth-child(-n + 3) {
-  border-radius: 12px;
-  border-width: 1px;
+  transition: background-color 0.16s ease;
 }
 
 .ft-bar-right > .ft-bar-item.ft-bar-item-clickable:hover {
   background-color: rgba(255, 255, 255, 0.14) !important;
-  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .ft-bar-right > .ft-bar-item.ft-bar-item-clickable:active {
   background-color: rgba(255, 255, 255, 0.2) !important;
 }
 
-/* Distinct system controls: Wi-Fi, battery, sliders, bell, and date/time each
-   have their own hit zone so the visual affordance matches the click behavior. */
+/* Clock is the distinct trailing item, gently set off from the status glyphs. */
+.ft-bar-right > .ft-bar-item:last-child {
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+}
 
 .ft-bar-left > .ft-bar-item {
   flex: 0 1 auto;
@@ -203,13 +202,9 @@
   display: none !important;
 }
 
-/* Optional window title context: macOS-ish without letting long titles eat the bar. */
+/* macOS shows only the bold app name in the menu bar - hide the window-title item. */
 .ft-bar-left > .ft-bar-item:nth-child(3) {
-  max-width: 250px !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
-  opacity: 0.72;
-  padding: 0 4px !important;
+  display: none !important;
 }
 
 .ft-bar-left > .ft-bar-item:nth-child(3),
