@@ -172,6 +172,14 @@ if (Test-Path -LiteralPath $ToolbarPath) {
   }
 }
 
+if (Test-Path -LiteralPath $ThemePath) {
+  $toolbarCss = Get-Content -LiteralPath $ThemePath -Raw
+  if ($toolbarCss -notmatch '\.ft-bar-right:hover' -or $toolbarCss -notmatch 'Single MacBook-style status strip') {
+    Write-Warning "Right-side status items should be styled as one shared status strip, not separate button-like icons."
+    $VerificationFailed = $true
+  }
+}
+
 $menuHostSourcePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\Program.cs"
 if (Test-Path -LiteralPath $menuHostSourcePath) {
   $menuHostSource = Get-Content -LiteralPath $menuHostSourcePath -Raw
@@ -199,6 +207,11 @@ if (Test-Path -LiteralPath $HotCornersConfigPath) {
 
   if (-not $hotCornersConfig.appleMenuClickEnabled -or -not $hotCornersConfig.controlCenterClickEnabled) {
     Write-Warning "Helper-owned Apple/Control Center click routing is disabled."
+    $VerificationFailed = $true
+  }
+
+  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("controlCenterStatusZoneLeftOffset")) {
+    Write-Warning "Top-right status strip click zone is missing. The visible grouped status strip should open one shared Control Center."
     $VerificationFailed = $true
   }
 }

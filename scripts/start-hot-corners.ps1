@@ -70,6 +70,8 @@ function Read-HotCornerConfig {
     appleMenuClickCooldownMilliseconds = 300
     controlCenterClickEnabled = $true
     topBarClickHeight = 40
+    controlCenterStatusZoneLeftOffset = 500
+    controlCenterStatusZoneRightOffset = 8
     controlCenterRightButtonWidth = 72
     controlCenterNetworkZoneLeftOffset = 370
     controlCenterNetworkZoneRightOffset = 245
@@ -390,6 +392,9 @@ function Test-ControlCenterClickZone {
     return $false
   }
 
+  $statusZoneLeft = $right - [int]$Config.controlCenterStatusZoneLeftOffset
+  $statusZoneRight = $right - [int]$Config.controlCenterStatusZoneRightOffset
+  $inStatusZone = $X -ge $statusZoneLeft -and $X -le $statusZoneRight
   $inRightButton = $X -ge ($right - [int]$Config.controlCenterRightButtonWidth)
   $networkZoneLeft = $right - [int]$Config.controlCenterNetworkZoneLeftOffset
   $networkZoneRight = $right - [int]$Config.controlCenterNetworkZoneRightOffset
@@ -398,7 +403,7 @@ function Test-ControlCenterClickZone {
   $powerZoneRight = $right - [int]$Config.controlCenterPowerZoneRightOffset
   $inPowerZone = $X -ge $powerZoneLeft -and $X -le $powerZoneRight
 
-  return $inRightButton -or $inNetworkZone -or $inPowerZone
+  return $inStatusZone -or $inRightButton -or $inNetworkZone -or $inPowerZone
 }
 
 function Get-CornerAtPoint {

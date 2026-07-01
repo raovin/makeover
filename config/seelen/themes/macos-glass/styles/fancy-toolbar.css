@@ -54,8 +54,28 @@
 
 .ft-bar-right {
   grid-column: 3;
+  justify-self: end !important;
   justify-content: flex-end !important;
-  gap: 5px !important;
+  align-items: center;
+  width: max-content !important;
+  max-width: max-content !important;
+  gap: 2px !important;
+  height: 26px;
+  padding: 0 6px !important;
+  border-radius: 13px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+/* Single MacBook-style status strip: the individual metrics are information,
+   but the strip opens one shared Control Center. */
+.ft-bar-right:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .ft-bar-item,
@@ -98,6 +118,18 @@
 .ft-bar-right .ft-bar-item-content,
 .ft-bar-right .ft-bar-item-content > span {
   overflow: visible !important;
+}
+
+.ft-bar-right .ft-bar-item {
+  background-color: transparent !important;
+  border-radius: 0;
+  margin: 0;
+  padding: 0 4px;
+}
+
+.ft-bar-right .ft-bar-item.ft-bar-item-clickable:hover,
+.ft-bar-right .ft-bar-item.ft-bar-item-clickable:active {
+  background-color: transparent !important;
 }
 
 .ft-bar-left > .ft-bar-item {
@@ -211,4 +243,3 @@
   filter: drop-shadow(0 0 4px rgba(70, 240, 180, 0.95)) drop-shadow(0 0 11px rgba(43, 212, 255, 0.7));
   transform: scale(1.06);
 }
-

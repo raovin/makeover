@@ -10,7 +10,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 
 - Normal Apple and Control Center clicks now open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
 - The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
-- Top-right sliders, Wi-Fi, and battery clicks open the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. The `macmakeover-control-center:` protocol remains registered by `scripts\Install-MacControlCenterHandler.ps1` only as fallback plumbing.
+- The top-right status strip opens the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. The `macmakeover-control-center:` protocol remains registered by `scripts\Install-MacControlCenterHandler.ps1` only as fallback plumbing.
 - Performance correction: normal Apple and Control Center clicks are no longer launched by Seelen `onClick` URI handlers. `scripts\start-hot-corners.ps1` owns those top-bar click zones and sends `apple` / `control` over the `MacMakeover.MenuHost` named pipe. The resident host must be running so clicks do not cold-launch.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
 - Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
@@ -30,9 +30,9 @@ The user is very explicit about quality: do not claim a visual task is finished 
 ## User Preferences And Recent Corrections
 
 - The top-left Apple icon should behave like macOS: it should open a compact Apple menu directly, not a big Seelen user drawer and not a terminal.
-- The top-right Wi-Fi, sliders, and power/battery widgets should open the custom Control Center directly, not Seelen's old power/options screen.
+- The top-right status strip should open the custom Control Center directly, not Seelen's old power/options screen.
 - The dock should stay rich; the user previously said there is no need to trim it.
-- The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered clock, and a MacBook-style Wi-Fi/battery/control cluster on the right.
+- The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered clock, and a single MacBook-style status strip on the right.
 - No visible overlap, clipped text, ghost tooltips, ugly separator lines, or accidental title pollution such as `Windows PowerShell / Apple Menu`.
 - Alt+Tab should remain native Windows Alt+Tab. Do not revive Seelen task-switcher shortcuts.
 - Lock-screen PIN entry previously broke during shortcut/task-switcher experiments. Keep Seelen shortcuts disabled.
@@ -163,7 +163,7 @@ The old top-right power/settings entry used Seelen's built-in `@seelen/tb-quick-
 C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\data\seelen-fancy-toolbar\state.yml
 ```
 
-The replacement is a custom toolbar item plus click handlers on the compact Wi-Fi and battery widgets:
+The replacement is a custom toolbar status strip:
 
 ```yaml
 - id: macmakeover-control-center
@@ -189,7 +189,7 @@ The current Control Center includes:
 - Restart...
 - Shut Down...
 
-Because Seelen/Windows URI launches were measured as laggy, `scripts\start-hot-corners.ps1` routes the Apple zone, far-right control zone, Wi-Fi zone, and power/battery zone directly to the resident MenuHost. Keep that layer unless replacing the whole top-bar interaction model.
+Because Seelen/Windows URI launches were measured as laggy, `scripts\start-hot-corners.ps1` routes the Apple zone and the top-right status strip directly to the resident MenuHost. Keep that layer unless replacing the whole top-bar interaction model.
 
 Recent visual/performance proof screenshots:
 
@@ -291,7 +291,7 @@ C:\Users\VineethRao\source\repos\mac-makeover\config\hot-corners.json
 
 The top-left hot corner and Apple glyph are close together. Top-left/top-right outer-corner clicks use `clickCornerSize` from `config\hot-corners.json` and send Show Desktop. Be careful when changing hit targets; do not reintroduce invisible click stealing.
 
-The same helper owns the Apple click zone through `appleMenuClickEnabled` and `appleMenuZone*`, plus the top-right Control Center/Wi-Fi/power hit zones through `controlCenterClickEnabled`, `controlCenterRightButtonWidth`, `controlCenterNetworkZone*`, and the `controlCenterPowerZone*` offsets. The exact physical top-left/top-right corners remain reserved for Show Desktop.
+The same helper owns the Apple click zone through `appleMenuClickEnabled` and `appleMenuZone*`, plus the top-right status-strip hit zone through `controlCenterClickEnabled` and `controlCenterStatusZone*`. The older `controlCenterRightButtonWidth`, `controlCenterNetworkZone*`, and `controlCenterPowerZone*` offsets remain as fallback compatibility. The exact physical top-left/top-right corners remain reserved for Show Desktop.
 
 ## The Repo / Git Backup
 

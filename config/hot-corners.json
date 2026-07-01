@@ -17,6 +17,8 @@
   "appleMenuClickCooldownMilliseconds": 300,
   "controlCenterClickEnabled": true,
   "topBarClickHeight": 40,
+  "controlCenterStatusZoneLeftOffset": 500,
+  "controlCenterStatusZoneRightOffset": 8,
   "controlCenterRightButtonWidth": 72,
   "controlCenterNetworkZoneLeftOffset": 370,
   "controlCenterNetworkZoneRightOffset": 245,
