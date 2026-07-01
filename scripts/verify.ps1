@@ -182,10 +182,18 @@ if (Test-Path -LiteralPath $ToolbarPath) {
   }
 }
 
+if (Test-Path -LiteralPath $SettingsPath) {
+  $seelenSettings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+  if ([string]$seelenSettings.dateFormat -ne "ddd D MMM HH:mm") {
+    Write-Warning "Seelen dateFormat should match the Mac-style menu bar shape: ddd D MMM HH:mm."
+    $VerificationFailed = $true
+  }
+}
+
 if (Test-Path -LiteralPath $ThemePath) {
   $toolbarCss = Get-Content -LiteralPath $ThemePath -Raw
-  if ($toolbarCss -notmatch 'One shared Control Center affordance' -or $toolbarCss -notmatch '\.ft-bar-right:has') {
-    Write-Warning "Right-side status items should be styled as one shared status strip, not separate button-like icons."
+  if ($toolbarCss -notmatch 'Distinct system controls' -or $toolbarCss -match '\.ft-bar-right:has') {
+    Write-Warning "Right-side system controls should be distinct hit targets; do not visually merge Wi-Fi, battery, sliders, bell, and date/time."
     $VerificationFailed = $true
   }
 }
@@ -220,8 +228,18 @@ if (Test-Path -LiteralPath $HotCornersConfigPath) {
     $VerificationFailed = $true
   }
 
+  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("networkFlyoutZoneLeftOffset")) {
+    Write-Warning "Wi-Fi click zone is missing. The Wi-Fi glyph should open the native Windows network flyout."
+    $VerificationFailed = $true
+  }
+
+  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("batteryQuickSettingsZoneLeftOffset")) {
+    Write-Warning "Battery click zone is missing. The battery control should open native Windows Quick Settings."
+    $VerificationFailed = $true
+  }
+
   if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("controlCenterStatusZoneLeftOffset")) {
-    Write-Warning "Top-right status strip click zone is missing. The visible grouped status strip should open one shared Control Center."
+    Write-Warning "Sliders click zone is missing. The visible sliders control should open the custom Control Center."
     $VerificationFailed = $true
   }
 

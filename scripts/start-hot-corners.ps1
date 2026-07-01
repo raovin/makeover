@@ -68,15 +68,18 @@ function Read-HotCornerConfig {
     appleMenuZoneLeft = 24
     appleMenuZoneRight = 78
     appleMenuClickCooldownMilliseconds = 300
+    networkFlyoutClickEnabled = $true
+    networkFlyoutZoneLeftOffset = 355
+    networkFlyoutZoneRightOffset = 310
+    networkFlyoutClickCooldownMilliseconds = 300
+    batteryQuickSettingsClickEnabled = $true
+    batteryQuickSettingsZoneLeftOffset = 310
+    batteryQuickSettingsZoneRightOffset = 222
+    batteryQuickSettingsClickCooldownMilliseconds = 300
     controlCenterClickEnabled = $true
     topBarClickHeight = 40
-    controlCenterStatusZoneLeftOffset = 355
+    controlCenterStatusZoneLeftOffset = 222
     controlCenterStatusZoneRightOffset = 188
-    controlCenterRightButtonWidth = 72
-    controlCenterNetworkZoneLeftOffset = 370
-    controlCenterNetworkZoneRightOffset = 245
-    controlCenterPowerZoneLeftOffset = 245
-    controlCenterPowerZoneRightOffset = 125
     controlCenterClickCooldownMilliseconds = 300
     notificationCenterClickEnabled = $true
     notificationCenterZoneLeftOffset = 186
@@ -133,6 +136,21 @@ function Send-Hotkey {
   }
 }
 
+function Open-WindowsShellUri {
+  param(
+    [string]$Uri,
+    [object]$Config
+  )
+
+  try {
+    Start-Process -FilePath $Uri -ErrorAction Stop
+    return $true
+  } catch {
+    Write-HotCornerLog $Config "Shell URI '$Uri' failed: $($_.Exception.Message)"
+    return $false
+  }
+}
+
 function Invoke-HotCornerAction {
   param(
     [string]$Action,
@@ -148,6 +166,16 @@ function Invoke-HotCornerAction {
     "Sleep" { Start-Process -FilePath "$env:windir\System32\rundll32.exe" -ArgumentList "powrprof.dll,SetSuspendState 0,1,0" }
     "ClipboardHistory" { Send-Hotkey ([byte[]](0x5B, 0x56)) }
     "NotificationCenter" { Send-Hotkey ([byte[]](0x5B, 0x4E)) }
+    "NetworkFlyout" {
+      Close-MacMakeoverMenuHostPanels -Config $Config
+      if (-not (Open-WindowsShellUri -Uri "ms-availablenetworks:" -Config $Config)) {
+        Send-Hotkey ([byte[]](0x5B, 0x41))
+      }
+    }
+    "QuickSettings" {
+      Close-MacMakeoverMenuHostPanels -Config $Config
+      Send-Hotkey ([byte[]](0x5B, 0x41))
+    }
     default { Write-HotCornerLog $Config "Unknown action '$Action' ignored." }
   }
 }
@@ -418,6 +446,56 @@ function Test-ControlCenterClickZone {
   return $X -ge $statusZoneLeft -and $X -le $statusZoneRight
 }
 
+function Test-NetworkFlyoutClickZone {
+  param(
+    [int]$X,
+    [int]$Y,
+    [System.Drawing.Rectangle]$Bounds,
+    [object]$Config
+  )
+
+  if (-not $Config.networkFlyoutClickEnabled) { return $false }
+  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+
+  $right = $Bounds.Right - 1
+  $top = $Bounds.Top
+  $cornerSize = [int]$Config.clickCornerSize
+
+  # Preserve the exact physical corner for Show Desktop.
+  if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
+    return $false
+  }
+
+  $networkZoneLeft = $right - [int]$Config.networkFlyoutZoneLeftOffset
+  $networkZoneRight = $right - [int]$Config.networkFlyoutZoneRightOffset
+  return $X -ge $networkZoneLeft -and $X -le $networkZoneRight
+}
+
+function Test-BatteryQuickSettingsClickZone {
+  param(
+    [int]$X,
+    [int]$Y,
+    [System.Drawing.Rectangle]$Bounds,
+    [object]$Config
+  )
+
+  if (-not $Config.batteryQuickSettingsClickEnabled) { return $false }
+  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+
+  $right = $Bounds.Right - 1
+  $top = $Bounds.Top
+  $cornerSize = [int]$Config.clickCornerSize
+
+  # Preserve the exact physical corner for Show Desktop.
+  if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
+    return $false
+  }
+
+  $batteryZoneLeft = $right - [int]$Config.batteryQuickSettingsZoneLeftOffset
+  $batteryZoneRight = $right - [int]$Config.batteryQuickSettingsZoneRightOffset
+  return $X -ge $batteryZoneLeft -and $X -le $batteryZoneRight
+}
+
 function Test-NotificationCenterClickZone {
   param(
     [int]$X,
@@ -502,6 +580,8 @@ $activeCorner = $null
 $enteredAt = Get-Date
 $lastTriggered = @{}
 $lastClickTriggered = @{}
+$lastNetworkFlyoutClick = [datetime]::MinValue
+$lastBatteryQuickSettingsClick = [datetime]::MinValue
 $lastControlCenterClick = [datetime]::MinValue
 $lastNotificationCenterClick = [datetime]::MinValue
 $lastCalendarPopupClick = [datetime]::MinValue
@@ -527,6 +607,24 @@ while ($true) {
         Write-HotCornerLog $config "TopBar click -> AppleMenu"
         Start-MacMakeoverMenu -Command "apple" -Config $config
         $lastAppleMenuClick = $now
+      }
+    }
+
+    if ($leftMousePressed -and (Test-NetworkFlyoutClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+      $networkFlyoutCooldownElapsed = ($now - $lastNetworkFlyoutClick).TotalMilliseconds -ge [int]$config.networkFlyoutClickCooldownMilliseconds
+      if ($networkFlyoutCooldownElapsed) {
+        Write-HotCornerLog $config "TopBar click -> NetworkFlyout"
+        Invoke-HotCornerAction -Action "NetworkFlyout" -Config $config
+        $lastNetworkFlyoutClick = $now
+      }
+    }
+
+    if ($leftMousePressed -and (Test-BatteryQuickSettingsClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+      $batteryQuickSettingsCooldownElapsed = ($now - $lastBatteryQuickSettingsClick).TotalMilliseconds -ge [int]$config.batteryQuickSettingsClickCooldownMilliseconds
+      if ($batteryQuickSettingsCooldownElapsed) {
+        Write-HotCornerLog $config "TopBar click -> QuickSettings"
+        Invoke-HotCornerAction -Action "QuickSettings" -Config $config
+        $lastBatteryQuickSettingsClick = $now
       }
     }
 

@@ -11,9 +11,9 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 - A macOS-style top menu bar using Seelen UI.
 - A bottom dock using Seelen WEG.
 - The custom `macos-glass` theme for the frosted menu bar and dock.
-- The current toolbar layout: Apple-style mark, focused app, centered CPU/memory/network telemetry, a compact Control Center status strip, a separate notification bell, and date/time on the far right.
+- The current toolbar layout: Apple-style mark, focused app, centered CPU/memory/network telemetry, separate Wi-Fi, battery, Control Center sliders, notification bell, and date/time controls on the far right.
 - A Mac-style Apple menu on the top-left Apple mark, opened by the warmed hot-corners helper so it appears quickly and no terminal window appears.
-- A custom Mac-style Control Center / power popover from the top-right status strip, replacing Seelen's built-in quick-settings flyout and avoiding slow URI launches.
+- A custom Mac-style Control Center / power popover from the top-right sliders control, replacing Seelen's built-in quick-settings flyout and avoiding slow URI launches.
 - Seelen shortcuts disabled so native Windows Alt+Tab and lock-screen input remain normal.
 - Spotlight-style search through PowerToys / Command Palette on `Alt+Space`.
 - Windows Search web/Bing result suppression for the current user.
@@ -151,9 +151,9 @@ Change the corner behavior in:
 config\hot-corners.json
 ```
 
-Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, and `None`. Click actions use the smaller `clickCornerSize` zones, so top-left/top-right show-desktop clicks do not steal the normal Apple icon or right-side menu-bar clicks.
+Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, `NetworkFlyout`, `QuickSettings`, and `None`. Click actions use the smaller `clickCornerSize` zones, so top-left/top-right show-desktop clicks do not steal the normal Apple icon or right-side menu-bar clicks.
 
-The same helper also routes Apple and the top-right status strip to the resident .NET MenuHost over a named pipe. This avoids Seelen `onClick` URI/ShellExecute launches, which were measured as visibly laggy. The `macmakeover-apple-menu:` and `macmakeover-control-center:` protocol handlers remain registered as fallback/restore plumbing only.
+The same helper also routes Apple and the top-right system controls. Apple and the sliders control go to the resident .NET MenuHost over a named pipe; Wi-Fi opens the native Windows network flyout, battery opens native Quick Settings, the bell opens Notification Center, and date/time opens Seelen's calendar popup. This avoids Seelen `onClick` URI/ShellExecute launches, which were measured as visibly laggy. The `macmakeover-apple-menu:` and `macmakeover-control-center:` protocol handlers remain registered as fallback/restore plumbing only.
 
 ## Manual Steps After Restore
 
@@ -213,10 +213,12 @@ The launcher behavior is separate from Seelen:
 - Restart, Shut Down, and Log Out ask for confirmation.
 - Normal Apple clicks are handled by `scripts\start-hot-corners.ps1`, which sends `apple` to `tools\MacMakeover.MenuHost`. The `macmakeover-apple-menu:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` as fallback. Registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
 - `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running or if the helper is running under `pwsh.exe`.
-- Clicking the compact Wi-Fi/battery/sliders status strip opens the custom Control Center for Power & Battery Settings, Network Settings, System Settings, Show Desktop, Lock Screen, Sleep, Restart, and Shut Down.
+- Clicking Wi-Fi opens the native Windows network flyout.
+- Clicking battery opens native Windows Quick Settings, matching normal Windows tray behavior.
+- Clicking the sliders control opens the custom Control Center for Power & Battery Settings, Network Settings, System Settings, Show Desktop, Lock Screen, Sleep, Restart, and Shut Down.
 - Clicking the bell opens Windows Notification Center separately from Control Center.
 - Clicking the date/time opens Seelen's calendar popup and dismisses any custom Apple/Control Center panel first, so panels do not stack.
-- Normal Control Center clicks are handled by `scripts\start-hot-corners.ps1`, which sends `control` to `tools\MacMakeover.MenuHost`. The `macmakeover-control-center:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacControlCenter.ps1` as fallback.
+- Normal sliders/Control Center clicks are handled by `scripts\start-hot-corners.ps1`, which sends `control` to `tools\MacMakeover.MenuHost`. The `macmakeover-control-center:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacControlCenter.ps1` as fallback.
 - Do not re-add Seelen's `@seelen/tb-quick-settings` item unless the user explicitly asks to restore the old flyout.
 - `Alt+Space` opens Microsoft Command Palette / PowerToys-style search.
 - Command Palette web search is disabled.

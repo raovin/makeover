@@ -39,9 +39,9 @@ Make this setup feel less like a themed Windows shell and more like a polished M
 Current intended behavior:
 - Top-left Apple mark opens a compact Apple menu quickly.
 - Clicking the Apple mark must not open a terminal window.
-- Top-right status strip opens the custom MenuHost Control Center, not Seelen's old quick-settings or power-options flyout.
-- The compact Wi-Fi/battery/sliders status strip is one shared Control Center area, so those three items should visually read as one combined control rather than several separate fake buttons.
-- The notification bell and date/time are separate controls and should not visually merge into the Control Center strip.
+- The top-right sliders control opens the custom MenuHost Control Center, not Seelen's old quick-settings or power-options flyout.
+- Wi-Fi, battery, sliders, bell, and date/time are separate click targets, so their visual affordances should read as distinct controls.
+- Wi-Fi opens the native Windows network flyout; battery opens native Windows Quick Settings; the bell opens Notification Center; date/time opens the calendar popup.
 - Wi-Fi/network belongs in the MacBook-style right-side status area.
 - Battery and charging should be presented as one combined status item, not two unrelated icons.
 - Throughput/readout clutter should not live in the top bar unless the design makes it genuinely elegant.
@@ -71,8 +71,8 @@ Design assignment:
 
 Design direction:
 - Top bar should feel like a real menu bar: calm, aligned, compact, readable.
-- The status strip should behave and look like one cohesive MacBook-style cluster.
-- Avoid individual hover targets for icons that all open the same menu.
+- The right-side system controls should feel MacBook-like but must not pretend to be one shared button.
+- Use subtle individual hover/active states because the icons now open different panels.
 - Apple menu and Control Center should feel immediate, clean, and intentional.
 - Dock glass should be stable and readable, with useful contrast and active indicators.
 - Avoid one-note palettes and avoid overusing blur/glow until text becomes fuzzy.
@@ -84,7 +84,9 @@ Verification requirements before saying done:
 - Inspect the saved full screenshot plus the top and bottom crops under qa\.
 - Test real interactions, not just static screenshots:
   - Apple mark opens the Apple menu quickly and without a terminal.
-  - Wi-Fi, battery, and sliders open the same custom Control Center.
+  - Wi-Fi opens the native Windows network flyout.
+  - Battery opens native Windows Quick Settings.
+  - Sliders open the custom Control Center.
   - The bell opens Notification Center instead of Control Center.
   - Date/time opens the calendar popup and does not leave Control Center underneath it.
   - The top-right Control Center does not show Seelen's old power/options flyout.

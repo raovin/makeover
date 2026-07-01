@@ -106,7 +106,7 @@
       "workspacePadding": 10
     }
   },
-  "dateFormat": "ddd HH:mm",
+  "dateFormat": "ddd D MMM HH:mm",
   "devTools": false,
   "drpc": false,
   "hardwareAcceleration": true,
