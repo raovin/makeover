@@ -212,7 +212,7 @@ The launcher behavior is separate from Seelen:
 - Restart, Shut Down, and Log Out ask for confirmation.
 - Normal Apple clicks are handled by `scripts\start-hot-corners.ps1`, which sends `apple` to `tools\MacMakeover.MenuHost`. The `macmakeover-apple-menu:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` as fallback. Registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
 - `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running or if the helper is running under `pwsh.exe`.
-- Clicking the top-right Wi-Fi, sliders icon, charge-rate text, or battery widget opens the custom Control Center for Power & Battery Settings, Network Settings, System Settings, Show Desktop, Lock Screen, Sleep, Restart, and Shut Down.
+- Clicking the top-right Wi-Fi, sliders icon, or battery widget opens the custom Control Center for Power & Battery Settings, Network Settings, System Settings, Show Desktop, Lock Screen, Sleep, Restart, and Shut Down.
 - Normal Control Center clicks are handled by `scripts\start-hot-corners.ps1`, which sends `control` to `tools\MacMakeover.MenuHost`. The `macmakeover-control-center:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacControlCenter.ps1` as fallback.
 - Do not re-add Seelen's `@seelen/tb-quick-settings` item unless the user explicitly asks to restore the old flyout.
 - `Alt+Space` opens Microsoft Command Palette / PowerToys-style search.

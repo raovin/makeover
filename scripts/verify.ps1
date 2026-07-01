@@ -156,6 +156,11 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
+  if ($toolbarRaw -match 'f3a7c1e2-9b4d-4e6a-8c1f-2d5e7a9b0c11|BsLightningChargeFill|energyRate') {
+    Write-Warning "Top-bar battery charging state has split back into a separate charge-rate/lightning item. Keep it merged into one battery control."
+    $VerificationFailed = $true
+  }
+
   if ($toolbarRaw -notmatch 'LuWifi') {
     Write-Warning "Top-bar network affordance is missing. Keep the Wi-Fi glyph visible in the compact right-side cluster."
     $VerificationFailed = $true

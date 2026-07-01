@@ -10,7 +10,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 
 - Normal Apple and Control Center clicks now open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
 - The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
-- Top-right sliders, charge-rate, and battery clicks open the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. The `macmakeover-control-center:` protocol remains registered by `scripts\Install-MacControlCenterHandler.ps1` only as fallback plumbing.
+- Top-right sliders, Wi-Fi, and battery clicks open the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. The `macmakeover-control-center:` protocol remains registered by `scripts\Install-MacControlCenterHandler.ps1` only as fallback plumbing.
 - Performance correction: normal Apple and Control Center clicks are no longer launched by Seelen `onClick` URI handlers. `scripts\start-hot-corners.ps1` owns those top-bar click zones and sends `apple` / `control` over the `MacMakeover.MenuHost` named pipe. The resident host must be running so clicks do not cold-launch.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
 - Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
@@ -163,7 +163,7 @@ The old top-right power/settings entry used Seelen's built-in `@seelen/tb-quick-
 C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\data\seelen-fancy-toolbar\state.yml
 ```
 
-The replacement is a custom toolbar item plus click handlers on the charge-rate and battery widgets:
+The replacement is a custom toolbar item plus click handlers on the compact Wi-Fi and battery widgets:
 
 ```yaml
 - id: macmakeover-control-center
