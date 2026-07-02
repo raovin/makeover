@@ -161,7 +161,13 @@
   background-color: rgba(255, 255, 255, 0.2) !important;
 }
 
-/* Clock is the trailing item - flat text, macOS-style, with a touch of space. */
+/* Battery reads green like macOS. It's the 3rd right item (Wi-Fi, Bluetooth, Battery);
+   svg:last-of-type is the battery glyph, so the charging bolt (first glyph) stays white. */
+.ft-bar-right > .ft-bar-item:nth-child(3) svg:last-of-type {
+  color: #34c759;
+}
+
+/* Trailing items (clock, then bell) get a touch of separating space. */
 .ft-bar-right > .ft-bar-item:last-child {
   margin-left: 3px;
 }
