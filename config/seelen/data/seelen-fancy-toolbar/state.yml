@@ -79,9 +79,9 @@ right:
 - id: macmakeover-network-status
   scopes: []
   template: return icon("LuWifi");
-  tooltip: return "";
+  tooltip: return "Network";
   badge: null
-  onClick: null
+  onClick: open("ms-availablenetworks:");
   onWheelUp: null
   onWheelDown: null
   style:
@@ -119,17 +119,4 @@ right:
   remoteData: {}
 - '@seelen/tb-power-menu'
 - '@seelen/tb-calendar-popup'
-- id: macmakeover-notifications
-  scopes: []
-  template: return icon("LuBell");
-  tooltip: return "";
-  badge: null
-  onClick: null
-  onWheelUp: null
-  onWheelDown: null
-  style:
-    minWidth: 28
-    flexShrink: 0
-    maxWidth: 28
-    width: 28
-  remoteData: {}
+- '@seelen/tb-notifications'
