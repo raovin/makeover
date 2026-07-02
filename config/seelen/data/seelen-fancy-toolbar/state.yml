@@ -90,6 +90,7 @@ right:
     flexShrink: 0
     width: 28
   remoteData: {}
+- '@seelen/tb-bluetooth-popup'
 - id: c947837b-128a-450c-a634-f215d5935aac
   scopes:
   - Power
@@ -105,6 +106,21 @@ right:
 - id: macmakeover-control-center
   scopes: []
   template: return icon("LuSlidersHorizontal");
+  tooltip: return "";
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style:
+    minWidth: 28
+    flexShrink: 0
+    maxWidth: 28
+    width: 28
+  remoteData: {}
+- '@seelen/tb-power-menu'
+- id: macmakeover-notifications
+  scopes: []
+  template: return icon("LuBell");
   tooltip: return "";
   badge: null
   onClick: null

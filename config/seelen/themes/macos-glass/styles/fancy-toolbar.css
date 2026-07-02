@@ -50,15 +50,14 @@
   grid-column: 2;
   justify-content: center !important;
   align-items: center;
-  height: 26px;
+  height: 24px;
   width: max-content !important;
-  max-width: min(30vw, 260px) !important;
-  padding: 0 6px !important;
-  border-radius: 13px;
-  background-color: rgba(255, 255, 255, 0.075);
-  border: 1px solid rgba(255, 255, 255, 0.075);
+  max-width: min(34vw, 320px) !important;
+  padding: 0 !important;
+  background-color: transparent;
+  border: 0;
   box-sizing: border-box;
-  gap: 0 !important;
+  gap: 14px !important;
 }
 
 .ft-bar-right {
@@ -68,12 +67,11 @@
   align-items: center;
   width: max-content !important;
   max-width: max-content !important;
-  gap: 5px !important;
-  height: 26px;
-  padding: 0 4px !important;
-  border-radius: 13px;
-  background-color: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  gap: 4px !important;
+  height: 24px;
+  padding: 0 !important;
+  background-color: transparent;
+  border: 0;
   box-sizing: border-box;
 }
 
@@ -163,12 +161,9 @@
   background-color: rgba(255, 255, 255, 0.2) !important;
 }
 
-/* Clock is the distinct trailing item, gently set off from the status glyphs. */
+/* Clock is the trailing item - flat text, macOS-style, with a touch of space. */
 .ft-bar-right > .ft-bar-item:last-child {
-  margin-left: 2px;
-  padding-left: 8px;
-  border-left: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 0;
+  margin-left: 3px;
 }
 
 .ft-bar-left > .ft-bar-item {
