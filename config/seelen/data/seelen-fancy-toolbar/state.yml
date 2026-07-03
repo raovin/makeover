@@ -79,9 +79,9 @@ right:
 - id: macmakeover-network-status
   scopes: []
   template: return icon("LuWifi");
-  tooltip: return "Network";
+  tooltip: return "Control Center";
   badge: null
-  onClick: open("ms-availablenetworks:");
+  onClick: null
   onWheelUp: null
   onWheelDown: null
   style:
@@ -90,7 +90,20 @@ right:
     flexShrink: 0
     width: 28
   remoteData: {}
-- '@seelen/tb-bluetooth-popup'
+- id: macmakeover-bluetooth
+  scopes: []
+  template: return icon("LuBluetooth");
+  tooltip: return "Control Center";
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style:
+    minWidth: 28
+    maxWidth: 28
+    flexShrink: 0
+    width: 28
+  remoteData: {}
 - id: c947837b-128a-450c-a634-f215d5935aac
   scopes:
   - Power
@@ -117,6 +130,19 @@ right:
     maxWidth: 28
     width: 28
   remoteData: {}
-- '@seelen/tb-power-menu'
+- id: macmakeover-power
+  scopes: []
+  template: return icon("LuPower");
+  tooltip: return "Control Center";
+  badge: null
+  onClick: null
+  onWheelUp: null
+  onWheelDown: null
+  style:
+    minWidth: 28
+    maxWidth: 28
+    flexShrink: 0
+    width: 28
+  remoteData: {}
 - '@seelen/tb-calendar-popup'
 - '@seelen/tb-notifications'

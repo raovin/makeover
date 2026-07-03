@@ -234,6 +234,13 @@ internal sealed class MenuForm : Form
                 Close();
             }
         };
+        Deactivate += (_, _) =>
+        {
+            if ((DateTime.UtcNow - _shownAt).TotalMilliseconds > 250)
+            {
+                Close();
+            }
+        };
     }
 
     // All size/position math depends on DeviceDpi, which is only correct once the handle exists.
@@ -357,8 +364,9 @@ internal sealed class MenuForm : Form
         form.Text = "Control Center";
         form._anchorRight = true;
         form.AddHeader("Control Center", GetBatterySummary());
-        form.AddCard("Power & Battery Settings", "Open Windows power settings", () => Start("ms-settings:powersleep"));
-        form.AddCard("Network Settings", "Open Network & Internet settings", () => Start("ms-settings:network-status"));
+        form.AddCard("Wi-Fi & Network", "Open Network & Internet settings", () => Start("ms-settings:network-status"));
+        form.AddCard("Bluetooth", "Manage Bluetooth devices", () => Start("ms-settings:bluetooth"));
+        form.AddCard("Power & Battery", "Open Windows power settings", () => Start("ms-settings:powersleep"));
         form.AddCard("System Settings", "Open Windows settings", () => Start("ms-settings:"));
         form.AddItem("Show Desktop", ToggleDesktop);
         form.AddItem("Lock Screen", () => Start("rundll32.exe", "user32.dll,LockWorkStation"));
