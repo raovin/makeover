@@ -7,23 +7,24 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$taskName = "Mac Makeover Hot Corners"
-$taskPath = "\"
+$keepaliveTaskName = "MacMakeover Hot Corners Keepalive"
 $startupShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk"
 
+# The keepalive task relaunches the helper every 5 minutes, so stopping the helper
+# without pausing the task would just resurrect it. Disable on stop, remove on unregister.
 try {
-  $task = Get-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue
+  $task = Get-ScheduledTask -TaskName $keepaliveTaskName -ErrorAction SilentlyContinue
   if ($task) {
-    Stop-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue
     if ($Unregister) {
-      Unregister-ScheduledTask -TaskPath $taskPath -TaskName $taskName -Confirm:$false
-      Write-Host "Unregistered scheduled task: $taskPath$taskName"
+      Unregister-ScheduledTask -TaskName $keepaliveTaskName -Confirm:$false
+      Write-Host "Unregistered keepalive scheduled task: $keepaliveTaskName"
     } else {
-      Write-Host "Stopped scheduled task: $taskPath$taskName"
+      Disable-ScheduledTask -TaskName $keepaliveTaskName | Out-Null
+      Write-Host "Disabled keepalive scheduled task (re-enable with install-hot-corners.ps1): $keepaliveTaskName"
     }
   }
 } catch {
-  Write-Warning "Scheduled task cleanup skipped: $($_.Exception.Message)"
+  Write-Warning "Keepalive task cleanup skipped: $($_.Exception.Message)"
 }
 
 if ($Unregister -and (Test-Path -LiteralPath $startupShortcut)) {

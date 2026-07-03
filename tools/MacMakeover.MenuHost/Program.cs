@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace MacMakeover.MenuHost;
@@ -191,6 +192,7 @@ internal sealed class MenuForm : Form
     private readonly Font _boldFont;
     private readonly Font _smallFont;
     private readonly Font _smallBoldFont;
+    private readonly Font _iconFont;
     private readonly int _logicalWidth;
     private bool _anchorRight;
     private int _logicalTop = 38;
@@ -198,6 +200,7 @@ internal sealed class MenuForm : Form
     private DateTime _shownAt;
     private bool _wasLeftMouseDown;
     private int _hoverIndex = -1;
+    private int _dragRow = -1;
 
     private MenuForm(int width)
     {
@@ -210,6 +213,7 @@ internal sealed class MenuForm : Form
         _boldFont = new Font("Segoe UI", 9.8F, FontStyle.Bold, GraphicsUnit.Point);
         _smallFont = new Font("Segoe UI", 8.3F, FontStyle.Regular, GraphicsUnit.Point);
         _smallBoldFont = new Font("Segoe UI", 8.6F, FontStyle.Bold, GraphicsUnit.Point);
+        _iconFont = new Font("Segoe Fluent Icons", 11F, FontStyle.Regular, GraphicsUnit.Point);
         Font = _regularFont;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -247,6 +251,7 @@ internal sealed class MenuForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        NativeMethods.ApplyRoundedDarkChrome(Handle);
         Padding = new Padding(LogicalToDeviceUnits(10));
         Width = LogicalToDeviceUnits(_logicalWidth);
         FitHeight();
@@ -286,6 +291,12 @@ internal sealed class MenuForm : Form
                 case MenuRowKind.Card:
                     DrawCard(e.Graphics, rect, row, i == _hoverIndex);
                     break;
+                case MenuRowKind.IconCard:
+                    DrawIconCard(e.Graphics, rect, row, i == _hoverIndex);
+                    break;
+                case MenuRowKind.Slider:
+                    DrawSlider(e.Graphics, rect, row);
+                    break;
                 case MenuRowKind.Separator:
                     using (var pen = new Pen(_separator))
                     {
@@ -305,11 +316,17 @@ internal sealed class MenuForm : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        if (_dragRow >= 0)
+        {
+            UpdateSliderFromX(_dragRow, e.X, commit: false);
+            return;
+        }
+
         var hit = HitTest(e.Location);
         if (hit == _hoverIndex) return;
 
         _hoverIndex = hit;
-        Cursor = hit >= 0 && _rows[hit].Action is not null ? Cursors.Hand : Cursors.Default;
+        Cursor = hit >= 0 && (_rows[hit].Action is not null || _rows[hit].Kind == MenuRowKind.Slider) ? Cursors.Hand : Cursors.Default;
         Invalidate();
     }
 
@@ -360,20 +377,164 @@ internal sealed class MenuForm : Form
 
     public static MenuForm CreateControlCenter()
     {
-        var form = new MenuForm(264);
+        var form = new MenuForm(292);
         form.Text = "Control Center";
         form._anchorRight = true;
         form.AddHeader("Control Center", GetBatterySummary());
-        form.AddCard("Wi-Fi & Network", "Open Network & Internet settings", () => Start("ms-settings:network-status"));
-        form.AddCard("Bluetooth", "Manage Bluetooth devices", () => Start("ms-settings:bluetooth"));
-        form.AddCard("Power & Battery", "Open Windows power settings", () => Start("ms-settings:powersleep"));
-        form.AddCard("System Settings", "Open Windows settings", () => Start("ms-settings:"));
+
+        var wifi = form.AddIconCard("", "Wi-Fi", "Checking...", active: false, () => Start("ms-settings:network-wifi"));
+        var bluetooth = form.AddIconCard("", "Bluetooth", "Checking...", active: false, () => Start("ms-settings:bluetooth"));
+
+        var brightnessSlider = new SliderInfo
+        {
+            Glyph = "",
+            Value = 0.5f,
+            OnCommit = value => SetBrightnessAsync((int)Math.Round(value * 100))
+        };
+        form.AddSlider("Display", brightnessSlider);
+
+        var volumeSlider = new SliderInfo
+        {
+            Glyph = "",
+            Value = VolumeService.GetMasterVolume() ?? 0.5f,
+            OnChange = VolumeService.SetMasterVolume
+        };
+        form.AddSlider("Sound", volumeSlider);
+
+        form.AddSeparator();
+        form.AddItem("System Settings...", () => Start("ms-settings:"));
         form.AddItem("Show Desktop", ToggleDesktop);
         form.AddItem("Lock Screen", () => Start("rundll32.exe", "user32.dll,LockWorkStation"));
         form.AddItem("Sleep", () => Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
+
+        form.LoadControlCenterStateAsync(wifi, bluetooth, brightnessSlider);
         return form;
+    }
+
+    // Fill Wi-Fi SSID, Bluetooth state, and current brightness in the background so the
+    // panel opens instantly and enriches itself a beat later.
+    private void LoadControlCenterStateAsync(MenuRow wifi, MenuRow bluetooth, SliderInfo brightness)
+    {
+        _ = Task.Run(() =>
+        {
+            var ssid = ReadWifiSsid();
+            var bluetoothOn = ReadBluetoothOn();
+            var brightnessPercent = ReadBrightnessPercent();
+
+            try
+            {
+                if (IsDisposed || Disposing) return;
+                BeginInvoke(() =>
+                {
+                    wifi.Detail = ssid ?? "Not connected";
+                    wifi.Active = ssid is not null;
+                    bluetooth.Detail = bluetoothOn ? "On" : "Off";
+                    bluetooth.Active = bluetoothOn;
+                    if (brightnessPercent is { } pct)
+                    {
+                        brightness.Value = Math.Clamp(pct / 100f, 0f, 1f);
+                    }
+
+                    Invalidate();
+                });
+            }
+            catch
+            {
+                // Panel may already be closed; state enrichment is best-effort.
+            }
+        });
+    }
+
+    private static string? ReadWifiSsid()
+    {
+        try
+        {
+            var output = RunHidden("netsh", "wlan show interfaces", 2500);
+            string? ssid = null;
+            var connected = false;
+            foreach (var rawLine in output.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (line.StartsWith("State", StringComparison.OrdinalIgnoreCase) && line.Contains("connected", StringComparison.OrdinalIgnoreCase) && !line.Contains("disconnected", StringComparison.OrdinalIgnoreCase))
+                {
+                    connected = true;
+                }
+
+                if (ssid is null && line.StartsWith("SSID", StringComparison.OrdinalIgnoreCase) && !line.StartsWith("BSSID", StringComparison.OrdinalIgnoreCase))
+                {
+                    var idx = line.IndexOf(':');
+                    if (idx > 0) ssid = line[(idx + 1)..].Trim();
+                }
+            }
+
+            return connected && !string.IsNullOrWhiteSpace(ssid) ? ssid : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool ReadBluetoothOn()
+    {
+        try
+        {
+            var output = RunHidden("powershell.exe", "-NoProfile -NonInteractive -Command \"(Get-Service bthserv).Status\"", 4000);
+            return output.Contains("Running", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static int? ReadBrightnessPercent()
+    {
+        try
+        {
+            var output = RunHidden("powershell.exe", "-NoProfile -NonInteractive -Command \"(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness\"", 4000);
+            return int.TryParse(output.Trim(), out var value) ? value : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void SetBrightnessAsync(int percent)
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                RunHidden(
+                    "powershell.exe",
+                    $"-NoProfile -NonInteractive -Command \"(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{Math.Clamp(percent, 0, 100)})\"",
+                    5000);
+            }
+            catch (Exception ex)
+            {
+                Program.Log("SetBrightness failed: " + ex.Message);
+            }
+        });
+    }
+
+    private static string RunHidden(string fileName, string arguments, int timeoutMs)
+    {
+        var psi = new ProcessStartInfo(fileName, arguments)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        using var process = Process.Start(psi);
+        if (process is null) return string.Empty;
+        var output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit(timeoutMs);
+        return output;
     }
 
     private static string FriendlyUserName()
@@ -395,6 +556,27 @@ internal sealed class MenuForm : Form
     private void AddItem(string label, Action? action, string shortcut = "")
     {
         _rows.Add(new MenuRow(MenuRowKind.Item, label, string.Empty, shortcut, action, 30));
+    }
+
+    private MenuRow AddIconCard(string glyph, string label, string detail, bool active, Action action)
+    {
+        var row = new MenuRow(MenuRowKind.IconCard, label, detail, string.Empty, action, 46)
+        {
+            Glyph = glyph,
+            Active = active
+        };
+        _rows.Add(row);
+        return row;
+    }
+
+    private MenuRow AddSlider(string label, SliderInfo slider)
+    {
+        var row = new MenuRow(MenuRowKind.Slider, label, string.Empty, string.Empty, null, 52)
+        {
+            Slider = slider
+        };
+        _rows.Add(row);
+        return row;
     }
 
     private void AddSeparator()
@@ -443,6 +625,133 @@ internal sealed class MenuForm : Form
         var detailRect = new Rectangle(cardRect.Left + LogicalToDeviceUnits(12), cardRect.Top + LogicalToDeviceUnits(26), cardRect.Width - LogicalToDeviceUnits(24), LogicalToDeviceUnits(18));
         TextRenderer.DrawText(graphics, row.Label, _smallBoldFont, titleRect, _primaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         TextRenderer.DrawText(graphics, row.Detail, _smallFont, detailRect, _secondaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+    }
+
+    private void DrawIconCard(Graphics graphics, Rectangle rect, MenuRow row, bool hovered)
+    {
+        var cardRect = Rectangle.Inflate(rect, -LogicalToDeviceUnits(2), -LogicalToDeviceUnits(3));
+        using (var brush = new SolidBrush(hovered ? _cardHover : _card))
+        using (var path = RoundedRect(cardRect, LogicalToDeviceUnits(10)))
+        {
+            graphics.FillPath(brush, path);
+        }
+
+        // Circular icon chip: accent blue when the feature is active, muted gray otherwise.
+        var chipSize = LogicalToDeviceUnits(28);
+        var chipRect = new Rectangle(
+            cardRect.Left + LogicalToDeviceUnits(10),
+            cardRect.Top + (cardRect.Height - chipSize) / 2,
+            chipSize,
+            chipSize);
+        using (var chipBrush = new SolidBrush(row.Active ? _hover : Color.FromArgb(88, 93, 108)))
+        {
+            graphics.FillEllipse(chipBrush, chipRect);
+        }
+
+        TextRenderer.DrawText(graphics, row.Glyph, _iconFont, chipRect, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+
+        var textLeft = chipRect.Right + LogicalToDeviceUnits(10);
+        var titleRect = new Rectangle(textLeft, cardRect.Top + LogicalToDeviceUnits(5), cardRect.Right - textLeft - LogicalToDeviceUnits(10), LogicalToDeviceUnits(18));
+        var detailRect = new Rectangle(textLeft, cardRect.Top + LogicalToDeviceUnits(23), cardRect.Right - textLeft - LogicalToDeviceUnits(10), LogicalToDeviceUnits(16));
+        TextRenderer.DrawText(graphics, row.Label, _smallBoldFont, titleRect, _primaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        TextRenderer.DrawText(graphics, row.Detail, _smallFont, detailRect, _secondaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+    }
+
+    // macOS-style thick pill slider: label above, full-width track with the icon riding
+    // the filled end and a round knob at the value position.
+    private void DrawSlider(Graphics graphics, Rectangle rect, MenuRow row)
+    {
+        if (row.Slider is not { } slider) return;
+
+        var labelRect = new Rectangle(rect.Left + LogicalToDeviceUnits(12), rect.Top + LogicalToDeviceUnits(2), rect.Width - LogicalToDeviceUnits(24), LogicalToDeviceUnits(18));
+        TextRenderer.DrawText(graphics, row.Label, _smallBoldFont, labelRect, _primaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+
+        var track = SliderTrackRect(rect);
+        using (var backBrush = new SolidBrush(Color.FromArgb(70, 255, 255, 255)))
+        using (var backPath = RoundedRect(track, track.Height / 2))
+        {
+            graphics.FillPath(backBrush, backPath);
+        }
+
+        var knobRadius = track.Height / 2;
+        var usable = track.Width - track.Height;
+        var knobCx = track.Left + knobRadius + (int)(Math.Clamp(slider.Value, 0f, 1f) * usable);
+        var filled = new Rectangle(track.Left, track.Top, knobCx + knobRadius - track.Left, track.Height);
+        using (var fillBrush = new SolidBrush(Color.FromArgb(242, 244, 248)))
+        using (var fillPath = RoundedRect(filled, track.Height / 2))
+        {
+            graphics.FillPath(fillBrush, fillPath);
+        }
+
+        var glyphRect = new Rectangle(track.Left, track.Top, track.Height, track.Height);
+        TextRenderer.DrawText(graphics, slider.Glyph, _iconFont, glyphRect, Color.FromArgb(74, 78, 92), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+
+        var knobRect = new Rectangle(knobCx - knobRadius, track.Top, track.Height, track.Height);
+        using var knobBrush = new SolidBrush(Color.White);
+        graphics.FillEllipse(knobBrush, knobRect);
+        using var knobPen = new Pen(Color.FromArgb(60, 0, 0, 0));
+        graphics.DrawEllipse(knobPen, knobRect);
+    }
+
+    private Rectangle SliderTrackRect(Rectangle rowRect)
+    {
+        var height = LogicalToDeviceUnits(22);
+        return new Rectangle(
+            rowRect.Left + LogicalToDeviceUnits(12),
+            rowRect.Bottom - height - LogicalToDeviceUnits(6),
+            rowRect.Width - LogicalToDeviceUnits(24),
+            height);
+    }
+
+    private Rectangle RowRect(int index)
+    {
+        var y = Padding.Top;
+        for (var i = 0; i < index; i++)
+        {
+            y += LogicalToDeviceUnits(_rows[i].Height);
+        }
+
+        return new Rectangle(Padding.Left, y, ClientSize.Width - Padding.Horizontal, LogicalToDeviceUnits(_rows[index].Height));
+    }
+
+    private void UpdateSliderFromX(int rowIndex, int x, bool commit)
+    {
+        if (_rows[rowIndex].Slider is not { } slider) return;
+
+        var track = SliderTrackRect(RowRect(rowIndex));
+        var usable = Math.Max(1, track.Width - track.Height);
+        var value = Math.Clamp((x - track.Left - (track.Height / 2f)) / usable, 0f, 1f);
+        slider.Value = value;
+        Invalidate();
+        slider.OnChange?.Invoke(value);
+        if (commit)
+        {
+            slider.OnCommit?.Invoke(value);
+        }
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (e.Button != MouseButtons.Left) return;
+
+        var hit = HitTest(e.Location);
+        if (hit >= 0 && _rows[hit].Kind == MenuRowKind.Slider)
+        {
+            _dragRow = hit;
+            Capture = true;
+            UpdateSliderFromX(hit, e.X, commit: false);
+        }
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (_dragRow < 0) return;
+
+        UpdateSliderFromX(_dragRow, e.X, commit: true);
+        _dragRow = -1;
+        Capture = false;
     }
 
     private void DrawItem(Graphics graphics, Rectangle rect, MenuRow row, bool hovered)
@@ -504,6 +813,7 @@ internal sealed class MenuForm : Form
             _boldFont.Dispose();
             _smallFont.Dispose();
             _smallBoldFont.Dispose();
+            _iconFont.Dispose();
         }
 
         base.Dispose(disposing);
@@ -551,7 +861,9 @@ internal sealed class MenuForm : Form
         Item,
         Separator,
         Header,
-        Card
+        Card,
+        IconCard,
+        Slider
     }
 
     private sealed class MenuRow
@@ -568,15 +880,34 @@ internal sealed class MenuForm : Form
 
         public MenuRowKind Kind { get; }
 
-        public string Label { get; }
+        public string Label { get; set; }
 
-        public string Detail { get; }
+        public string Detail { get; set; }
 
         public string Shortcut { get; }
 
         public Action? Action { get; }
 
         public int Height { get; }
+
+        // IconCard extras: Segoe Fluent icon glyph + accent state (blue chip when active).
+        public string Glyph { get; set; } = string.Empty;
+
+        public bool Active { get; set; }
+
+        // Slider extras.
+        public SliderInfo? Slider { get; set; }
+    }
+
+    private sealed class SliderInfo
+    {
+        public string Glyph { get; set; } = string.Empty;
+
+        public float Value { get; set; } = 0.5f;
+
+        public Action<float>? OnChange { get; set; }
+
+        public Action<float>? OnCommit { get; set; }
     }
 }
 
@@ -587,7 +918,7 @@ internal static class NativeMethods
     private const uint SwpNoSize = 0x0001;
     private const uint SwpShowWindow = 0x0040;
 
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
         IntPtr hWnd,
         IntPtr hWndInsertAfter,
@@ -597,10 +928,114 @@ internal static class NativeMethods
         int cy,
         uint uFlags);
 
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
     public static void ShowAboveEverything(Form form)
     {
         form.TopMost = true;
         form.BringToFront();
         SetWindowPos(form.Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpShowWindow);
+    }
+
+    // Windows 11 native rounded corners + dark frame for a borderless popup, so the
+    // panels read as system surfaces instead of hard rectangles.
+    public static void ApplyRoundedDarkChrome(IntPtr handle)
+    {
+        try
+        {
+            var dark = 1;
+            DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int)); // DWMWA_USE_IMMERSIVE_DARK_MODE
+            var corner = 2;
+            DwmSetWindowAttribute(handle, 33, ref corner, sizeof(int)); // DWMWA_WINDOW_CORNER_PREFERENCE = ROUND
+            var border = 0x00463F3A; // subtle dark border (COLORREF, BGR)
+            DwmSetWindowAttribute(handle, 34, ref border, sizeof(int)); // DWMWA_BORDER_COLOR
+        }
+        catch
+        {
+            // Cosmetic only; never let chrome styling break the menu.
+        }
+    }
+}
+
+// Master-volume control over Core Audio (IAudioEndpointVolume) so the Control Center
+// sound slider drives the real system volume with no shelling out.
+internal static class VolumeService
+{
+    private static IAudioEndpointVolume? _endpoint;
+
+    public static float? GetMasterVolume()
+    {
+        try
+        {
+            Endpoint().GetMasterVolumeLevelScalar(out var level);
+            return level;
+        }
+        catch
+        {
+            _endpoint = null;
+            return null;
+        }
+    }
+
+    public static void SetMasterVolume(float level)
+    {
+        try
+        {
+            var context = Guid.Empty;
+            Endpoint().SetMasterVolumeLevelScalar(Math.Clamp(level, 0f, 1f), ref context);
+        }
+        catch
+        {
+            _endpoint = null;
+        }
+    }
+
+    private static IAudioEndpointVolume Endpoint()
+    {
+        if (_endpoint is not null) return _endpoint;
+        var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+        enumerator.GetDefaultAudioEndpoint(0, 1, out var device); // eRender, eMultimedia
+        var iid = typeof(IAudioEndpointVolume).GUID;
+        device.Activate(ref iid, 23, IntPtr.Zero, out var obj); // CLSCTX_ALL
+        _endpoint = (IAudioEndpointVolume)obj;
+        return _endpoint;
+    }
+
+    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+    private class MMDeviceEnumeratorComObject
+    {
+    }
+
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMMDeviceEnumerator
+    {
+        int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
+
+        int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint);
+    }
+
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMMDevice
+    {
+        int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
+    }
+
+    [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioEndpointVolume
+    {
+        int RegisterControlChangeNotify(IntPtr notify);
+
+        int UnregisterControlChangeNotify(IntPtr notify);
+
+        int GetChannelCount(out uint count);
+
+        int SetMasterVolumeLevel(float levelDb, ref Guid eventContext);
+
+        int SetMasterVolumeLevelScalar(float level, ref Guid eventContext);
+
+        int GetMasterVolumeLevel(out float levelDb);
+
+        int GetMasterVolumeLevelScalar(out float level);
     }
 }
