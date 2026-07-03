@@ -76,24 +76,11 @@ center:
     minWidth: 82
   remoteData: {}
 right:
+- '@seelen/tb-bluetooth-popup'
 - id: macmakeover-network-status
   scopes: []
   template: return icon("LuWifi");
-  tooltip: return "Control Center";
-  badge: null
-  onClick: null
-  onWheelUp: null
-  onWheelDown: null
-  style:
-    minWidth: 28
-    maxWidth: 28
-    flexShrink: 0
-    width: 28
-  remoteData: {}
-- id: macmakeover-bluetooth
-  scopes: []
-  template: return icon("LuBluetooth");
-  tooltip: return "Control Center";
+  tooltip: return "";
   badge: null
   onClick: null
   onWheelUp: null
@@ -133,7 +120,7 @@ right:
 - id: macmakeover-power
   scopes: []
   template: return icon("LuPower");
-  tooltip: return "Control Center";
+  tooltip: return "";
   badge: null
   onClick: null
   onWheelUp: null

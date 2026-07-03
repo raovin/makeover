@@ -35,6 +35,54 @@ public static class MacMakeoverHotCornersNative {
 
   [DllImport("user32.dll")]
   public static extern void keybd_event(byte bVk, byte bScan, int dwFlags, UIntPtr dwExtraInfo);
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+  [DllImport("user32.dll")]
+  public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxLength);
+
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder text, int maxLength);
+
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr hWnd);
+
+  [DllImport("user32.dll")]
+  public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+  // Seelen flyout popups ("Bluetooth Popup", "Calendar Popup", ...) are sticky: they do
+  // not dismiss on an outside click. Hide any visible Tauri "* Popup" window that does
+  // not contain the click point, so they behave like normal menus.
+  public static void HideSeelenPopupsOutside(int x, int y) {
+    EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
+      if (!IsWindowVisible(hWnd)) return true;
+      var title = new System.Text.StringBuilder(128);
+      GetWindowText(hWnd, title, 128);
+      if (!title.ToString().EndsWith(" Popup", StringComparison.Ordinal)) return true;
+      var className = new System.Text.StringBuilder(128);
+      GetClassName(hWnd, className, 128);
+      if (className.ToString() != "Tauri Window") return true;
+      RECT rect;
+      GetWindowRect(hWnd, out rect);
+      if (x >= rect.Left && x <= rect.Right && y >= rect.Top && y <= rect.Bottom) return true;
+      ShowWindow(hWnd, 0);
+      return true;
+    }, IntPtr.Zero);
+  }
 }
 "@
 Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue
@@ -600,6 +648,13 @@ while ($true) {
     $leftMouseDown = ($leftMouseState -band 0x8000) -ne 0
     $leftMousePressed = (($leftMouseState -band 0x0001) -ne 0) -or ($leftMouseDown -and -not $wasLeftMouseDown)
     $now = Get-Date
+
+    # Click-away dismissal for sticky Seelen popups (Bluetooth/Calendar/Notifications):
+    # any click below the top bar hides popups that do not contain the click point.
+    # Clicks ON the bar are left alone so icon toggles keep their native behavior.
+    if ($leftMousePressed -and $point.Y -gt ($bounds.Top + [int]$config.topBarClickHeight)) {
+      try { [MacMakeoverHotCornersNative]::HideSeelenPopupsOutside($point.X, $point.Y) } catch { }
+    }
 
     if ($leftMousePressed -and (Test-AppleMenuClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
       $appleMenuCooldownElapsed = ($now - $lastAppleMenuClick).TotalMilliseconds -ge [int]$config.appleMenuClickCooldownMilliseconds
