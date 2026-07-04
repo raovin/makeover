@@ -1,14 +1,22 @@
-# Registers the `macmakeover-control-center:` protocol so top-right toolbar controls open
-# the custom mac-style control/power popover without showing Seelen's built-in flyout.
+# Registers the `macmakeover-control-center:` protocol. The toolbar sliders item's
+# onClick opens this URI, which makes the trigger position-independent (pixel click
+# zones kept breaking whenever bar item widths drifted).
+#
+# Fast path: cmd (via conhost --headless, no window flash) echoes "control" straight
+# into the resident MacMakeover.MenuHost named pipe (~50ms). If the pipe is missing
+# (host died), the || fallback starts the host with --show control, which both heals
+# the host and opens the panel. No PowerShell in the hot path.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$controlScript = Join-Path $repoRoot 'scripts\Show-MacControlCenter.ps1'
-if (-not (Test-Path $controlScript)) { throw "Control Center script not found: $controlScript" }
+$menuHostExe = Join-Path $repoRoot 'tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe'
+if (-not (Test-Path $menuHostExe)) {
+  Write-Warning "MenuHost is not built yet ($menuHostExe). Run: dotnet build tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj -c Release"
+}
 
 $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$command = '"{0}" --headless "{1}" -NoProfile -ExecutionPolicy Bypass -STA -File "{2}" "%1"' -f $conhost, $powershell, $controlScript
+$cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+$command = '"{0}" --headless "{1}" /c echo control> \\.\pipe\MacMakeover.MenuHost || start "" "{2}" --show control' -f $conhost, $cmd, $menuHostExe
 
 $base = 'HKCU:\Software\Classes\macmakeover-control-center'
 New-Item -Path "$base\shell\open\command" -Force | Out-Null

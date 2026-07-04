@@ -40,8 +40,9 @@ Current intended behavior:
 - Top-left Apple mark opens a compact Apple menu quickly.
 - Clicking the Apple mark must not open a terminal window.
 - The top-right sliders control opens the custom MenuHost Control Center, not Seelen's old quick-settings or power-options flyout.
-- Wi-Fi, battery, sliders, bell, and date/time are separate click targets, so their visual affordances should read as distinct controls.
-- Wi-Fi opens the native Windows network flyout; battery opens native Windows Quick Settings; the bell opens Notification Center; date/time opens the calendar popup.
+- Wi-Fi, Bluetooth, sliders, bell, and date/time are separate click targets, so their visual affordances should read as distinct controls.
+- Wi-Fi opens Seelen's network quick panel; Bluetooth opens Seelen's Bluetooth quick panel; the bell opens Seelen notifications; date/time opens the calendar popup.
+- Battery is an informational center readout merged with charging state, not a right-side pseudo-button.
 - Wi-Fi/network belongs in the MacBook-style right-side status area.
 - Battery and charging should be presented as one combined status item, not two unrelated icons.
 - Throughput/readout clutter should not live in the top bar unless the design makes it genuinely elegant.
@@ -52,8 +53,8 @@ Current intended behavior:
 Critical guardrails:
 - Do not re-enable Seelen shortcuts or Seelen task switcher behavior.
 - Do not re-add @seelen/tb-quick-settings unless the user explicitly asks for the old Seelen flyout.
-- Do not wire Seelen toolbar onClick directly to macmakeover-apple-menu: or macmakeover-control-center:. That URI/ShellExecute path was laggy.
-- Normal Apple and Control Center clicks are routed by scripts\start-hot-corners.ps1 to the resident tools\MacMakeover.MenuHost process over a named pipe.
+- Do not wire the Apple toolbar item directly to macmakeover-apple-menu:. Apple remains helper-routed.
+- The sliders item should wire directly to macmakeover-control-center:, whose protocol writes to the resident tools\MacMakeover.MenuHost named pipe and has a self-healing --show fallback.
 - The macmakeover-* URI handlers are fallback/restore plumbing only.
 - Do not reintroduce visible PowerShell, Windows Terminal, or old power-options screens.
 - Stop Seelen before editing Seelen config/theme files.
@@ -84,8 +85,9 @@ Verification requirements before saying done:
 - Inspect the saved full screenshot plus the top and bottom crops under qa\.
 - Test real interactions, not just static screenshots:
   - Apple mark opens the Apple menu quickly and without a terminal.
-  - Wi-Fi opens the native Windows network flyout.
-  - Battery opens native Windows Quick Settings.
+  - Wi-Fi opens Seelen's network quick panel.
+  - Bluetooth opens Seelen's Bluetooth quick panel.
+  - Battery appears in the center informational cluster, not the right interactive cluster.
   - Sliders open the custom Control Center.
   - The bell opens Notification Center instead of Control Center.
   - Date/time opens the calendar popup and does not leave Control Center underneath it.

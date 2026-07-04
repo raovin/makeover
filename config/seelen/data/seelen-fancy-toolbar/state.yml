@@ -75,22 +75,6 @@ center:
   style:
     minWidth: 82
   remoteData: {}
-right:
-- '@seelen/tb-bluetooth-popup'
-- id: macmakeover-network-status
-  scopes: []
-  template: return icon("LuWifi");
-  tooltip: return "";
-  badge: null
-  onClick: null
-  onWheelUp: null
-  onWheelDown: null
-  style:
-    minWidth: 28
-    maxWidth: 28
-    flexShrink: 0
-    width: 28
-  remoteData: {}
 - id: c947837b-128a-450c-a634-f215d5935aac
   scopes:
   - Power
@@ -103,32 +87,21 @@ right:
   style:
     minWidth: 68
   remoteData: {}
+right:
+- '@seelen/tb-network-popup'
+- '@seelen/tb-bluetooth-popup'
 - id: macmakeover-control-center
   scopes: []
   template: return icon("LuSlidersHorizontal");
   tooltip: return "";
   badge: null
-  onClick: null
+  onClick: 'open("macmakeover-control-center:")'
   onWheelUp: null
   onWheelDown: null
   style:
     minWidth: 28
     flexShrink: 0
     maxWidth: 28
-    width: 28
-  remoteData: {}
-- id: macmakeover-power
-  scopes: []
-  template: return icon("LuPower");
-  tooltip: return "";
-  badge: null
-  onClick: null
-  onWheelUp: null
-  onWheelDown: null
-  style:
-    minWidth: 28
-    maxWidth: 28
-    flexShrink: 0
     width: 28
   remoteData: {}
 - '@seelen/tb-calendar-popup'

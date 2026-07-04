@@ -124,10 +124,10 @@ if (Test-Path -Path $ControlCenterCommandPath) {
   $controlCenterCommand = (Get-Item -Path $ControlCenterCommandPath).GetValue("")
   Write-Host "  $controlCenterCommand"
   if ($controlCenterCommand -match "wscript\.exe") {
-    Write-Warning "Control Center is registered via wscript.exe, which is blocked by this PC's security policy. Re-run scripts\Install-MacControlCenterHandler.ps1 to switch to conhost."
+    Write-Warning "Control Center is registered via wscript.exe, which is blocked by this PC's security policy. Re-run scripts\Install-MacControlCenterHandler.ps1 to switch to the pipe launcher."
     $VerificationFailed = $true
-  } elseif (-not ($controlCenterCommand -match "conhost\.exe" -and $controlCenterCommand -match "Show-MacControlCenter\.ps1")) {
-    Write-Warning "Control Center is not registered to the conhost launcher. Re-run scripts\Install-MacControlCenterHandler.ps1."
+  } elseif (-not ($controlCenterCommand -match "MacMakeover\.MenuHost" -and $controlCenterCommand -match "echo control")) {
+    Write-Warning "Control Center is not registered to the fast MenuHost pipe launcher (cmd echo into \\.\pipe\MacMakeover.MenuHost with a --show fallback). Re-run scripts\Install-MacControlCenterHandler.ps1."
     $VerificationFailed = $true
   }
 } else {
@@ -144,11 +144,18 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -match 'open\("macmakeover-(apple-menu|control-center):"\)') {
-    Write-Warning "Toolbar clicks are registered directly to macmakeover URI protocols. Normal Apple/Control Center clicks should be handled by start-hot-corners.ps1 to avoid multi-second ShellExecute/PowerShell launch lag."
+  if ($toolbarRaw -match 'open\("macmakeover-apple-menu:"\)') {
+    Write-Warning "Apple-logo clicks are registered directly to the macmakeover URI protocol. Normal Apple clicks should be handled by start-hot-corners.ps1 (instant); the URI is fallback plumbing."
     $VerificationFailed = $true
   } else {
-    Write-Host "  OK normal Apple/Control Center clicks are helper-owned, not URI-launched from Seelen."
+    Write-Host "  OK Apple clicks are helper-owned, not URI-launched from Seelen."
+  }
+
+  if ($toolbarRaw -notmatch 'open\("macmakeover-control-center:"\)') {
+    Write-Warning "The Control Center sliders item has lost its onClick. It must open via the macmakeover-control-center: URI (fast MenuHost pipe echo) so it never depends on pixel positions."
+    $VerificationFailed = $true
+  } else {
+    Write-Host "  OK Control Center opens via its item onClick (position-independent)."
   }
 
   if ($toolbarRaw -match 'Battery:|Charge rate:|return "Control Center";') {
@@ -156,17 +163,32 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -match 'f3a7c1e2-9b4d-4e6a-8c1f-2d5e7a9b0c11|BsLightningChargeFill|energyRate') {
-    Write-Warning "Top-bar battery charging state has split back into a separate charge-rate/lightning item. Keep it merged into one battery control."
+  if ($toolbarRaw -match 'f3a7c1e2-9b4d-4e6a-8c1f-2d5e7a9b0c11|energyRate') {
+    Write-Warning "Top-bar battery charging state has split back into a separate charge-rate item. Keep it merged into one battery readout (a charging bolt inside the merged item is fine)."
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -notmatch 'LuWifi') {
-    Write-Warning "Top-bar network affordance is missing. Keep the Wi-Fi glyph visible in the compact right-side cluster."
+  if ($toolbarRaw -notmatch '@seelen/tb-network-popup') {
+    Write-Warning "The network quick panel (@seelen/tb-network-popup) is missing from the status strip. Wi-Fi should have its own popup like Bluetooth."
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -notmatch 'macmakeover-notifications' -or $toolbarRaw -notmatch 'LuBell') {
+  if ($toolbarRaw -notmatch '@seelen/tb-bluetooth-popup') {
+    Write-Warning "The Bluetooth quick panel (@seelen/tb-bluetooth-popup) is missing from the status strip."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarRaw -notmatch '(?s)center:.*c947837b-128a-450c-a634-f215d5935aac.*right:') {
+    Write-Warning "The battery readout should live in the CENTER informational cluster (CPU/MEM/NET/Battery), not as a right-side pseudo-button."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarRaw -match 'macmakeover-power') {
+    Write-Warning "A separate top-bar power icon is present. Power actions belong inside the custom Control Center, not as a dead/fake right-side button."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarRaw -notmatch '@seelen/tb-notifications') {
     Write-Warning "Top-bar notification bell is missing. It should be a separate click target from Control Center."
     $VerificationFailed = $true
   }
@@ -192,8 +214,8 @@ if (Test-Path -LiteralPath $SettingsPath) {
 
 if (Test-Path -LiteralPath $ThemePath) {
   $toolbarCss = Get-Content -LiteralPath $ThemePath -Raw
-  if ($toolbarCss -notmatch 'Distinct system controls' -or $toolbarCss -match '\.ft-bar-right:has') {
-    Write-Warning "Right-side system controls should be distinct hit targets; do not visually merge Wi-Fi, battery, sliders, bell, and date/time."
+  if ($toolbarCss -notmatch 'Right status cluster reads as ONE cohesive unit' -or $toolbarCss -match '\.ft-bar-right:has') {
+    Write-Warning "Right-side system controls should use the current cohesive-cluster styling and must not share a hover group via :has()."
     $VerificationFailed = $true
   }
 }
@@ -201,8 +223,8 @@ if (Test-Path -LiteralPath $ThemePath) {
 $menuHostSourcePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\Program.cs"
 if (Test-Path -LiteralPath $menuHostSourcePath) {
   $menuHostSource = Get-Content -LiteralPath $menuHostSourcePath -Raw
-  if ($menuHostSource -notmatch 'Network Settings' -or $menuHostSource -notmatch 'ms-settings:network-status') {
-    Write-Warning "MenuHost Control Center is missing the Network Settings action."
+  if ($menuHostSource -notmatch 'Wi-Fi' -or $menuHostSource -notmatch 'ms-settings:network-wifi') {
+    Write-Warning "MenuHost Control Center is missing the Wi-Fi live tile/action."
     $VerificationFailed = $true
   }
 }
@@ -223,34 +245,23 @@ if (Test-Path -LiteralPath $HotCornersConfigPath) {
     $VerificationFailed = $true
   }
 
-  if (-not $hotCornersConfig.appleMenuClickEnabled -or -not $hotCornersConfig.controlCenterClickEnabled) {
-    Write-Warning "Helper-owned Apple/Control Center click routing is disabled."
+  if (-not $hotCornersConfig.appleMenuClickEnabled) {
+    Write-Warning "Helper-owned Apple click routing is disabled."
     $VerificationFailed = $true
   }
 
-  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("networkFlyoutZoneLeftOffset")) {
-    Write-Warning "Wi-Fi click zone is missing. The Wi-Fi glyph should open the native Windows network flyout."
-    $VerificationFailed = $true
-  }
-
-  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("batteryQuickSettingsZoneLeftOffset")) {
-    Write-Warning "Battery click zone is missing. The battery control should open native Windows Quick Settings."
-    $VerificationFailed = $true
-  }
-
-  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("controlCenterStatusZoneLeftOffset")) {
-    Write-Warning "Sliders click zone is missing. The visible sliders control should open the custom Control Center."
-    $VerificationFailed = $true
-  }
-
-  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("notificationCenterZoneLeftOffset")) {
-    Write-Warning "Notification Center click zone is missing. The bell should not open Control Center."
-    $VerificationFailed = $true
-  }
-
-  if (-not $hotCornersConfig.PSObject.Properties.Name.Contains("calendarPopupZoneLeftOffset")) {
-    Write-Warning "Calendar/date click zone is missing. Date clicks should dismiss custom panels before opening the calendar."
-    $VerificationFailed = $true
+  foreach ($itemOwnedRoute in @(
+    "networkFlyoutClickEnabled",
+    "batteryQuickSettingsClickEnabled",
+    "controlCenterClickEnabled",
+    "notificationCenterClickEnabled",
+    "calendarPopupClickEnabled"
+  )) {
+    $routeProperty = $hotCornersConfig.PSObject.Properties[$itemOwnedRoute]
+    if ($routeProperty -and [bool]$routeProperty.Value) {
+      Write-Warning "$itemOwnedRoute should be false. Right-side menu-bar controls are item-owned now, not pixel-zone-routed by the helper."
+      $VerificationFailed = $true
+    }
   }
 }
 

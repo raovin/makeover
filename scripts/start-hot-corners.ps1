@@ -64,21 +64,44 @@ public static class MacMakeoverHotCornersNative {
   [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
-  // Seelen flyout popups ("Bluetooth Popup", "Calendar Popup", ...) are sticky: they do
-  // not dismiss on an outside click. Hide any visible Tauri "* Popup" window that does
-  // not contain the click point, so they behave like normal menus.
+  // Seelen flyout popups are sticky: they do not dismiss on an outside click. Hide any
+  // visible Tauri popup window ("Bluetooth Popup", "Calendar Popup", ..., and the
+  // network panel which is titled just "Network") that does not contain the click
+  // point, so they behave like normal menus. Seelen "Tooltip" windows are transient
+  // hover labels that linger and overlap the bar - hide those on every click.
   public static void HideSeelenPopupsOutside(int x, int y) {
     EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
       if (!IsWindowVisible(hWnd)) return true;
-      var title = new System.Text.StringBuilder(128);
-      GetWindowText(hWnd, title, 128);
-      if (!title.ToString().EndsWith(" Popup", StringComparison.Ordinal)) return true;
+      var titleBuilder = new System.Text.StringBuilder(128);
+      GetWindowText(hWnd, titleBuilder, 128);
+      var title = titleBuilder.ToString();
+      bool isPopup = title.EndsWith(" Popup", StringComparison.Ordinal) || title == "Network";
+      bool isTooltip = title == "Tooltip";
+      if (!isPopup && !isTooltip) return true;
       var className = new System.Text.StringBuilder(128);
       GetClassName(hWnd, className, 128);
       if (className.ToString() != "Tauri Window") return true;
-      RECT rect;
-      GetWindowRect(hWnd, out rect);
-      if (x >= rect.Left && x <= rect.Right && y >= rect.Top && y <= rect.Bottom) return true;
+      if (isPopup) {
+        RECT rect;
+        GetWindowRect(hWnd, out rect);
+        if (x >= rect.Left && x <= rect.Right && y >= rect.Top && y <= rect.Bottom) return true;
+      }
+      ShowWindow(hWnd, 0);
+      return true;
+    }, IntPtr.Zero);
+  }
+
+  // Bar clicks must not dismiss the popup they are opening, but lingering hover
+  // tooltips should still vanish the moment anything is clicked.
+  public static void HideSeelenTooltips() {
+    EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
+      if (!IsWindowVisible(hWnd)) return true;
+      var titleBuilder = new System.Text.StringBuilder(128);
+      GetWindowText(hWnd, titleBuilder, 128);
+      if (titleBuilder.ToString() != "Tooltip") return true;
+      var className = new System.Text.StringBuilder(128);
+      GetClassName(hWnd, className, 128);
+      if (className.ToString() != "Tauri Window") return true;
       ShowWindow(hWnd, 0);
       return true;
     }, IntPtr.Zero);
@@ -116,24 +139,24 @@ function Read-HotCornerConfig {
     appleMenuZoneLeft = 24
     appleMenuZoneRight = 78
     appleMenuClickCooldownMilliseconds = 300
-    networkFlyoutClickEnabled = $true
+    networkFlyoutClickEnabled = $false
     networkFlyoutZoneLeftOffset = 355
     networkFlyoutZoneRightOffset = 310
     networkFlyoutClickCooldownMilliseconds = 300
-    batteryQuickSettingsClickEnabled = $true
+    batteryQuickSettingsClickEnabled = $false
     batteryQuickSettingsZoneLeftOffset = 310
     batteryQuickSettingsZoneRightOffset = 222
     batteryQuickSettingsClickCooldownMilliseconds = 300
-    controlCenterClickEnabled = $true
+    controlCenterClickEnabled = $false
     topBarClickHeight = 40
     controlCenterStatusZoneLeftOffset = 222
     controlCenterStatusZoneRightOffset = 188
     controlCenterClickCooldownMilliseconds = 300
-    notificationCenterClickEnabled = $true
+    notificationCenterClickEnabled = $false
     notificationCenterZoneLeftOffset = 186
     notificationCenterZoneRightOffset = 140
     notificationCenterClickCooldownMilliseconds = 300
-    calendarPopupClickEnabled = $true
+    calendarPopupClickEnabled = $false
     calendarPopupZoneLeftOffset = 138
     calendarPopupZoneRightOffset = 24
     calendarPopupClickCooldownMilliseconds = 300
@@ -649,11 +672,16 @@ while ($true) {
     $leftMousePressed = (($leftMouseState -band 0x0001) -ne 0) -or ($leftMouseDown -and -not $wasLeftMouseDown)
     $now = Get-Date
 
-    # Click-away dismissal for sticky Seelen popups (Bluetooth/Calendar/Notifications):
-    # any click below the top bar hides popups that do not contain the click point.
-    # Clicks ON the bar are left alone so icon toggles keep their native behavior.
-    if ($leftMousePressed -and $point.Y -gt ($bounds.Top + [int]$config.topBarClickHeight)) {
-      try { [MacMakeoverHotCornersNative]::HideSeelenPopupsOutside($point.X, $point.Y) } catch { }
+    # Click-away dismissal for sticky Seelen popups (Network/Bluetooth/Calendar/
+    # Notifications): any click below the top bar hides popups that do not contain the
+    # click point. Clicks ON the bar only clear lingering hover tooltips, so the popup
+    # being opened by that click is never dismissed by us in the same instant.
+    if ($leftMousePressed) {
+      if ($point.Y -gt ($bounds.Top + [int]$config.topBarClickHeight)) {
+        try { [MacMakeoverHotCornersNative]::HideSeelenPopupsOutside($point.X, $point.Y) } catch { }
+      } else {
+        try { [MacMakeoverHotCornersNative]::HideSeelenTooltips() } catch { }
+      }
     }
 
     if ($leftMousePressed -and (Test-AppleMenuClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {

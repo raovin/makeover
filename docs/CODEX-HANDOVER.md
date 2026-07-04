@@ -8,10 +8,10 @@ The user is very explicit about quality: do not claim a visual task is finished 
 
 ## Latest (2026-06-29, Codex Audit Fix)
 
-- Normal Apple and Control Center clicks now open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
+- Normal Apple clicks open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
 - The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
-- The top-right sliders control opens the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. Wi-Fi opens the native Windows network flyout, battery opens native Quick Settings, the bell opens Notification Center, and date/time opens the calendar popup. The `macmakeover-control-center:` protocol remains registered by `scripts\Install-MacControlCenterHandler.ps1` only as fallback plumbing.
-- Performance correction: normal Apple and Control Center clicks are no longer launched by Seelen `onClick` URI handlers. `scripts\start-hot-corners.ps1` owns those top-bar click zones and sends `apple` / `control` over the `MacMakeover.MenuHost` named pipe. The resident host must be running so clicks do not cold-launch.
+- The top-right sliders control opens the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. It intentionally uses `onClick: open("macmakeover-control-center:")`; that protocol is registered to a fast `conhost --headless cmd /c echo control> \\.\pipe\MacMakeover.MenuHost` launcher with a `--show control` fallback.
+- Performance correction: normal Apple clicks remain helper-owned through `scripts\start-hot-corners.ps1`. Right-side controls are item-owned now: Network/Bluetooth/Calendar/Notifications use Seelen quick panels, and sliders use the fast Control Center protocol.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
 - Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
 - The three previous locations were consolidated into this single git repo at `C:\Users\VineethRao\source\repos\mac-makeover`. The old brunel copy is kept untouched as a frozen backup.
@@ -32,7 +32,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 - The top-left Apple icon should behave like macOS: it should open a compact Apple menu directly, not a big Seelen user drawer and not a terminal.
 - The top-right sliders control should open the custom Control Center directly, not Seelen's old power/options screen.
 - The dock should stay rich; the user previously said there is no need to trim it.
-- The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered CPU/memory/network telemetry, and a MacBook-style right side with separate Wi-Fi, battery, Control Center sliders, notification bell, and date/time controls at the far right.
+- The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered CPU/memory/network/battery telemetry, and a MacBook-style right side with separate Network, Bluetooth, Control Center sliders, notification bell, and date/time controls at the far right.
 - No visible overlap, clipped text, ghost tooltips, ugly separator lines, or accidental title pollution such as `Windows PowerShell / Apple Menu`.
 - Alt+Tab should remain native Windows Alt+Tab. Do not revive Seelen task-switcher shortcuts.
 - Lock-screen PIN entry previously broke during shortcut/task-switcher experiments. Keep Seelen shortcuts disabled.
@@ -76,14 +76,14 @@ Registry path:
 HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command
 ```
 
-7. Do not wire Seelen toolbar `onClick` directly to `macmakeover-apple-menu:` or `macmakeover-control-center:`. That URI/ShellExecute path caused multi-second perceived lag. Normal Apple and Control Center clicks must be owned by `scripts\start-hot-corners.ps1`, which sends named-pipe commands to the resident `tools\MacMakeover.MenuHost` process. The URI protocols remain registered only as fallback/restore plumbing.
+7. Do not wire Seelen toolbar `onClick` directly to `macmakeover-apple-menu:`. Apple must stay helper-routed. The Control Center sliders item is the exception: it should use `open("macmakeover-control-center:")`, whose protocol is a fast named-pipe echo into the resident `tools\MacMakeover.MenuHost` process with a self-healing `--show control` fallback.
 
 8. Do not re-add Seelen's `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back. The right-side Control Center entry is custom and is backed by the hot-corners top-bar click router.
 
 Correct Control Center handler shape (registered by `scripts\Install-MacControlCenterHandler.ps1`):
 
 ```text
-"C:\Windows\System32\conhost.exe" --headless "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -STA -File "C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacControlCenter.ps1" "%1"
+"C:\Windows\System32\conhost.exe" --headless "C:\Windows\System32\cmd.exe" /c echo control> \\.\pipe\MacMakeover.MenuHost || start "" "C:\Users\VineethRao\source\repos\mac-makeover\tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe" --show control
 ```
 
 Registry path:
@@ -169,7 +169,7 @@ The replacement is a custom toolbar sliders control:
 - id: macmakeover-control-center
   template: 'return icon("LuSlidersHorizontal");'
   tooltip: 'return "";'
-  onClick: null
+  onClick: 'open("macmakeover-control-center:")'
 ```
 
 Normal clicks are caught by `scripts\start-hot-corners.ps1` and shown by `tools\MacMakeover.MenuHost`. The fallback URI launches this WPF script through `conhost.exe --headless`:
@@ -180,8 +180,11 @@ C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacControlCenter.ps1
 
 The current Control Center includes:
 
-- Power & Battery Settings
-- Network Settings
+- Battery summary
+- Wi-Fi live tile
+- Bluetooth live tile
+- Display slider
+- Sound slider
 - System Settings
 - Show Desktop
 - Lock Screen
@@ -189,7 +192,7 @@ The current Control Center includes:
 - Restart...
 - Shut Down...
 
-Because Seelen/Windows URI launches were measured as laggy, `scripts\start-hot-corners.ps1` routes the Apple zone and sliders control directly to the resident MenuHost. The same helper owns Wi-Fi, battery, bell, and date/time click zones so their behavior stays aligned with their visual targets. Keep that layer unless replacing the whole top-bar interaction model.
+Because Seelen/Windows PowerShell URI launches were measured as laggy, Apple remains helper-routed to the resident MenuHost. The sliders item uses a URI only because the handler is a fast pipe echo with a self-healing MenuHost fallback. Network, Bluetooth, calendar, and notifications are Seelen-owned item clicks, not helper pixel zones.
 
 Recent visual/performance proof screenshots:
 
@@ -291,7 +294,7 @@ C:\Users\VineethRao\source\repos\mac-makeover\config\hot-corners.json
 
 The top-left hot corner and Apple glyph are close together. Top-left/top-right outer-corner clicks use `clickCornerSize` from `config\hot-corners.json` and send Show Desktop. Be careful when changing hit targets; do not reintroduce invisible click stealing.
 
-The same helper owns the Apple click zone through `appleMenuClickEnabled` and `appleMenuZone*`, plus the top-right status-strip hit zone through `controlCenterClickEnabled` and `controlCenterStatusZone*`. The older `controlCenterRightButtonWidth`, `controlCenterNetworkZone*`, and `controlCenterPowerZone*` offsets remain as fallback compatibility. The exact physical top-left/top-right corners remain reserved for Show Desktop.
+The same helper owns the Apple click zone through `appleMenuClickEnabled` and `appleMenuZone*`. Right-side controls are item-owned now; keep the helper's network/battery/control/notification/calendar pixel-zone booleans disabled unless deliberately reverting to the older coordinate-based model. The exact physical top-left/top-right corners remain reserved for Show Desktop.
 
 ## The Repo / Git Backup
 
@@ -337,7 +340,7 @@ Top picks:
    - Make the focused app label more Mac-like: app name only, no noisy title unless useful.
    - Keep the centered CPU/memory/network telemetry visually centered even when right-side items widen.
    - Ensure long app names do not overlap the center telemetry.
-   - Keep right-side Wi-Fi/battery/Control Center, notification bell, and date/time visually distinct because they now have different click behavior.
+   - Keep right-side Network/Bluetooth/Control Center, notification bell, and date/time visually distinct because they now have different click behavior.
    - Preserve the custom Control Center; do not fall back to Seelen's quick-settings flyout.
 
 3. Dock polish

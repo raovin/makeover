@@ -141,6 +141,12 @@
   opacity: 0.9;
 }
 
+/* Battery is an informational center readout now. The charging bolt can stay
+   white while the actual battery glyph takes on the macOS green. */
+.ft-bar-center > .ft-bar-item:nth-child(4) svg:last-of-type {
+  color: #34c759;
+}
+
 /* Right status cluster reads as ONE cohesive unit (like the center stats pill):
    flat, transparent items inside a single soft container - no per-item chips. */
 .ft-bar-right .ft-bar-item {
@@ -159,12 +165,6 @@
 
 .ft-bar-right > .ft-bar-item.ft-bar-item-clickable:active {
   background-color: rgba(255, 255, 255, 0.2) !important;
-}
-
-/* Battery reads green like macOS. It's the 3rd right item (Wi-Fi, Bluetooth, Battery);
-   svg:last-of-type is the battery glyph, so the charging bolt (first glyph) stays white. */
-.ft-bar-right > .ft-bar-item:nth-child(3) svg:last-of-type {
-  color: #34c759;
 }
 
 /* Trailing items (clock, then bell) get a touch of separating space. */
