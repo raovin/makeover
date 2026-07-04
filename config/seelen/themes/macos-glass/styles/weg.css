@@ -1,28 +1,30 @@
-/* macOS Glass - frosted dock */
+/* macOS Glass - reimagined floating dock */
 .taskbar {
-  background-color: rgba(18, 22, 30, 0.82) !important;
-  backdrop-filter: blur(22px) saturate(1.35);
-  -webkit-backdrop-filter: blur(22px) saturate(1.35);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background:
+    linear-gradient(180deg, rgba(38, 44, 58, 0.74), rgba(16, 20, 29, 0.82)) !important;
+  backdrop-filter: blur(30px) saturate(1.55) contrast(1.04);
+  -webkit-backdrop-filter: blur(30px) saturate(1.55) contrast(1.04);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   box-shadow:
-    0 18px 44px -14px rgba(0, 0, 0, 0.78),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.22),
-    inset 0 -1px 0 0 rgba(0, 0, 0, 0.28);
+    0 22px 58px -16px rgba(0, 0, 0, 0.82),
+    0 7px 20px -14px rgba(118, 176, 255, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3);
 }
 
 .taskbar[data-has-margin="true"],
 .taskbar[data-size="min-content"] {
-  border-radius: 22px;
+  border-radius: 24px;
 }
 
 .taskbar[data-has-margin="true"] > .weg-items-container,
 .taskbar[data-size="min-content"] > .weg-items-container {
-  border-radius: 22px;
+  border-radius: 24px;
 }
 
 .weg-item {
   background-color: transparent !important;
-  border-radius: 12px;
+  border-radius: 15px;
   box-shadow: none !important;
   overflow: visible !important;
   transition:
@@ -32,25 +34,29 @@
 }
 
 .weg-item:hover {
-  background-color: rgba(255, 255, 255, 0.14) !important;
-  transform: translateY(-2px);
+  background-color: rgba(255, 255, 255, 0.16) !important;
+  transform: translateY(-3px);
 }
 
 .weg-item:active {
-  transform: scale(0.94);
+  transform: translateY(-1px) scale(0.95);
 }
 
 .weg-item:hover .weg-item-icon {
-  filter: brightness(1.08) saturate(1.12);
+  filter:
+    brightness(1.1)
+    saturate(1.15)
+    drop-shadow(0 8px 14px rgba(0, 0, 0, 0.36));
 }
 
 .weg-separator {
-  opacity: 0.42;
+  opacity: 0.5;
 }
 
 .weg-item-open-sign.weg-item-open-sign-active {
-  background-color: rgba(255, 255, 255, 0.9) !important;
+  background-color: rgba(245, 249, 255, 0.96) !important;
   border-radius: 999px;
   height: 4px;
   width: 4px;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.35);
 }

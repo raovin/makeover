@@ -155,6 +155,9 @@ internal sealed class MenuContext : ApplicationContext
             _current.Show();
             NativeMethods.ShowAboveEverything(_current);
             _current.Activate();
+            _current.Invalidate(invalidateChildren: true);
+            _current.Update();
+            _current.Refresh();
             Program.Log($"Shown {_current.Text}, visible={_current.Visible}, handle={_current.Handle}");
         }
         catch (Exception ex)
@@ -179,13 +182,17 @@ internal sealed class MenuContext : ApplicationContext
 
 internal sealed class MenuForm : Form
 {
-    private readonly Color _panel = Color.FromArgb(33, 36, 45);
-    private readonly Color _card = Color.FromArgb(48, 52, 65);
-    private readonly Color _cardHover = Color.FromArgb(58, 64, 80);
-    private readonly Color _hover = Color.FromArgb(44, 107, 237);
-    private readonly Color _separator = Color.FromArgb(84, 91, 103);
-    private readonly Color _primaryText = Color.FromArgb(246, 248, 251);
-    private readonly Color _secondaryText = Color.FromArgb(174, 181, 191);
+    private readonly Color _panel = Color.FromArgb(30, 35, 46);
+    private readonly Color _panelTop = Color.FromArgb(40, 47, 61);
+    private readonly Color _panelBottom = Color.FromArgb(23, 27, 36);
+    private readonly Color _panelBorder = Color.FromArgb(76, 88, 108);
+    private readonly Color _card = Color.FromArgb(48, 54, 70);
+    private readonly Color _cardBottom = Color.FromArgb(40, 45, 59);
+    private readonly Color _cardHover = Color.FromArgb(62, 70, 89);
+    private readonly Color _hover = Color.FromArgb(59, 116, 239);
+    private readonly Color _separator = Color.FromArgb(78, 87, 103);
+    private readonly Color _primaryText = Color.FromArgb(248, 250, 253);
+    private readonly Color _secondaryText = Color.FromArgb(184, 192, 205);
     private readonly List<MenuRow> _rows = [];
     private readonly System.Windows.Forms.Timer _outsideClickTimer;
     private readonly Font _regularFont;
@@ -199,6 +206,7 @@ internal sealed class MenuForm : Form
     private int _logicalMargin = 8;
     private DateTime _shownAt;
     private bool _wasLeftMouseDown;
+    private bool _hasShown;
     private int _hoverIndex = -1;
     private int _dragRow = -1;
 
@@ -228,6 +236,7 @@ internal sealed class MenuForm : Form
         Shown += (_, _) =>
         {
             _shownAt = DateTime.UtcNow;
+            _hasShown = true;
             _outsideClickTimer.Start();
         };
         FormClosed += (_, _) => _outsideClickTimer.Dispose();
@@ -238,13 +247,10 @@ internal sealed class MenuForm : Form
                 Close();
             }
         };
-        Deactivate += (_, _) =>
-        {
-            if ((DateTime.UtcNow - _shownAt).TotalMilliseconds > 250)
-            {
-                Close();
-            }
-        };
+        // Do not close on Deactivate. Seelen, shell URI launches, screenshot tools, and
+        // the desktop compositor can briefly take focus away from a just-opened menu,
+        // which made the Control Center vanish before it ever painted. The timer below
+        // still handles normal click-away dismissal.
     }
 
     // All size/position math depends on DeviceDpi, which is only correct once the handle exists.
@@ -266,7 +272,7 @@ internal sealed class MenuForm : Form
 
     protected override void OnPaintBackground(PaintEventArgs e)
     {
-        using var brush = new SolidBrush(_panel);
+        using var brush = new LinearGradientBrush(ClientRectangle, _panelTop, _panelBottom, LinearGradientMode.Vertical);
         e.Graphics.FillRectangle(brush, ClientRectangle);
     }
 
@@ -274,7 +280,10 @@ internal sealed class MenuForm : Form
     {
         base.OnPaint(e);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.Clear(_panel);
+        using (var brush = new LinearGradientBrush(ClientRectangle, _panelTop, _panelBottom, LinearGradientMode.Vertical))
+        {
+            e.Graphics.FillRectangle(brush, ClientRectangle);
+        }
 
         var y = Padding.Top;
         for (var i = 0; i < _rows.Count; i++)
@@ -311,6 +320,11 @@ internal sealed class MenuForm : Form
 
             y += height;
         }
+
+        var borderRect = Rectangle.Inflate(ClientRectangle, -1, -1);
+        using var borderPath = RoundedRect(borderRect, LogicalToDeviceUnits(12));
+        using var borderPen = new Pen(_panelBorder);
+        e.Graphics.DrawPath(borderPen, borderPath);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
@@ -353,10 +367,11 @@ internal sealed class MenuForm : Form
         action();
     }
 
-    public static MenuForm CreateApple()
+    public static MenuForm CreateApple(bool anchorRight = false)
     {
         var form = new MenuForm(248);
         form.Text = "Apple Menu";
+        form._anchorRight = anchorRight;
         form.AddItem("About This Mac", () => Start("msinfo32.exe"));
         form.AddSeparator();
         form.AddItem("System Settings...", () => Start("ms-settings:"));
@@ -380,36 +395,20 @@ internal sealed class MenuForm : Form
         var form = new MenuForm(292);
         form.Text = "Control Center";
         form._anchorRight = true;
-        form.AddHeader("Control Center", GetBatterySummary());
-
-        var wifi = form.AddIconCard("", "Wi-Fi", "Checking...", active: false, () => Start("ms-settings:network-wifi"));
-        var bluetooth = form.AddIconCard("", "Bluetooth", "Checking...", active: false, () => Start("ms-settings:bluetooth"));
-
-        var brightnessSlider = new SliderInfo
-        {
-            Glyph = "",
-            Value = 0.5f,
-            OnCommit = value => SetBrightnessAsync((int)Math.Round(value * 100))
-        };
-        form.AddSlider("Display", brightnessSlider);
-
-        var volumeSlider = new SliderInfo
-        {
-            Glyph = "",
-            Value = VolumeService.GetMasterVolume() ?? 0.5f,
-            OnChange = VolumeService.SetMasterVolume
-        };
-        form.AddSlider("Sound", volumeSlider);
-
+        form.AddItem("Control Center", null, GetBatterySummary());
+        form.AddSeparator();
+        form.AddItem("Wi-Fi...", () => Start("ms-settings:network-wifi"));
+        form.AddItem("Bluetooth...", () => Start("ms-settings:bluetooth"));
+        form.AddItem("Display...", () => Start("ms-settings:display"));
+        form.AddItem("Sound...", () => Start("ms-settings:sound"));
         form.AddSeparator();
         form.AddItem("System Settings...", () => Start("ms-settings:"));
         form.AddItem("Show Desktop", ToggleDesktop);
+        form.AddSeparator();
         form.AddItem("Lock Screen", () => Start("rundll32.exe", "user32.dll,LockWorkStation"));
         form.AddItem("Sleep", () => Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
-
-        form.LoadControlCenterStateAsync(wifi, bluetooth, brightnessSlider);
         return form;
     }
 
@@ -545,7 +544,7 @@ internal sealed class MenuForm : Form
 
     private void AddHeader(string title, string detail)
     {
-        _rows.Add(new MenuRow(MenuRowKind.Header, title, detail, string.Empty, null, 52));
+        _rows.Add(new MenuRow(MenuRowKind.Header, title, detail, string.Empty, null, 54));
     }
 
     private void AddCard(string label, string detail, Action action)
@@ -560,7 +559,7 @@ internal sealed class MenuForm : Form
 
     private MenuRow AddIconCard(string glyph, string label, string detail, bool active, Action action)
     {
-        var row = new MenuRow(MenuRowKind.IconCard, label, detail, string.Empty, action, 46)
+        var row = new MenuRow(MenuRowKind.IconCard, label, detail, string.Empty, action, 50)
         {
             Glyph = glyph,
             Active = active
@@ -571,7 +570,7 @@ internal sealed class MenuForm : Form
 
     private MenuRow AddSlider(string label, SliderInfo slider)
     {
-        var row = new MenuRow(MenuRowKind.Slider, label, string.Empty, string.Empty, null, 52)
+        var row = new MenuRow(MenuRowKind.Slider, label, string.Empty, string.Empty, null, 56)
         {
             Slider = slider
         };
@@ -615,10 +614,12 @@ internal sealed class MenuForm : Form
     private void DrawCard(Graphics graphics, Rectangle rect, MenuRow row, bool hovered)
     {
         var cardRect = Rectangle.Inflate(rect, -LogicalToDeviceUnits(2), -LogicalToDeviceUnits(3));
-        using (var brush = new SolidBrush(hovered ? _cardHover : _card))
+        using (var brush = new LinearGradientBrush(cardRect, hovered ? _cardHover : _card, _cardBottom, LinearGradientMode.Vertical))
         using (var path = RoundedRect(cardRect, LogicalToDeviceUnits(8)))
         {
             graphics.FillPath(brush, path);
+            using var pen = new Pen(Color.FromArgb(hovered ? 86 : 52, 255, 255, 255));
+            graphics.DrawPath(pen, path);
         }
 
         var titleRect = new Rectangle(cardRect.Left + LogicalToDeviceUnits(12), cardRect.Top + LogicalToDeviceUnits(6), cardRect.Width - LogicalToDeviceUnits(24), LogicalToDeviceUnits(20));
@@ -630,22 +631,28 @@ internal sealed class MenuForm : Form
     private void DrawIconCard(Graphics graphics, Rectangle rect, MenuRow row, bool hovered)
     {
         var cardRect = Rectangle.Inflate(rect, -LogicalToDeviceUnits(2), -LogicalToDeviceUnits(3));
-        using (var brush = new SolidBrush(hovered ? _cardHover : _card))
-        using (var path = RoundedRect(cardRect, LogicalToDeviceUnits(10)))
+        using (var brush = new LinearGradientBrush(cardRect, hovered ? _cardHover : _card, _cardBottom, LinearGradientMode.Vertical))
+        using (var path = RoundedRect(cardRect, LogicalToDeviceUnits(12)))
         {
             graphics.FillPath(brush, path);
+            using var pen = new Pen(Color.FromArgb(hovered ? 90 : 54, 255, 255, 255));
+            graphics.DrawPath(pen, path);
         }
 
         // Circular icon chip: accent blue when the feature is active, muted gray otherwise.
-        var chipSize = LogicalToDeviceUnits(28);
+        var chipSize = LogicalToDeviceUnits(30);
         var chipRect = new Rectangle(
             cardRect.Left + LogicalToDeviceUnits(10),
             cardRect.Top + (cardRect.Height - chipSize) / 2,
             chipSize,
             chipSize);
-        using (var chipBrush = new SolidBrush(row.Active ? _hover : Color.FromArgb(88, 93, 108)))
+        using (var chipBrush = new LinearGradientBrush(chipRect, row.Active ? Color.FromArgb(73, 140, 255) : Color.FromArgb(96, 104, 124), row.Active ? Color.FromArgb(35, 92, 215) : Color.FromArgb(70, 77, 94), LinearGradientMode.Vertical))
         {
             graphics.FillEllipse(chipBrush, chipRect);
+        }
+        using (var chipPen = new Pen(Color.FromArgb(70, 255, 255, 255)))
+        {
+            graphics.DrawEllipse(chipPen, chipRect);
         }
 
         TextRenderer.DrawText(graphics, row.Glyph, _iconFont, chipRect, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
@@ -667,17 +674,19 @@ internal sealed class MenuForm : Form
         TextRenderer.DrawText(graphics, row.Label, _smallBoldFont, labelRect, _primaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
 
         var track = SliderTrackRect(rect);
-        using (var backBrush = new SolidBrush(Color.FromArgb(70, 255, 255, 255)))
+        using (var backBrush = new LinearGradientBrush(track, Color.FromArgb(82, 255, 255, 255), Color.FromArgb(48, 255, 255, 255), LinearGradientMode.Vertical))
         using (var backPath = RoundedRect(track, track.Height / 2))
         {
             graphics.FillPath(backBrush, backPath);
+            using var trackPen = new Pen(Color.FromArgb(36, 255, 255, 255));
+            graphics.DrawPath(trackPen, backPath);
         }
 
         var knobRadius = track.Height / 2;
         var usable = track.Width - track.Height;
         var knobCx = track.Left + knobRadius + (int)(Math.Clamp(slider.Value, 0f, 1f) * usable);
         var filled = new Rectangle(track.Left, track.Top, knobCx + knobRadius - track.Left, track.Height);
-        using (var fillBrush = new SolidBrush(Color.FromArgb(242, 244, 248)))
+        using (var fillBrush = new LinearGradientBrush(filled, Color.FromArgb(252, 254, 255), Color.FromArgb(214, 226, 245), LinearGradientMode.Vertical))
         using (var fillPath = RoundedRect(filled, track.Height / 2))
         {
             graphics.FillPath(fillBrush, fillPath);
@@ -689,7 +698,7 @@ internal sealed class MenuForm : Form
         var knobRect = new Rectangle(knobCx - knobRadius, track.Top, track.Height, track.Height);
         using var knobBrush = new SolidBrush(Color.White);
         graphics.FillEllipse(knobBrush, knobRect);
-        using var knobPen = new Pen(Color.FromArgb(60, 0, 0, 0));
+        using var knobPen = new Pen(Color.FromArgb(75, 0, 0, 0));
         graphics.DrawEllipse(knobPen, knobRect);
     }
 
@@ -778,8 +787,13 @@ internal sealed class MenuForm : Form
 
     private void CloseAfterOutsideClick()
     {
+        if (!_hasShown)
+        {
+            return;
+        }
+
         var leftMouseDown = (Control.MouseButtons & MouseButtons.Left) == MouseButtons.Left;
-        if ((DateTime.UtcNow - _shownAt).TotalMilliseconds < 220)
+        if ((DateTime.UtcNow - _shownAt).TotalMilliseconds < 420)
         {
             _wasLeftMouseDown = leftMouseDown;
             return;

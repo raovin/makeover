@@ -20,4 +20,4 @@ plugin:
     if (kind === "ETHERNET_CSMACD" || /ethernet/.test(label)) return icon("LuCable");
     return icon("FaWifi");
   onClickV2: |-
-    trigger("@seelen/network-popup");
+    open("ms-settings:network-wifi");

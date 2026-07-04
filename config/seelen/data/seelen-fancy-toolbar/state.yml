@@ -42,38 +42,38 @@ center:
 - id: 5f28a9a4-83d4-44ac-b7dd-69a651a44db1
   scopes:
   - Cpu
-  template: if (typeof cores === "undefined" || !cores.length) return ""; const used = cores.reduce((total, core) => total + core.usage, 0) / cores.length; return [icon("LuCpu"), " ", used.toFixed(0) + "%"];
+  template: if (typeof cores === "undefined" || !cores.length) return ""; const used = cores.reduce((total, core) => total + core.usage, 0) / cores.length; return [icon("LuCpu"), " CPU " + used.toFixed(0) + "%"];
   tooltip: 'if (typeof cores === "undefined" || !cores.length) return ""; const used = cores.reduce((total, core) => total + core.usage, 0) / cores.length; return "CPU: " + used.toFixed(0) + "%";'
   badge: null
   onClick: null
   onWheelUp: null
   onWheelDown: null
   style:
-    minWidth: 50
+    minWidth: 72
   remoteData: {}
 - id: 42f54665-c379-4f6b-86e4-9b42cbfc1e2d
   scopes:
   - Memory
-  template: if (typeof memory === "undefined") return ""; const units = ["B", "K", "M", "G", "T"]; let total = memory.total; let used = memory.total - memory.free; let unit = 0; while (total >= 1024 && unit < units.length - 1) { total /= 1024; used /= 1024; unit++; } return [icon("FaMemory"), " ", used.toFixed(0) + "/" + total.toFixed(0) + units[unit]];
+  template: if (typeof memory === "undefined") return ""; const units = ["B", "K", "M", "G", "T"]; let total = memory.total; let used = memory.total - memory.free; let unit = 0; while (total >= 1024 && unit < units.length - 1) { total /= 1024; used /= 1024; unit++; } return [icon("FaMemory"), " RAM " + used.toFixed(0) + "/" + total.toFixed(0) + units[unit]];
   tooltip: 'if (typeof memory === "undefined") return ""; return "Memory: " + ((memory.total - memory.free) / 1073741824).toFixed(1) + " GB / " + (memory.total / 1073741824).toFixed(1) + " GB";'
   badge: null
   onClick: null
   onWheelUp: null
   onWheelDown: null
   style:
-    minWidth: 68
+    minWidth: 92
   remoteData: {}
 - id: 772bb39f-7bbb-4417-98ef-8150b798cd61
   scopes:
   - NetworkStatistics
-  template: 'if (typeof networkStatistics === "undefined") return [icon("LuArrowDownUp"), " 0"]; const down = networkStatistics.reduce((total, net) => total + net.received, 0) * 8; const up = networkStatistics.reduce((total, net) => total + net.transmitted, 0) * 8; const fmt = (value) => { const units = ["b", "K", "M", "G"]; let n = value; let unit = 0; while (n >= 1000 && unit < units.length - 1) { n /= 1000; unit++; } return (unit === 0 || n >= 10 ? n.toFixed(0) : n.toFixed(1)) + units[unit]; }; return [icon("LuArrowDownUp"), " ", fmt(down) + "/" + fmt(up)];'
+  template: 'if (typeof networkStatistics === "undefined") return [icon("LuArrowDownUp"), " NET 0"]; const down = networkStatistics.reduce((total, net) => total + net.received, 0) * 8; const up = networkStatistics.reduce((total, net) => total + net.transmitted, 0) * 8; const fmt = (value) => { const units = ["b", "K", "M", "G"]; let n = value; let unit = 0; while (n >= 1000 && unit < units.length - 1) { n /= 1000; unit++; } return (unit === 0 || n >= 10 ? n.toFixed(0) : n.toFixed(1)) + units[unit]; }; return [icon("LuArrowDownUp"), " NET " + fmt(down) + "/" + fmt(up)];'
   tooltip: 'if (typeof networkStatistics === "undefined") return "Network"; const down = networkStatistics.reduce((total, net) => total + net.received, 0) * 8; const up = networkStatistics.reduce((total, net) => total + net.transmitted, 0) * 8; return "Network: ↓ " + down.toFixed(0) + " bps, ↑ " + up.toFixed(0) + " bps";'
   badge: null
   onClick: null
   onWheelUp: null
   onWheelDown: null
   style:
-    minWidth: 82
+    minWidth: 108
   remoteData: {}
 - id: c947837b-128a-450c-a634-f215d5935aac
   scopes:
