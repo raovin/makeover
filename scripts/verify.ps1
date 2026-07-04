@@ -168,8 +168,8 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -notmatch '@seelen/tb-network-popup') {
-    Write-Warning "The network quick panel (@seelen/tb-network-popup) is missing from the status strip. Wi-Fi should have its own popup like Bluetooth."
+  if ($toolbarRaw -notmatch '@vineeth/tb-network-status' -and $toolbarRaw -notmatch '@seelen/tb-network-popup') {
+    Write-Warning "The network status item is missing from the status strip. Use @vineeth/tb-network-status (VPN/Wi-Fi/ethernet/tether-aware icon that triggers the network popup)."
     $VerificationFailed = $true
   }
 

@@ -88,15 +88,14 @@ center:
     minWidth: 68
   remoteData: {}
 right:
-- '@seelen/tb-network-popup'
+- '@vineeth/tb-network-status'
 - '@seelen/tb-bluetooth-popup'
 - id: macmakeover-control-center
   scopes: []
   template: return icon("LuSlidersHorizontal");
   tooltip: return "";
   badge: null
-  onClickV2: 'open("macmakeover-control-center:")'
-  onClick: null
+  onClick: 'open("macmakeover-control-center:")'
   onWheelUp: null
   onWheelDown: null
   style:

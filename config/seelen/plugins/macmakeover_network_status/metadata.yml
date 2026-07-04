@@ -1,0 +1,23 @@
+id: "@vineeth/tb-network-status"
+metadata:
+  displayName: Network Status
+icon: FaWifi
+target: "@seelen/fancy-toolbar"
+plugin:
+  scopes:
+    - Network
+  tooltip: >-
+    if (typeof usingInterface === "undefined" || !usingInterface) return "Offline";
+    return (usingInterface.name || "Network") + " (" + (usingInterface.type || "?") + ")";
+  template: >-
+    if (typeof online === "undefined" || !online) return icon("TbWorldCancel");
+    const label = (((usingInterface && usingInterface.name) || "") + " " + ((usingInterface && usingInterface.description) || "")).toLowerCase();
+    const kind = (usingInterface && usingInterface.type) || "";
+    if (kind === "PROP_VIRTUAL" || kind === "TUNNEL" || kind === "PPP" || /vpn|wireguard|tailscale|proton|openvpn|yggdrasil|surfshark|nord|mullvad/.test(label)) return icon("LuShieldCheck");
+    if (/rndis|remote ndis|tether/.test(label)) return icon("LuSmartphone");
+    if (kind === "WWANPP" || kind === "WWANPP2") return icon("LuSmartphone");
+    if (kind === "IEEE80211") return icon("FaWifi");
+    if (kind === "ETHERNET_CSMACD" || /ethernet/.test(label)) return icon("LuCable");
+    return icon("FaWifi");
+  onClickV2: |-
+    trigger("@seelen/network-popup");
