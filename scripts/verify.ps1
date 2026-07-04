@@ -151,6 +151,12 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     Write-Host "  OK Apple clicks are helper-owned, not URI-launched from Seelen."
   }
 
+  $seelenUiHideCount = ([regex]::Matches($toolbarRaw, 'name === "Seelen UI"\) return "";')).Count
+  if ($seelenUiHideCount -lt 2) {
+    Write-Warning "Focused-app labels should hide Seelen UI shell popups. Otherwise Network/Bluetooth/Calendar/Notifications clicks pollute the menu bar with 'Seelen UI'."
+    $VerificationFailed = $true
+  }
+
   if ($toolbarRaw -notmatch 'open\("macmakeover-control-center:"\)') {
     Write-Warning "The Control Center sliders item has lost its onClick. It must open via the macmakeover-control-center: URI (fast MenuHost pipe echo) so it never depends on pixel positions."
     $VerificationFailed = $true
