@@ -214,6 +214,9 @@ Copy-FileIfExists (Join-Path $ConfigRoot "data\seelen-weg\state.yml") (Join-Path
 Copy-FileIfExists (Join-Path $ConfigRoot "data\seelen-apps-menu\favorites.json") (Join-Path $SeelenRoot "data\seelen-apps-menu\favorites.json")
 Copy-FileIfExists (Join-Path $ConfigRoot "data\seelen-settings\welcomeModal.json") (Join-Path $SeelenRoot "data\seelen-settings\welcomeModal.json")
 Copy-TreeContents (Join-Path $ConfigRoot "themes\macos-glass") (Join-Path $SeelenRoot "themes\macos-glass")
+# User plugins (e.g. @vineeth/tb-network-status) - the toolbar references them, so a
+# restore without this leaves dangling plugin ids in state.yml.
+Copy-TreeContents (Join-Path $ConfigRoot "plugins") (Join-Path $SeelenRoot "plugins")
 
 # Hard guardrail: keep Seelen shortcuts disabled for normal Alt+Tab and lock-screen input behavior.
 $shortcutsPath = Join-Path $SeelenRoot "settings_shortcuts.json"
