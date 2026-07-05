@@ -6,9 +6,9 @@
 
 .ft-bar {
   background:
-    linear-gradient(180deg, rgba(62, 76, 92, 0.66), rgba(23, 28, 38, 0.74)) !important;
-  backdrop-filter: blur(32px) saturate(1.72) contrast(1.05);
-  -webkit-backdrop-filter: blur(32px) saturate(1.72) contrast(1.05);
+    linear-gradient(180deg, rgba(53, 66, 82, 0.84), rgba(19, 23, 31, 0.9)) !important;
+  backdrop-filter: blur(18px) saturate(1.35) contrast(1.03);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35) contrast(1.03);
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   column-gap: 10px;

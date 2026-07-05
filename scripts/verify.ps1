@@ -144,6 +144,11 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
+  if ($toolbarRaw -notmatch 'isReorderDisabled:\s*true') {
+    Write-Warning "Toolbar reordering is enabled. Seelen can expose a black edit/reorder mini-toolbar over the center stats in normal desktop use."
+    $VerificationFailed = $true
+  }
+
   if ($toolbarRaw -match 'open\("macmakeover-apple-menu:"\)') {
     Write-Warning "Apple-logo clicks are registered directly to the macmakeover URI protocol. Normal Apple clicks should be handled by start-hot-corners.ps1 (instant); the URI is fallback plumbing."
     $VerificationFailed = $true
@@ -155,6 +160,13 @@ if (Test-Path -LiteralPath $ToolbarPath) {
   if ($seelenUiHideCount -lt 2) {
     Write-Warning "Focused-app labels should hide Seelen UI shell popups. Otherwise Network/Bluetooth/Calendar/Notifications clicks pollute the menu bar with 'Seelen UI'."
     $VerificationFailed = $true
+  }
+
+  if ($toolbarRaw -notmatch 'Windows Explorer\|File Explorer\|Explorer\|Program Manager' -or $toolbarRaw -notmatch 'return "Finder"') {
+    Write-Warning "Focused-app labels should map desktop/File Explorer shell focus to Finder. Otherwise minimized/show-desktop states leak 'Windows Explorer' into the Mac menu bar."
+    $VerificationFailed = $true
+  } else {
+    Write-Host "  OK desktop/File Explorer shell focus maps to Finder."
   }
 
   if ($toolbarRaw -notmatch 'open\("macmakeover-control-center:"\)') {

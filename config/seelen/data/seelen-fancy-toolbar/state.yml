@@ -1,4 +1,4 @@
-isReorderDisabled: false
+isReorderDisabled: true
 left:
 - id: macmakeover-apple-menu
   scopes: []
@@ -17,7 +17,7 @@ left:
 - id: focused-app-name-codex
   scopes:
   - FocusedApp
-  template: if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || focusedApp.title || "").trim(); const title = (focusedApp.title || "").trim(); if (name === "Seelen UI") return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center)$/.test(title)) return ""; return name || title;
+  template: if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; if (shell.test(name) || shell.test(title)) return "Finder"; if (name === "Seelen UI") return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center)$/.test(title)) return ""; return name || title;
   tooltip: if (typeof focusedApp === "undefined" || !focusedApp) return ""; return focusedApp.title || focusedApp.name || "";
   badge: null
   onClick: null
@@ -29,7 +29,7 @@ left:
 - id: focused-window-title-codex
   scopes:
   - FocusedApp
-  template: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); if (name === "Seelen UI") return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center)$/.test(title)) return ""; if (!title || title === name) return ""; return title;
+  template: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; if (shell.test(name) || shell.test(title)) return ""; if (name === "Seelen UI") return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center)$/.test(title)) return ""; if (!title || title === name) return ""; return title;
   tooltip: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; return focusedApp.title;
   badge: null
   onClick: null
