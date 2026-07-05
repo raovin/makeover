@@ -15,8 +15,7 @@
   align-items: center;
   border-bottom: 0 !important;
   box-shadow:
-    inset 0 -1px 0 rgba(255, 255, 255, 0.12),
-    0 8px 28px rgba(0, 0, 0, 0.22) !important;
+    inset 0 -1px 0 rgba(255, 255, 255, 0.1) !important;
   color: rgba(250, 252, 255, 0.94);
 }
 
@@ -40,7 +39,7 @@
   max-width: none !important;
   min-width: 0;
   overflow: hidden !important;
-  transform: translateY(-4px);
+  transform: translateY(-1px);
 }
 
 .ft-bar-left {
@@ -54,7 +53,7 @@
   grid-column: 2;
   justify-content: center !important;
   align-items: center;
-  height: 25px;
+  height: 22px;
   width: max-content !important;
   max-width: min(38vw, 390px) !important;
   padding: 0 10px !important;
@@ -77,7 +76,7 @@
   width: max-content !important;
   max-width: max-content !important;
   gap: 3px !important;
-  height: 26px;
+  height: 22px;
   padding: 0 5px !important;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
@@ -101,7 +100,7 @@
 
 .ft-bar-item {
   border-radius: 8px;
-  height: 23px;
+  height: 21px;
   margin: 0 1px;
   padding: 0 5px;
 }
@@ -110,8 +109,8 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  height: 23px;
-  line-height: 22px;
+  height: 21px;
+  line-height: 20px;
   width: auto !important;
 }
 
@@ -268,7 +267,7 @@
 .ft-bar-left > .ft-bar-item:first-child .ft-bar-item-content {
   position: relative;
   width: 100% !important;
-  height: 23px;
+  height: 21px;
   justify-content: center;
   gap: 0;
   color: transparent !important;
