@@ -40,6 +40,7 @@
   max-width: none !important;
   min-width: 0;
   overflow: hidden !important;
+  transform: translateY(-4px);
 }
 
 .ft-bar-left {
@@ -100,7 +101,7 @@
 
 .ft-bar-item {
   border-radius: 8px;
-  height: 24px;
+  height: 23px;
   margin: 0 1px;
   padding: 0 5px;
 }
@@ -109,7 +110,8 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  line-height: 24px;
+  height: 23px;
+  line-height: 22px;
   width: auto !important;
 }
 
@@ -266,7 +268,7 @@
 .ft-bar-left > .ft-bar-item:first-child .ft-bar-item-content {
   position: relative;
   width: 100% !important;
-  height: 24px;
+  height: 23px;
   justify-content: center;
   gap: 0;
   color: transparent !important;
