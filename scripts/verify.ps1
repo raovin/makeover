@@ -397,6 +397,19 @@ if (Test-Path -LiteralPath $HotCornersConfigPath) {
   }
 }
 
+if (Test-Path -LiteralPath $HotCornersScriptPath) {
+  $hotCornersScript = Get-Content -LiteralPath $HotCornersScriptPath -Raw
+  if ($hotCornersScript -match 'HashSet<IntPtr>\s+NudgedWindows|NudgedWindows\.Contains') {
+    Write-Warning "The window-under-menu-bar nudge is one-shot per HWND again. Repeated app restores can still park a title bar under the menu bar."
+    $VerificationFailed = $true
+  }
+
+  if ($hotCornersScript -match 'NudgeWindowsOutOfBar' -and ($hotCornersScript -notmatch 'LastNudgedWindows' -or $hotCornersScript -notmatch 'TotalMilliseconds\s*<\s*1200')) {
+    Write-Warning "The window-under-menu-bar nudge should use a short cooldown, not a permanent per-window block."
+    $VerificationFailed = $true
+  }
+}
+
 if (Test-Path -LiteralPath $ShortcutPath) {
   Write-Host ""
   Write-Host "settings_shortcuts.json:"

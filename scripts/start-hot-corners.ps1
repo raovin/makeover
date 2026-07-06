@@ -106,14 +106,14 @@ public static class MacMakeoverHotCornersNative {
   [DllImport("user32.dll")]
   public static extern bool SystemParametersInfo(uint action, uint param, ref RECT rect, uint flags);
 
-  private static readonly System.Collections.Generic.HashSet<IntPtr> NudgedWindows = new System.Collections.Generic.HashSet<IntPtr>();
+  private static readonly System.Collections.Generic.Dictionary<IntPtr, DateTime> LastNudgedWindows = new System.Collections.Generic.Dictionary<IntPtr, DateTime>();
 
   // The menu bar reserves the top work-area strip, which stops window DRAGGING from
   // going underneath - but apps that restore/position themselves programmatically
   // (Snipping Tool remembering an old spot, etc.) can still park their title bar
-  // under the bar. macOS simply never allows that. Evict such windows once: normal
-  // captioned app windows only; fullscreen surfaces, minimized/maximized windows,
-  // tool windows and Seelen's own Tauri windows are exempt.
+  // under the bar. macOS simply never allows that. Evict such windows with a short
+  // cooldown: normal captioned app windows only; fullscreen surfaces, minimized/
+  // maximized windows, tool windows and Seelen's own Tauri windows are exempt.
   public static void NudgeWindowsOutOfBar(int screenHeight) {
     RECT work = new RECT();
     if (!SystemParametersInfo(0x0030, 0, ref work, 0)) return; // SPI_GETWORKAREA
@@ -133,8 +133,10 @@ public static class MacMakeoverHotCornersNative {
       GetClassName(hWnd, cls, 128);
       string className = cls.ToString();
       if (className == "Tauri Window" || className == "Tao Thread Event Target" || className == "Progman" || className == "WorkerW" || className == "Shell_TrayWnd") return true;
-      if (NudgedWindows.Contains(hWnd)) return true;                    // one nudge per window
-      NudgedWindows.Add(hWnd);
+      DateTime lastNudged;
+      DateTime now = DateTime.UtcNow;
+      if (LastNudgedWindows.TryGetValue(hWnd, out lastNudged) && (now - lastNudged).TotalMilliseconds < 1200) return true;
+      LastNudgedWindows[hWnd] = now;
       SetWindowPos(hWnd, IntPtr.Zero, r.Left, workTop, 0, 0, 0x0001 | 0x0004 | 0x0010); // NOSIZE|NOZORDER|NOACTIVATE
       return true;
     }, IntPtr.Zero);
