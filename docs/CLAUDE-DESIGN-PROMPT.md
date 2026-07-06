@@ -41,8 +41,8 @@ Current intended behavior:
 - Clicking the Apple mark must not open a terminal window.
 - The top-right sliders control opens the custom MenuHost Control Center, not Seelen's old quick-settings or power-options flyout.
 - Wi-Fi, Bluetooth, sliders, bell, and date/time are separate click targets, so their visual affordances should read as distinct controls.
-- Wi-Fi opens Seelen's network quick panel; Bluetooth opens Seelen's Bluetooth quick panel; the bell opens Seelen notifications; date/time opens the calendar popup.
-- Battery is an informational center readout merged with charging state, not a right-side pseudo-button.
+- Wi-Fi opens the custom MenuHost Network panel and is visually skinned as a Wi-Fi glyph; Bluetooth opens the custom MenuHost Bluetooth panel; the bell opens Seelen notifications; date/time opens the calendar popup.
+- Battery is a right-side Mac-style system readout merged with charging state, not a separate power button.
 - Wi-Fi/network belongs in the MacBook-style right-side status area.
 - Battery and charging should be presented as one combined status item, not two unrelated icons.
 - Throughput/readout clutter should not live in the top bar unless the design makes it genuinely elegant.
@@ -85,9 +85,9 @@ Verification requirements before saying done:
 - Inspect the saved full screenshot plus the top and bottom crops under qa\.
 - Test real interactions, not just static screenshots:
   - Apple mark opens the Apple menu quickly and without a terminal.
-  - Wi-Fi opens Seelen's network quick panel.
-  - Bluetooth opens Seelen's Bluetooth quick panel.
-  - Battery appears in the center informational cluster, not the right interactive cluster.
+  - Wi-Fi opens the custom MenuHost Network panel and stays visually Wi-Fi even when a VPN/tunnel route is active.
+  - Bluetooth opens the custom MenuHost Bluetooth panel.
+  - Battery appears in the right Mac-style system cluster, while the center cluster stays CPU/RAM/NET only.
   - Sliders open the custom Control Center.
   - The bell opens Notification Center instead of Control Center.
   - Date/time opens the calendar popup and does not leave Control Center underneath it.

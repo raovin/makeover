@@ -8,7 +8,11 @@ plugin:
     - Network
   tooltip: >-
     if (typeof usingInterface === "undefined" || !usingInterface) return "Offline";
-    return (usingInterface.name || "Network") + " (" + (usingInterface.type || "?") + ")";
+    const label = (((usingInterface && usingInterface.name) || "") + " " + ((usingInterface && usingInterface.description) || "")).toLowerCase();
+    const kind = (usingInterface && usingInterface.type) || "";
+    const tunnel = kind === "PROP_VIRTUAL" || kind === "TUNNEL" || kind === "PPP" || /vpn|wireguard|tailscale|proton|openvpn|yggdrasil|surfshark|nord|mullvad/.test(label);
+    const name = (usingInterface.name || "Network");
+    return tunnel ? "VPN: " + name : name + " (" + (kind || "?") + ")";
   template: >-
     if (typeof online === "undefined" || !online) return icon("TbWorldCancel");
     const label = (((usingInterface && usingInterface.name) || "") + " " + ((usingInterface && usingInterface.description) || "")).toLowerCase();
@@ -20,4 +24,4 @@ plugin:
     if (kind === "ETHERNET_CSMACD" || /ethernet/.test(label)) return icon("LuCable");
     return icon("FaWifi");
   onClickV2: |-
-    open("ms-settings:network-wifi");
+    open("macmakeover-network:");

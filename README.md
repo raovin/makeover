@@ -11,7 +11,7 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 - A macOS-style top menu bar using Seelen UI.
 - A bottom dock using Seelen WEG.
 - The custom `macos-glass` theme for the frosted menu bar and dock.
-- The current toolbar layout: Apple-style mark, focused app, centered CPU/memory/network/battery telemetry, and right-side Network, Bluetooth, Control Center sliders, date/time, and notification controls.
+- The current toolbar layout: Apple-style mark, focused app, centered CPU/memory/network telemetry, and right-side Network, Bluetooth, battery, Control Center sliders, date/time, and notification controls.
 - A Mac-style Apple menu on the top-left Apple mark, opened by the warmed hot-corners helper so it appears quickly and no terminal window appears.
 - A custom Mac-style Control Center / power popover from the top-right sliders control, replacing Seelen's built-in quick-settings flyout and avoiding slow URI launches.
 - Seelen shortcuts disabled so native Windows Alt+Tab and lock-screen input remain normal.
@@ -153,7 +153,7 @@ config\hot-corners.json
 
 Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, `NetworkFlyout`, `QuickSettings`, and `None`. Click actions use the smaller `clickCornerSize` zones, so top-left/top-right show-desktop clicks do not steal the normal Apple icon or right-side menu-bar clicks.
 
-The same helper routes the Apple mark and preserves the tiny physical Show Desktop corners. The right-side controls are item-owned instead of pixel-zone-routed: Network and Bluetooth use Seelen quick panels, the sliders item opens `macmakeover-control-center:` through a fast MenuHost pipe launcher, date/time opens Seelen's calendar popup, and the bell opens Seelen notifications. The Apple URI remains fallback plumbing only.
+The same helper routes the Apple mark and preserves the tiny physical Show Desktop corners. The right-side controls are item-owned instead of pixel-zone-routed: Network and Bluetooth use custom MenuHost panels, the sliders item opens `macmakeover-control-center:` through a fast MenuHost pipe launcher, date/time opens Seelen's calendar popup, and the bell opens Seelen notifications. The Apple URI remains fallback plumbing only.
 
 ## Manual Steps After Restore
 
@@ -213,9 +213,9 @@ The launcher behavior is separate from Seelen:
 - Restart, Shut Down, and Log Out ask for confirmation.
 - Normal Apple clicks are handled by `scripts\start-hot-corners.ps1`, which sends `apple` to `tools\MacMakeover.MenuHost`. The `macmakeover-apple-menu:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` as fallback. Registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
 - `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running or if the helper is running under `pwsh.exe`.
-- Clicking Wi-Fi opens Seelen's network quick panel.
-- Clicking Bluetooth opens Seelen's Bluetooth quick panel.
-- Battery is an informational center readout, merged with charging state.
+- Clicking Wi-Fi opens the custom MenuHost Network panel; the icon stays visually Wi-Fi so VPN/tunnel routes do not turn it into a misleading shield or generic computer glyph.
+- Clicking Bluetooth opens the custom MenuHost Bluetooth panel.
+- Battery is a right-side Mac-style system readout, merged with charging state.
 - Clicking the sliders control opens the custom Control Center with Wi-Fi/Bluetooth live tiles, display and sound sliders, System Settings, Show Desktop, Lock Screen, Sleep, Restart, and Shut Down.
 - Clicking the bell opens Seelen's notifications panel separately from Control Center.
 - Clicking the date/time opens Seelen's calendar popup and dismisses any custom Apple/Control Center panel first, so panels do not stack.

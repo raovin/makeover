@@ -11,7 +11,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 - Normal Apple clicks open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
 - The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
 - The top-right sliders control opens the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. It intentionally uses `onClick: open("macmakeover-control-center:")`; that protocol is registered to a fast `conhost --headless cmd /c echo control> \\.\pipe\MacMakeover.MenuHost` launcher with a `--show control` fallback.
-- Performance correction: normal Apple clicks remain helper-owned through `scripts\start-hot-corners.ps1`. Right-side controls are item-owned now: Network/Bluetooth/Calendar/Notifications use Seelen quick panels, and sliders use the fast Control Center protocol.
+- Performance correction: normal Apple clicks remain helper-owned through `scripts\start-hot-corners.ps1`. Right-side controls are item-owned now: Network and Bluetooth use custom MenuHost panels, Calendar/Notifications use Seelen quick panels, and sliders use the fast Control Center protocol.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
 - Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
 - The three previous locations were consolidated into this single git repo at `C:\Users\VineethRao\source\repos\mac-makeover`. The old brunel copy is kept untouched as a frozen backup.
@@ -32,7 +32,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 - The top-left Apple icon should behave like macOS: it should open a compact Apple menu directly, not a big Seelen user drawer and not a terminal.
 - The top-right sliders control should open the custom Control Center directly, not Seelen's old power/options screen.
 - The dock should stay rich; the user previously said there is no need to trim it.
-- The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered CPU/memory/network/battery telemetry, and a MacBook-style right side with separate Network, Bluetooth, Control Center sliders, notification bell, and date/time controls at the far right.
+- The top bar should read like a Mac menu bar: Apple mark at far left, focused app identity next to it, centered CPU/memory/network telemetry, and a MacBook-style right side with separate Network, Bluetooth, battery, Control Center sliders, notification bell, and date/time controls at the far right.
 - No visible overlap, clipped text, ghost tooltips, ugly separator lines, or accidental title pollution such as `Windows PowerShell / Apple Menu`.
 - Alt+Tab should remain native Windows Alt+Tab. Do not revive Seelen task-switcher shortcuts.
 - Lock-screen PIN entry previously broke during shortcut/task-switcher experiments. Keep Seelen shortcuts disabled.
@@ -192,7 +192,7 @@ The current Control Center includes:
 - Restart...
 - Shut Down...
 
-Because Seelen/Windows PowerShell URI launches were measured as laggy, Apple remains helper-routed to the resident MenuHost. The sliders item uses a URI only because the handler is a fast pipe echo with a self-healing MenuHost fallback. Network, Bluetooth, calendar, and notifications are Seelen-owned item clicks, not helper pixel zones.
+Because Seelen/Windows PowerShell URI launches were measured as laggy, Apple remains helper-routed to the resident MenuHost. The sliders item uses a URI only because the handler is a fast pipe echo with a self-healing MenuHost fallback. Network and Bluetooth are custom MenuHost item clicks; calendar and notifications remain Seelen-owned item clicks; none of these should be helper pixel zones.
 
 Recent visual/performance proof screenshots:
 

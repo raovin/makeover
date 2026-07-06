@@ -188,6 +188,28 @@ function Register-MacMakeoverControlCenter {
   Write-Host "Control Center protocol registered (conhost --headless launcher): macmakeover-control-center:"
 }
 
+function Register-MacMakeoverNetwork {
+  $installer = Join-Path $PSScriptRoot "Install-MacNetworkHandler.ps1"
+  if (-not (Test-Path -LiteralPath $installer)) {
+    Write-Warning "Network handler installer was not found, so the protocol handler was not registered: $installer"
+    return
+  }
+
+  & $installer
+  Write-Host "Network protocol registered (conhost --headless launcher): macmakeover-network:"
+}
+
+function Register-MacMakeoverBluetooth {
+  $installer = Join-Path $PSScriptRoot "Install-MacBluetoothHandler.ps1"
+  if (-not (Test-Path -LiteralPath $installer)) {
+    Write-Warning "Bluetooth handler installer was not found, so the protocol handler was not registered: $installer"
+    return
+  }
+
+  & $installer
+  Write-Host "Bluetooth protocol registered (conhost --headless launcher): macmakeover-bluetooth:"
+}
+
 if (-not (Test-Path -LiteralPath $ConfigRoot)) {
   throw "Backup config was not found. Run scripts\backup-current.ps1 first. Missing: $ConfigRoot"
 }
@@ -214,8 +236,9 @@ Copy-FileIfExists (Join-Path $ConfigRoot "data\seelen-weg\state.yml") (Join-Path
 Copy-FileIfExists (Join-Path $ConfigRoot "data\seelen-apps-menu\favorites.json") (Join-Path $SeelenRoot "data\seelen-apps-menu\favorites.json")
 Copy-FileIfExists (Join-Path $ConfigRoot "data\seelen-settings\welcomeModal.json") (Join-Path $SeelenRoot "data\seelen-settings\welcomeModal.json")
 Copy-TreeContents (Join-Path $ConfigRoot "themes\macos-glass") (Join-Path $SeelenRoot "themes\macos-glass")
-# User plugins (e.g. @vineeth/tb-network-status) - the toolbar references them, so a
-# restore without this leaves dangling plugin ids in state.yml.
+# User plugins (e.g. @vineeth/tb-network-status fallback). Keep copying them so old
+# toolbar backups still restore, even though the current toolbar uses the custom
+# MenuHost network panel for reliable click behavior.
 Copy-TreeContents (Join-Path $ConfigRoot "plugins") (Join-Path $SeelenRoot "plugins")
 
 # Hard guardrail: keep Seelen shortcuts disabled for normal Alt+Tab and lock-screen input behavior.
@@ -224,6 +247,8 @@ $shortcutsPath = Join-Path $SeelenRoot "settings_shortcuts.json"
 
 Register-MacMakeoverAppleMenu
 Register-MacMakeoverControlCenter
+Register-MacMakeoverNetwork
+Register-MacMakeoverBluetooth
 
 if ($ApplyAccent) {
   $accentReg = Join-Path $PackageRoot "registry\hkcu-explorer-accent.reg"

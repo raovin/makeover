@@ -17,7 +17,7 @@ left:
 - id: focused-app-name-codex
   scopes:
   - FocusedApp
-  template: if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; if (shell.test(name) || shell.test(title)) return "Finder"; if (name === "Seelen UI") return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center)$/.test(title)) return ""; return name || title;
+  template: if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; const helper = /^(Seelen UI|ShellHost|MacMakeover\.MenuHost)$/i; if (shell.test(name) || shell.test(title)) return "Finder"; if (helper.test(name) || helper.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center|Network)$/.test(title)) return ""; return name || title;
   tooltip: if (typeof focusedApp === "undefined" || !focusedApp) return ""; return focusedApp.title || focusedApp.name || "";
   badge: null
   onClick: null
@@ -29,7 +29,7 @@ left:
 - id: focused-window-title-codex
   scopes:
   - FocusedApp
-  template: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; if (shell.test(name) || shell.test(title)) return ""; if (name === "Seelen UI") return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center)$/.test(title)) return ""; if (!title || title === name) return ""; return title;
+  template: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; const helper = /^(Seelen UI|ShellHost|MacMakeover\.MenuHost)$/i; if (shell.test(name) || shell.test(title)) return ""; if (helper.test(name) || helper.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center|Network)$/.test(title)) return ""; if (!title || title === name) return ""; return title;
   tooltip: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; return focusedApp.title;
   badge: null
   onClick: null
@@ -75,7 +75,7 @@ center:
   style:
     minWidth: 108
   remoteData: {}
-- id: c947837b-128a-450c-a634-f215d5935aac
+- id: macmakeover-battery-status
   scopes:
   - Power
   template: 'if (typeof batteries === "undefined" || !batteries.length) return icon("TbPlugConnected"); const pct = Math.round(batteries.reduce((total, battery) => total + battery.percentage, 0) / batteries.length); const charging = (typeof power !== "undefined" && power.acLineStatus === 1) || batteries.some((battery) => battery.state === "charging"); const lvl = pct > 90 ? icon("PiBatteryFullFill") : pct > 66 ? icon("PiBatteryHighFill") : pct > 33 ? icon("PiBatteryMediumFill") : pct > 5 ? icon("PiBatteryLowFill") : icon("PiBatteryWarning"); const out = []; if (charging) { out.push(icon("BsLightningChargeFill")); out.push(" "); } out.push(lvl); out.push(" " + pct + "%"); return out;'
@@ -85,11 +85,25 @@ center:
   onWheelUp: null
   onWheelDown: null
   style:
-    minWidth: 68
+    minWidth: 60
+    flexShrink: 0
   remoteData: {}
 right:
 - '@vineeth/tb-network-status'
-- '@seelen/tb-bluetooth-popup'
+- id: macmakeover-bluetooth
+  scopes: []
+  template: return icon("LuBluetooth");
+  tooltip: return "";
+  badge: null
+  onClick: 'open("macmakeover-bluetooth:")'
+  onWheelUp: null
+  onWheelDown: null
+  style:
+    minWidth: 28
+    flexShrink: 0
+    maxWidth: 28
+    width: 28
+  remoteData: {}
 - id: macmakeover-control-center
   scopes: []
   template: return icon("LuSlidersHorizontal");

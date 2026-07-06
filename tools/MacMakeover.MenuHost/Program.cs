@@ -143,6 +143,8 @@ internal sealed class MenuContext : ApplicationContext
             {
                 "apple" => MenuForm.CreateApple(),
                 "control" => MenuForm.CreateControlCenter(),
+                "network" => MenuForm.CreateNetwork(),
+                "bluetooth" => MenuForm.CreateBluetooth(),
                 _ => null
             };
 
@@ -152,18 +154,45 @@ internal sealed class MenuContext : ApplicationContext
             {
                 _current = null;
             };
-            _current.Show();
-            NativeMethods.ShowAboveEverything(_current);
-            _current.Activate();
-            _current.Invalidate(invalidateChildren: true);
-            _current.Update();
-            _current.Refresh();
-            Program.Log($"Shown {_current.Text}, visible={_current.Visible}, handle={_current.Handle}");
+            var shown = _current;
+            shown.Show();
+            BringShownMenuForward(shown);
+            shown.Invalidate(invalidateChildren: true);
+            shown.Update();
+            shown.Refresh();
+            ReinforceTopMostAsync(shown);
+            Program.Log($"Shown {shown.Text}, visible={shown.Visible}, handle={shown.Handle}");
         }
         catch (Exception ex)
         {
             Program.Log("ShowCommand failed: " + ex);
         }
+    }
+
+    private static void BringShownMenuForward(Form form)
+    {
+        NativeMethods.ShowAboveEverything(form);
+        form.Activate();
+    }
+
+    private static void ReinforceTopMostAsync(Form form)
+    {
+        _ = Task.Run(async () =>
+        {
+            foreach (var delay in new[] { 120, 320 })
+            {
+                await Task.Delay(delay).ConfigureAwait(false);
+                try
+                {
+                    if (form.IsDisposed || form.Disposing) return;
+                    form.BeginInvoke(() => BringShownMenuForward(form));
+                }
+                catch
+                {
+                    return;
+                }
+            }
+        });
     }
 
     protected override void Dispose(bool disposing)
@@ -253,6 +282,8 @@ internal sealed class MenuForm : Form
         // still handles normal click-away dismissal.
     }
 
+    protected override bool ShowWithoutActivation => false;
+
     // All size/position math depends on DeviceDpi, which is only correct once the handle exists.
     protected override void OnHandleCreated(EventArgs e)
     {
@@ -262,12 +293,17 @@ internal sealed class MenuForm : Form
         Width = LogicalToDeviceUnits(_logicalWidth);
         FitHeight();
 
+        // Screen.PrimaryScreen.Bounds and window Location share the same (physical)
+        // coordinate space in this DPI-aware process, so plain Right-anchoring is
+        // correct at every scale factor. Do NOT rescale Right by 96/DeviceDpi - that
+        // lands the panel mid-screen at 150% (right edge at 1280 physical of 1920).
         var screen = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1200);
         var x = _anchorRight
             ? screen.Right - Width - LogicalToDeviceUnits(_logicalMargin)
             : screen.Left + LogicalToDeviceUnits(_logicalMargin);
         var top = screen.Top + LogicalToDeviceUnits(_logicalTop);
         Location = new Point(x, top);
+        Program.Log($"Positioned {Text} at {Location.X},{Location.Y} on screen {screen.Width}x{screen.Height} dpi={DeviceDpi}");
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -395,12 +431,29 @@ internal sealed class MenuForm : Form
         var form = new MenuForm(292);
         form.Text = "Control Center";
         form._anchorRight = true;
-        form.AddItem("Control Center", null, GetBatterySummary());
-        form.AddSeparator();
-        form.AddItem("Wi-Fi...", () => Start("ms-settings:network-wifi"));
-        form.AddItem("Bluetooth...", () => Start("ms-settings:bluetooth"));
-        form.AddItem("Display...", () => Start("ms-settings:display"));
-        form.AddItem("Sound...", () => Start("ms-settings:sound"));
+        form.AddHeader("Control Center", GetBatterySummary());
+
+        // Live tiles + working sliders are the point of this panel - keep them.
+        // (The Display slider drives real WMI brightness; Sound drives Core Audio.)
+        var wifi = form.AddIconCard("", "Wi-Fi", "Checking...", active: false, () => Program.SendCommand("network", 350));
+        var bluetooth = form.AddIconCard("", "Bluetooth", "Checking...", active: false, () => Program.SendCommand("bluetooth", 350));
+
+        var brightnessSlider = new SliderInfo
+        {
+            Glyph = "",
+            Value = 0.5f,
+            OnCommit = value => SetBrightnessAsync((int)Math.Round(value * 100))
+        };
+        form.AddSlider("Display", brightnessSlider);
+
+        var volumeSlider = new SliderInfo
+        {
+            Glyph = "",
+            Value = VolumeService.GetMasterVolume() ?? 0.5f,
+            OnChange = VolumeService.SetMasterVolume
+        };
+        form.AddSlider("Sound", volumeSlider);
+
         form.AddSeparator();
         form.AddItem("System Settings...", () => Start("ms-settings:"));
         form.AddItem("Show Desktop", ToggleDesktop);
@@ -409,6 +462,60 @@ internal sealed class MenuForm : Form
         form.AddItem("Sleep", () => Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
+
+        form.LoadControlCenterStateAsync(wifi, bluetooth, brightnessSlider);
+        return form;
+    }
+
+    public static MenuForm CreateNetwork()
+    {
+        var form = new MenuForm(292);
+        form.Text = "Network";
+        form._anchorRight = true;
+
+        var currentSsid = ReadWifiSsid();
+        form.AddHeader("Wi-Fi", currentSsid is null ? "Not connected" : $"Connected to {currentSsid}");
+        form.AddItem("Wi-Fi Settings...", () => Start("ms-settings:network-wifi"));
+        form.AddItem("Network Settings...", () => Start("ms-settings:network"));
+        form.AddSeparator();
+
+        var networks = ReadWifiNetworks()
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(7)
+            .ToList();
+
+        if (networks.Count == 0)
+        {
+            form.AddItem("No nearby networks found", null);
+        }
+        else
+        {
+            foreach (var network in networks)
+            {
+                var label = network;
+                var detail = network.Equals(currentSsid, StringComparison.OrdinalIgnoreCase) ? "Connected" : string.Empty;
+                form.AddItem(label, () => ConnectWifiProfileAsync(label), detail);
+            }
+        }
+
+        form.AddSeparator();
+        form.AddItem("Refresh", () => Program.SendCommand("network", 350));
+        return form;
+    }
+
+    public static MenuForm CreateBluetooth()
+    {
+        var form = new MenuForm(292);
+        form.Text = "Bluetooth";
+        form._anchorRight = true;
+
+        form.AddHeader("Bluetooth", ReadBluetoothOn() ? "On" : "Off");
+        form.AddItem("Bluetooth Settings...", () => Start("ms-settings:bluetooth"));
+        form.AddItem("Paired Devices...", () => Start("ms-settings:connecteddevices"));
+        form.AddItem("Add Device...", () => Start("ms-settings:bluetooth"));
+        form.AddSeparator();
+        form.AddItem("Refresh", () => Program.SendCommand("bluetooth", 350));
         return form;
     }
 
@@ -476,6 +583,55 @@ internal sealed class MenuForm : Form
         }
     }
 
+    private static IEnumerable<string> ReadWifiNetworks()
+    {
+        var networks = new List<string>();
+        try
+        {
+            var output = RunHidden("netsh", "wlan show networks mode=bssid", 4000);
+            foreach (var rawLine in output.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (!line.StartsWith("SSID ", StringComparison.OrdinalIgnoreCase) ||
+                    line.StartsWith("BSSID", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var idx = line.IndexOf(':');
+                if (idx <= 0) continue;
+
+                var ssid = line[(idx + 1)..].Trim();
+                if (!string.IsNullOrWhiteSpace(ssid))
+                {
+                    networks.Add(ssid);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Log("ReadWifiNetworks failed: " + ex.Message);
+        }
+
+        return networks;
+    }
+
+    private static void ConnectWifiProfileAsync(string ssid)
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var safeName = ssid.Replace("\"", string.Empty);
+                RunHidden("netsh", $"wlan connect name=\"{safeName}\"", 7000);
+            }
+            catch (Exception ex)
+            {
+                Program.Log("Wi-Fi connect failed: " + ex.Message);
+            }
+        });
+    }
+
     private static bool ReadBluetoothOn()
     {
         try
@@ -487,6 +643,30 @@ internal sealed class MenuForm : Form
         {
             return false;
         }
+    }
+
+    private static IEnumerable<string> ReadBluetoothDevices()
+    {
+        var devices = new List<string>();
+        try
+        {
+            const string command = "Get-PnpDevice -Class Bluetooth -Status OK | Where-Object { $_.FriendlyName -and $_.FriendlyName -notmatch 'Enumerator|Adapter|Protocol|Transport|RFCOMM|Generic Attribute|Microsoft Bluetooth|Intel' } | Select-Object -First 7 -ExpandProperty FriendlyName";
+            var output = RunHidden("powershell.exe", "-NoProfile -NonInteractive -Command \"" + command + "\"", 2500);
+            foreach (var rawLine in output.Split('\n'))
+            {
+                var name = rawLine.Trim();
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    devices.Add(name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Log("ReadBluetoothDevices failed: " + ex.Message);
+        }
+
+        return devices;
     }
 
     private static int? ReadBrightnessPercent()
@@ -930,6 +1110,7 @@ internal static class NativeMethods
     private static readonly IntPtr HwndTopMost = new(-1);
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoActivate = 0x0010;
     private const uint SwpShowWindow = 0x0040;
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -942,14 +1123,22 @@ internal static class NativeMethods
         int cy,
         uint uFlags);
 
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     public static void ShowAboveEverything(Form form)
     {
         form.TopMost = true;
+        ShowWindow(form.Handle, 5); // SW_SHOW
         form.BringToFront();
         SetWindowPos(form.Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpShowWindow);
+        SetForegroundWindow(form.Handle);
     }
 
     // Windows 11 native rounded corners + dark frame for a borderless popup, so the

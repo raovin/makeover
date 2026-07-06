@@ -2,21 +2,49 @@
 #root {
   font-size: 0.8rem;
   font-weight: 550;
+  --mm-visible-width-scale: 1;
+}
+
+@media (min-resolution: 1.25dppx) {
+  #root {
+    --mm-visible-width-scale: 0.8;
+  }
+}
+
+@media (min-resolution: 1.5dppx) {
+  #root {
+    --mm-visible-width-scale: 0.6666667;
+  }
+}
+
+@media (min-resolution: 1.75dppx) {
+  #root {
+    --mm-visible-width-scale: 0.5714286;
+  }
+}
+
+@media (min-resolution: 2dppx) {
+  #root {
+    --mm-visible-width-scale: 0.5;
+  }
 }
 
 .ft-bar {
   background:
-    linear-gradient(180deg, rgba(53, 66, 82, 0.84), rgba(19, 23, 31, 0.9)) !important;
-  backdrop-filter: blur(18px) saturate(1.35) contrast(1.03);
-  -webkit-backdrop-filter: blur(18px) saturate(1.35) contrast(1.03);
+    linear-gradient(180deg, rgba(42, 52, 64, 0.74), rgba(14, 17, 23, 0.72)) !important;
+  backdrop-filter: blur(20px) saturate(1.28) contrast(1.02);
+  -webkit-backdrop-filter: blur(20px) saturate(1.28) contrast(1.02);
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   column-gap: 10px;
   align-items: center;
+  position: relative !important;
   border-bottom: 0 !important;
-  box-shadow:
-    inset 0 -1px 0 rgba(255, 255, 255, 0.1) !important;
+  box-shadow: none !important;
   color: rgba(250, 252, 255, 0.94);
+  overflow: hidden !important;
+  width: calc(100vw * var(--mm-visible-width-scale)) !important;
+  max-width: 100vw !important;
 }
 
 /* Seelen injects invisible "Show Desktop" corner buttons at the toolbar edges.
@@ -35,8 +63,9 @@
 .ft-bar-left,
 .ft-bar-center,
 .ft-bar-right {
+  position: static !important;
+  display: flex !important;
   width: auto !important;
-  max-width: none !important;
   min-width: 0;
   overflow: hidden !important;
   transform: translateY(-1px);
@@ -47,45 +76,43 @@
   justify-content: flex-start !important;
   gap: 6px !important;
   padding-left: 4px !important;
+  max-width: 100% !important;
 }
 
 .ft-bar-center {
   grid-column: 2;
   justify-content: center !important;
   align-items: center;
-  height: 22px;
+  height: 18px;
   width: max-content !important;
-  max-width: min(38vw, 390px) !important;
-  padding: 0 10px !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.055));
-  border: 1px solid rgba(255, 255, 255, 0.105);
-  border-radius: 999px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.11),
-    0 4px 14px rgba(0, 0, 0, 0.16);
+  max-width: min(44vw, 480px) !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
   box-sizing: border-box;
-  gap: 11px !important;
+  gap: 14px !important;
 }
 
 .ft-bar-right {
+  /* Let the notifications badge poke above the 18px row instead of being clipped. */
+  overflow: visible !important;
   grid-column: 3;
   justify-self: end !important;
   justify-content: flex-end !important;
   align-items: center;
   width: max-content !important;
   max-width: max-content !important;
-  gap: 3px !important;
-  height: 22px;
-  padding: 0 5px !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 4px 14px rgba(0, 0, 0, 0.15);
+  gap: 7px !important;
+  height: 18px;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
   box-sizing: border-box;
+  margin-right: 6px;
 }
 
 .ft-bar-item,
@@ -100,7 +127,7 @@
 
 .ft-bar-item {
   border-radius: 8px;
-  height: 21px;
+  height: 18px;
   margin: 0 1px;
   padding: 0 5px;
 }
@@ -109,8 +136,8 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  height: 21px;
-  line-height: 20px;
+  height: 18px;
+  line-height: 16px;
   width: auto !important;
 }
 
@@ -143,11 +170,11 @@
 }
 
 .ft-bar-center .ft-bar-item-content {
-  gap: 4px;
-  font-size: 0.74rem;
+  gap: 3px;
+  font-size: 0.72rem;
   letter-spacing: 0;
-  opacity: 0.94;
-  color: rgba(246, 249, 255, 0.94);
+  opacity: 0.88;
+  color: rgba(246, 249, 255, 0.91);
 }
 
 .ft-bar-center .ft-bar-item svg {
@@ -156,35 +183,38 @@
   opacity: 0.82;
 }
 
-/* Battery is an informational center readout now (last center item). The charging
-   bolt can stay white while the actual battery glyph takes on the macOS green.
-   Seelen injects a varying number of phantom siblings into the container, so plain
-   nth-child breaks across restarts; nth-last-child(1 of ...) counts only items. */
+/* Battery is the LAST item of the CENTER informational readout. The charging bolt
+   stays white while the battery glyph takes the macOS green. nth-last-child(of) is
+   immune to the phantom siblings Seelen injects into the container. */
 .ft-bar-center > .ft-bar-item:nth-last-child(1 of .ft-bar-item) svg:last-of-type {
   color: #34c759;
 }
 
-/* Right status cluster reads as ONE cohesive unit (like the center stats pill):
-   flat, transparent items inside a single soft container - no per-item chips. */
+/* MacBook-flat status strip: no persistent capsules around the center stats or
+   right-side system controls; only real click targets get a subtle hover. */
 .ft-bar-right .ft-bar-item {
   background-color: transparent;
   border: 0;
-  border-radius: 999px;
+  border-radius: 6px;
   margin: 0;
-  padding: 0 6px;
+  padding: 0 3px;
   box-sizing: border-box;
   transition: background-color 0.16s ease, transform 0.16s ease;
 }
 
 .ft-bar-right > .ft-bar-item.ft-bar-item-clickable:hover {
-  background-color: rgba(255, 255, 255, 0.16) !important;
-  transform: translateY(-1px);
+  background-color: rgba(255, 255, 255, 0.13) !important;
+  transform: none;
 }
 
 .ft-bar-right > .ft-bar-item.ft-bar-item-clickable:active {
   background-color: rgba(255, 255, 255, 0.22) !important;
   transform: translateY(0);
 }
+
+/* The network icon comes from @vineeth/tb-network-status and is deliberately
+   connection-aware: Wi-Fi arcs, VPN shield, ethernet cable, or tether phone.
+   Do NOT pin it to a static glyph in CSS - that erases the distinction. */
 
 /* Trailing items (clock, then bell) get a touch of separating space. */
 .ft-bar-right > .ft-bar-item:last-child {
@@ -267,7 +297,7 @@
 .ft-bar-left > .ft-bar-item:first-child .ft-bar-item-content {
   position: relative;
   width: 100% !important;
-  height: 21px;
+  height: 18px;
   justify-content: center;
   gap: 0;
   color: transparent !important;
@@ -286,8 +316,8 @@
 .ft-bar-left > .ft-bar-item:first-child .ft-bar-item-content::before {
   content: "";
   display: block;
-  width: 18px;
-  height: 20px;
+  width: 17px;
+  height: 18px;
   background: rgba(255, 255, 255, 0.96);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M16.6 13.1c0-2.6 2.1-3.9 2.2-4-1.2-1.8-3.1-2.1-3.8-2.1-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.3-.9-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.5 1.3-.1 1.8-.8 3.3-.8 1.5 0 1.9.8 3.3.8 1.4 0 2.3-1.2 3.1-2.5 1-1.4 1.4-2.8 1.5-2.9-.1-.1-2.7-1.1-2.7-3.7zM13.9 5.3c.7-.8 1.2-2 1.1-3.2-1 .1-2.2.7-2.9 1.5-.6.7-1.2 1.9-1 3 .9.1 2.1-.5 2.8-1.3z'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M16.6 13.1c0-2.6 2.1-3.9 2.2-4-1.2-1.8-3.1-2.1-3.8-2.1-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.3-.9-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.5 1.3-.1 1.8-.8 3.3-.8 1.5 0 1.9.8 3.3.8 1.4 0 2.3-1.2 3.1-2.5 1-1.4 1.4-2.8 1.5-2.9-.1-.1-2.7-1.1-2.7-3.7zM13.9 5.3c.7-.8 1.2-2 1.1-3.2-1 .1-2.2.7-2.9 1.5-.6.7-1.2 1.9-1 3 .9.1 2.1-.5 2.8-1.3z'/%3E%3C/svg%3E") center / contain no-repeat;

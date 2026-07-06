@@ -13,6 +13,7 @@ $ShortcutPath = Join-Path $SeelenRoaming "settings_shortcuts.json"
 $SettingsPath = Join-Path $SeelenRoaming "settings.json"
 $ToolbarPath = Join-Path $SeelenRoaming "data\seelen-fancy-toolbar\state.yml"
 $ThemePath = Join-Path $SeelenRoaming "themes\macos-glass\styles\fancy-toolbar.css"
+$NetworkPluginPath = Join-Path $SeelenRoaming "plugins\macmakeover_network_status\metadata.yml"
 $LogPath = Join-Path $SeelenLocal "logs\Seelen UI.log"
 $PowerToysSettingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\settings.json"
 $PowerToysRunSettingsPath = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys\PowerToys Run\settings.json"
@@ -20,12 +21,16 @@ $AppleMenuScriptPath = Join-Path $PackageRoot "scripts\Show-MacAppleMenu.ps1"
 $AppleMenuInstallerPath = Join-Path $PackageRoot "scripts\Install-AppleMenuHandler.ps1"
 $ControlCenterScriptPath = Join-Path $PackageRoot "scripts\Show-MacControlCenter.ps1"
 $ControlCenterInstallerPath = Join-Path $PackageRoot "scripts\Install-MacControlCenterHandler.ps1"
+$NetworkInstallerPath = Join-Path $PackageRoot "scripts\Install-MacNetworkHandler.ps1"
+$BluetoothInstallerPath = Join-Path $PackageRoot "scripts\Install-MacBluetoothHandler.ps1"
 $HotCornersScriptPath = Join-Path $PackageRoot "scripts\start-hot-corners.ps1"
 $HotCornersConfigPath = Join-Path $PackageRoot "config\hot-corners.json"
 $MenuHostProjectPath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj"
 $MenuHostExePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe"
 $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command"
 $ControlCenterCommandPath = "HKCU:\Software\Classes\macmakeover-control-center\shell\open\command"
+$NetworkCommandPath = "HKCU:\Software\Classes\macmakeover-network\shell\open\command"
+$BluetoothCommandPath = "HKCU:\Software\Classes\macmakeover-bluetooth\shell\open\command"
 $VerificationFailed = $false
 
 function Get-ImageAverageLuma {
@@ -92,7 +97,7 @@ Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPale
 
 Write-Host ""
 Write-Host "Core files:"
-foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath)) {
+foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath)) {
   if (Test-Path -LiteralPath $path) {
     "OK   {0}" -f $path
   } else {
@@ -135,6 +140,40 @@ if (Test-Path -Path $ControlCenterCommandPath) {
   $VerificationFailed = $true
 }
 
+Write-Host ""
+Write-Host "Network launcher:"
+if (Test-Path -Path $NetworkCommandPath) {
+  $networkCommand = (Get-Item -Path $NetworkCommandPath).GetValue("")
+  Write-Host "  $networkCommand"
+  if ($networkCommand -match "wscript\.exe") {
+    Write-Warning "Network panel is registered via wscript.exe, which is blocked by this PC's security policy. Re-run scripts\Install-MacNetworkHandler.ps1 to switch to the pipe launcher."
+    $VerificationFailed = $true
+  } elseif (-not ($networkCommand -match "MacMakeover\.MenuHost" -and $networkCommand -match "echo network")) {
+    Write-Warning "Network panel is not registered to the fast MenuHost pipe launcher (cmd echo into \\.\pipe\MacMakeover.MenuHost with a --show fallback). Re-run scripts\Install-MacNetworkHandler.ps1."
+    $VerificationFailed = $true
+  }
+} else {
+  Write-Warning "Network protocol handler is missing: macmakeover-network:"
+  $VerificationFailed = $true
+}
+
+Write-Host ""
+Write-Host "Bluetooth launcher:"
+if (Test-Path -Path $BluetoothCommandPath) {
+  $bluetoothCommand = (Get-Item -Path $BluetoothCommandPath).GetValue("")
+  Write-Host "  $bluetoothCommand"
+  if ($bluetoothCommand -match "wscript\.exe") {
+    Write-Warning "Bluetooth panel is registered via wscript.exe, which is blocked by this PC's security policy. Re-run scripts\Install-MacBluetoothHandler.ps1 to switch to the pipe launcher."
+    $VerificationFailed = $true
+  } elseif (-not ($bluetoothCommand -match "MacMakeover\.MenuHost" -and $bluetoothCommand -match "echo bluetooth")) {
+    Write-Warning "Bluetooth panel is not registered to the fast MenuHost pipe launcher (cmd echo into \\.\pipe\MacMakeover.MenuHost with a --show fallback). Re-run scripts\Install-MacBluetoothHandler.ps1."
+    $VerificationFailed = $true
+  }
+} else {
+  Write-Warning "Bluetooth protocol handler is missing: macmakeover-bluetooth:"
+  $VerificationFailed = $true
+}
+
 if (Test-Path -LiteralPath $ToolbarPath) {
   Write-Host ""
   Write-Host "Top-bar click latency guard:"
@@ -156,9 +195,9 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     Write-Host "  OK Apple clicks are helper-owned, not URI-launched from Seelen."
   }
 
-  $seelenUiHideCount = ([regex]::Matches($toolbarRaw, 'name === "Seelen UI"\) return "";')).Count
-  if ($seelenUiHideCount -lt 2) {
-    Write-Warning "Focused-app labels should hide Seelen UI shell popups. Otherwise Network/Bluetooth/Calendar/Notifications clicks pollute the menu bar with 'Seelen UI'."
+  $shellPopupHideCount = ([regex]::Matches($toolbarRaw, 'Seelen UI.*ShellHost.*MacMakeover\\.MenuHost|helper\\.test\\(name\\).*helper\\.test\\(title\\)')).Count
+  if ($shellPopupHideCount -lt 2) {
+    Write-Warning "Focused-app labels should hide Seelen UI/ShellHost/MacMakeover.MenuHost helper surfaces by name and title. Otherwise menu popups pollute the Mac menu bar with implementation labels."
     $VerificationFailed = $true
   }
 
@@ -186,18 +225,23 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -notmatch '@vineeth/tb-network-status' -and $toolbarRaw -notmatch '@seelen/tb-network-popup') {
-    Write-Warning "The network status item is missing from the status strip. Use @vineeth/tb-network-status (VPN/Wi-Fi/ethernet/tether-aware icon that triggers the network popup)."
+  # The network icon is the @vineeth/tb-network-status plugin (connection-aware);
+  # its onClickV2 (in the plugin file) opens macmakeover-network:. Checked further down.
+  if ($toolbarRaw -notmatch '@vineeth/tb-network-status') {
+    Write-Warning "The network status item must be the @vineeth/tb-network-status plugin (connection-aware icon: VPN shield / Wi-Fi / ethernet / tether)."
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -notmatch '@seelen/tb-bluetooth-popup') {
-    Write-Warning "The Bluetooth quick panel (@seelen/tb-bluetooth-popup) is missing from the status strip."
+  if ($toolbarRaw -match '@seelen/tb-bluetooth-popup' -or $toolbarRaw -notmatch 'open\("macmakeover-bluetooth:"\)') {
+    Write-Warning "Bluetooth should be a stable custom toolbar item opening macmakeover-bluetooth:, not Seelen's bundled popup which can collapse/disappear."
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -notmatch '(?s)center:.*c947837b-128a-450c-a634-f215d5935aac.*right:') {
-    Write-Warning "The battery readout should live in the CENTER informational cluster (CPU/MEM/NET/Battery), not as a right-side pseudo-button."
+  # User requirement (explicit): the battery is INFORMATIONAL and lives in the CENTER
+  # readout with CPU/RAM/NET. It must not be a right-side pseudo-button, and it must
+  # not carry an onClick (several icons opening the same panel was a complaint).
+  if ($toolbarRaw -notmatch '(?s)center:.*macmakeover-battery-status.*right:') {
+    Write-Warning "The battery readout must live in the CENTER informational cluster (CPU/RAM/NET/Battery), not on the right."
     $VerificationFailed = $true
   }
 
@@ -232,8 +276,62 @@ if (Test-Path -LiteralPath $SettingsPath) {
 
 if (Test-Path -LiteralPath $ThemePath) {
   $toolbarCss = Get-Content -LiteralPath $ThemePath -Raw
-  if ($toolbarCss -notmatch 'Right status cluster reads as ONE cohesive unit' -or $toolbarCss -match '\.ft-bar-right:has') {
-    Write-Warning "Right-side system controls should use the current cohesive-cluster styling and must not share a hover group via :has()."
+  if ($toolbarCss -notmatch 'MacBook-flat status strip' -or $toolbarCss -match '\.ft-bar-right:has') {
+    Write-Warning "Right-side system controls should use the MacBook-flat status strip styling and must not share a hover group via :has()."
+    $VerificationFailed = $true
+  }
+
+  function Get-CssDeclarationValue {
+    param(
+      [string]$Body,
+      [string]$Property
+    )
+
+    $match = [regex]::Match($Body, "(?m)(?:^|;)\s*$([regex]::Escape($Property))\s*:\s*(?<value>[^;]+);")
+    if (-not $match.Success) { return "" }
+    return $match.Groups["value"].Value.Trim()
+  }
+
+  $centerBarBlock = [regex]::Match($toolbarCss, '(?s)\.ft-bar-center\s*\{(?<body>.*?)\}').Groups["body"].Value
+  $rightBarMatches = [regex]::Matches($toolbarCss, '(?s)\.ft-bar-right\s*\{(?<body>.*?)\}')
+  $rightBarBlock = if ($rightBarMatches.Count) { $rightBarMatches[$rightBarMatches.Count - 1].Groups["body"].Value } else { "" }
+  $centerHasCapsule =
+    ((Get-CssDeclarationValue $centerBarBlock "background") -notmatch '^(|transparent|none)\b') -or
+    ((Get-CssDeclarationValue $centerBarBlock "border") -notmatch '^(|0|none)\b') -or
+    ((Get-CssDeclarationValue $centerBarBlock "box-shadow") -notmatch '^(|none)\b')
+  $rightHasCapsule =
+    ((Get-CssDeclarationValue $rightBarBlock "background") -notmatch '^(|transparent|none)\b') -or
+    ((Get-CssDeclarationValue $rightBarBlock "border") -notmatch '^(|0|none)\b') -or
+    ((Get-CssDeclarationValue $rightBarBlock "box-shadow") -notmatch '^(|none)\b')
+  if ($centerHasCapsule -or $rightHasCapsule) {
+    Write-Warning "The center/right menu-bar clusters have persistent capsule backgrounds again. Keep them flat like a MacBook menu bar."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarCss -match 'inset\s+0\s+-1px|box-shadow:\s*[^;]*-1px') {
+    Write-Warning "The toolbar has a bottom hairline/shadow again. That reads as the ugly black divider under the Mac menu bar."
+    $VerificationFailed = $true
+  }
+
+  # The network icon must NOT be pinned to a static glyph in CSS - the whole point
+  # of @vineeth/tb-network-status is that the icon changes with the connection type.
+  if ($toolbarCss -match 'first-child .ft-bar-item-content::before' -and $toolbarCss -match 'ft-bar-right > .ft-bar-item:first-child .ft-bar-item-content > svg') {
+    Write-Warning "The network icon is visually pinned via CSS, which erases the VPN/Wi-Fi/ethernet/tether distinction. Remove the pinned-glyph override."
+    $VerificationFailed = $true
+  }
+}
+
+if ((Test-Path -LiteralPath $NetworkPluginPath) -and (Test-Path -LiteralPath $ToolbarPath) -and ((Get-Content -LiteralPath $ToolbarPath -Raw) -match '@vineeth/tb-network-status')) {
+  $networkPluginRaw = Get-Content -LiteralPath $NetworkPluginPath -Raw
+  if ($networkPluginRaw -notmatch 'open\("macmakeover-network:"\)') {
+    Write-Warning "The custom network status fallback is not opening the custom MenuHost Network panel."
+    $VerificationFailed = $true
+  }
+
+  # User requirement (explicit): distinguish VPN from Wi-Fi/ethernet/tethering in the
+  # ICON itself. The shield for active tunnels is that distinction - keep it.
+  if ($networkPluginRaw -notmatch 'return icon\("LuShieldCheck"\)') {
+    Write-Warning "The network status plugin lost its VPN shield branch. Active tunnels (PROP_VIRTUAL/TUNNEL/PPP or VPN-named adapters) must show LuShieldCheck."
     $VerificationFailed = $true
   }
 }
@@ -243,6 +341,11 @@ if (Test-Path -LiteralPath $menuHostSourcePath) {
   $menuHostSource = Get-Content -LiteralPath $menuHostSourcePath -Raw
   if ($menuHostSource -notmatch 'Wi-Fi' -or $menuHostSource -notmatch 'ms-settings:network-wifi') {
     Write-Warning "MenuHost Control Center is missing the Wi-Fi live tile/action."
+    $VerificationFailed = $true
+  }
+
+  if ($menuHostSource -notmatch 'CreateNetwork' -or $menuHostSource -notmatch 'ReadWifiNetworks') {
+    Write-Warning "MenuHost is missing the custom Network panel. Wi-Fi clicks should not depend on Seelen's brittle network popup or the native Windows taskbar flyout."
     $VerificationFailed = $true
   }
 }
