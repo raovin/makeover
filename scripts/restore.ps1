@@ -210,6 +210,17 @@ function Register-MacMakeoverBluetooth {
   Write-Host "Bluetooth protocol registered (conhost --headless launcher): macmakeover-bluetooth:"
 }
 
+function Register-MacMakeoverNotificationCenter {
+  $installer = Join-Path $PSScriptRoot "Install-MacNotificationCenterHandler.ps1"
+  if (-not (Test-Path -LiteralPath $installer)) {
+    Write-Warning "Notification Center handler installer was not found, so the protocol handler was not registered: $installer"
+    return
+  }
+
+  & $installer
+  Write-Host "Notification Center protocol registered (conhost --headless launcher): macmakeover-notification-center:"
+}
+
 if (-not (Test-Path -LiteralPath $ConfigRoot)) {
   throw "Backup config was not found. Run scripts\backup-current.ps1 first. Missing: $ConfigRoot"
 }
@@ -249,6 +260,7 @@ Register-MacMakeoverAppleMenu
 Register-MacMakeoverControlCenter
 Register-MacMakeoverNetwork
 Register-MacMakeoverBluetooth
+Register-MacMakeoverNotificationCenter
 
 if ($ApplyAccent) {
   $accentReg = Join-Path $PackageRoot "registry\hkcu-explorer-accent.reg"

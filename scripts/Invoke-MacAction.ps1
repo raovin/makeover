@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory)]
-  [ValidateSet("Spotlight", "TaskView", "ShowDesktop", "Lock", "Sleep", "ClipboardHistory", "OpenMakeoverFolder", "VisualQa", "Backup")]
+  [ValidateSet("Spotlight", "TaskView", "ShowDesktop", "Lock", "Sleep", "ClipboardHistory", "NotificationCenter", "OpenMakeoverFolder", "VisualQa", "Backup")]
   [string]$Action
 )
 
@@ -53,6 +53,9 @@ switch ($Action) {
   }
   "ClipboardHistory" {
     Send-Hotkey ([byte[]](0x5B, 0x56)) # Win+V
+  }
+  "NotificationCenter" {
+    Send-Hotkey ([byte[]](0x5B, 0x4E)) # Win+N
   }
   "OpenMakeoverFolder" {
     Start-Process -FilePath "$env:windir\explorer.exe" -ArgumentList "`"$PackageRoot`""

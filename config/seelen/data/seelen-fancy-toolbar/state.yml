@@ -82,5 +82,31 @@ right:
     maxWidth: 28
     width: 28
   remoteData: {}
-- '@seelen/tb-calendar-popup'
-- '@seelen/tb-notifications'
+- id: macmakeover-notification-center
+  scopes:
+  - Notifications
+  template: 'return [dndActive ? icon("TbZzz") : null, count > 0 ? icon("MdNotificationsActive") : icon("MdOutlineNotifications")];'
+  badge: 'return count > 0 ? count : null;'
+  tooltip: return "";
+  onClick: 'open("macmakeover-notification-center:")'
+  onWheelUp: null
+  onWheelDown: null
+  style:
+    minWidth: 28
+    flexShrink: 0
+    maxWidth: 28
+    width: 28
+  remoteData: {}
+- id: macmakeover-date
+  scopes:
+  - Date
+  template: 'const d = new Date(); const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]; const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]; const hh = String(d.getHours()).padStart(2, "0"); const mm = String(d.getMinutes()).padStart(2, "0"); return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]} ${hh}:${mm}`;'
+  tooltip: return "";
+  badge: null
+  onClick: 'open("macmakeover-notification-center:")'
+  onWheelUp: null
+  onWheelDown: null
+  style:
+    minWidth: 104
+    flexShrink: 0
+  remoteData: {}

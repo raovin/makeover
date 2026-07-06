@@ -23,6 +23,7 @@ $ControlCenterScriptPath = Join-Path $PackageRoot "scripts\Show-MacControlCenter
 $ControlCenterInstallerPath = Join-Path $PackageRoot "scripts\Install-MacControlCenterHandler.ps1"
 $NetworkInstallerPath = Join-Path $PackageRoot "scripts\Install-MacNetworkHandler.ps1"
 $BluetoothInstallerPath = Join-Path $PackageRoot "scripts\Install-MacBluetoothHandler.ps1"
+$NotificationCenterInstallerPath = Join-Path $PackageRoot "scripts\Install-MacNotificationCenterHandler.ps1"
 $HotCornersScriptPath = Join-Path $PackageRoot "scripts\start-hot-corners.ps1"
 $HotCornersConfigPath = Join-Path $PackageRoot "config\hot-corners.json"
 $MenuHostProjectPath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj"
@@ -31,6 +32,7 @@ $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\ope
 $ControlCenterCommandPath = "HKCU:\Software\Classes\macmakeover-control-center\shell\open\command"
 $NetworkCommandPath = "HKCU:\Software\Classes\macmakeover-network\shell\open\command"
 $BluetoothCommandPath = "HKCU:\Software\Classes\macmakeover-bluetooth\shell\open\command"
+$NotificationCenterCommandPath = "HKCU:\Software\Classes\macmakeover-notification-center\shell\open\command"
 $VerificationFailed = $false
 
 function Get-ImageAverageLuma {
@@ -97,7 +99,7 @@ Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPale
 
 Write-Host ""
 Write-Host "Core files:"
-foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath)) {
+foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $NotificationCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath)) {
   if (Test-Path -LiteralPath $path) {
     "OK   {0}" -f $path
   } else {
@@ -171,6 +173,23 @@ if (Test-Path -Path $BluetoothCommandPath) {
   }
 } else {
   Write-Warning "Bluetooth protocol handler is missing: macmakeover-bluetooth:"
+  $VerificationFailed = $true
+}
+
+Write-Host ""
+Write-Host "Notification Center launcher:"
+if (Test-Path -Path $NotificationCenterCommandPath) {
+  $notificationCenterCommand = (Get-Item -Path $NotificationCenterCommandPath).GetValue("")
+  Write-Host "  $notificationCenterCommand"
+  if ($notificationCenterCommand -match "wscript\.exe") {
+    Write-Warning "Notification Center is registered via wscript.exe, which is blocked by this PC's security policy. Re-run scripts\Install-MacNotificationCenterHandler.ps1."
+    $VerificationFailed = $true
+  } elseif (-not ($notificationCenterCommand -match "conhost\.exe" -and $notificationCenterCommand -match "Invoke-MacAction\.ps1" -and $notificationCenterCommand -match "NotificationCenter")) {
+    Write-Warning "Notification Center is not registered to the conhost launcher. Re-run scripts\Install-MacNotificationCenterHandler.ps1."
+    $VerificationFailed = $true
+  }
+} else {
+  Write-Warning "Notification Center protocol handler is missing: macmakeover-notification-center:"
   $VerificationFailed = $true
 }
 
@@ -256,13 +275,18 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -notmatch '@seelen/tb-notifications') {
-    Write-Warning "Top-bar notification bell is missing. It should be a separate click target from Control Center."
+  if ($toolbarRaw -match '@seelen/tb-notifications|@seelen/tb-calendar-popup') {
+    Write-Warning "Top-bar calendar/notification items are using Seelen Flyouts again. Use macmakeover-date and macmakeover-notification-center instead."
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -notmatch '@seelen/tb-calendar-popup' -or $toolbarRaw -notmatch '(?s)right:\s*.*@seelen/tb-calendar-popup') {
-    Write-Warning "Date/time should live on the right side of the menu bar, macOS-style."
+  if ($toolbarRaw -notmatch 'macmakeover-notification-center' -or $toolbarRaw -notmatch 'open\("macmakeover-notification-center:"\)') {
+    Write-Warning "Top-bar notification bell is missing or not routed through the custom Notification Center protocol."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarRaw -notmatch 'macmakeover-date' -or $toolbarRaw -notmatch '(?s)right:\s*.*macmakeover-date') {
+    Write-Warning "Date/time should live on the right side of the menu bar, macOS-style, without Seelen Flyouts."
     $VerificationFailed = $true
   }
 
