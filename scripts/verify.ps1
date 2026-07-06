@@ -237,11 +237,17 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
-  # User requirement (explicit): the battery is INFORMATIONAL and lives in the CENTER
-  # readout with CPU/RAM/NET. It must not be a right-side pseudo-button, and it must
-  # not carry an onClick (several icons opening the same panel was a complaint).
-  if ($toolbarRaw -notmatch '(?s)center:.*macmakeover-battery-status.*right:') {
-    Write-Warning "The battery readout must live in the CENTER informational cluster (CPU/RAM/NET/Battery), not on the right."
+  # User requirement (explicit, 2026-07-06): keep the Mac menu bar center quiet.
+  # CPU/RAM/NET/Battery in the center made the bar read like misplaced menu options.
+  if ($toolbarRaw -match '(?s)center:\s*\n\s*-' -or $toolbarRaw -match '(?s)center:.*(Cpu|Memory|NetworkStatistics|macmakeover-battery-status).*right:') {
+    Write-Warning "The center of the menu bar should stay quiet/empty. Do not put CPU/RAM/NET/Battery readouts in the middle."
+    $VerificationFailed = $true
+  }
+
+  # Battery/charging should be one merged right-side system-status item, not a separate
+  # charge-rate glyph and not a center telemetry readout.
+  if ($toolbarRaw -notmatch '(?s)right:.*macmakeover-battery-status') {
+    Write-Warning "The merged battery/charging readout must live in the RIGHT system status cluster."
     $VerificationFailed = $true
   }
 
@@ -278,6 +284,11 @@ if (Test-Path -LiteralPath $ThemePath) {
   $toolbarCss = Get-Content -LiteralPath $ThemePath -Raw
   if ($toolbarCss -notmatch 'MacBook-flat status strip' -or $toolbarCss -match '\.ft-bar-right:has') {
     Write-Warning "Right-side system controls should use the MacBook-flat status strip styling and must not share a hover group via :has()."
+    $VerificationFailed = $true
+  }
+
+  if ($toolbarCss -match '--mm-visible-width-scale|calc\(100vw\s*\*\s*var\(') {
+    Write-Warning "The toolbar width is DPI-scaled/truncated. The menu bar must span the full physical screen width (100vw), not a scaled fraction."
     $VerificationFailed = $true
   }
 
