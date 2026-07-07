@@ -10,6 +10,7 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 
 - A macOS-style top menu bar using Seelen UI.
 - A bottom dock owned by `MacMakeover.MenuHost`, using the saved Seelen WEG pin list as its data source.
+- The dock registers as a bottom Windows appbar, so maximized windows reserve space above it instead of being covered.
 - The custom `macos-glass` theme for the frosted menu bar and dock.
 - The current toolbar layout: Apple-style mark, focused app, centered CPU/memory/network telemetry, and right-side Network, Bluetooth, battery, Control Center sliders, date/time, and notification controls.
 - A Mac-style Apple menu on the top-left Apple mark, opened by the warmed hot-corners helper so it appears quickly and no terminal window appears.
@@ -250,6 +251,8 @@ If app icons or dock pins do not launch, the executable paths probably differ on
 ```
 
 The file is still the portable pin source, but the visible dock is rendered by `tools\MacMakeover.MenuHost\DockForm.cs`. Keep `@seelen/weg.enabled` set to `false`; Seelen WEG rendered blank with hardware acceleration and snapped to the top when hardware acceleration was disabled.
+
+The native dock must keep its bottom appbar reservation. A plain topmost dock covers chat boxes, editors, and maximized app status bars.
 
 If clicking the Apple mark opens a terminal, rerun:
 

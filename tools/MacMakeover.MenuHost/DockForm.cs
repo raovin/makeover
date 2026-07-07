@@ -52,6 +52,7 @@ internal sealed class DockForm : Form
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         FormClosed += (_, _) =>
         {
+            NativeDockMethods.RemoveAppBar(this);
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             _refreshTimer.Dispose();
             _toolTip.Dispose();
@@ -211,8 +212,12 @@ internal sealed class DockForm : Form
             Region = new Region(path);
         }
 
+        var appBarHeight = height + LogicalToDeviceUnits(22);
+        var reserved = new Rectangle(screen.Left, screen.Bottom - appBarHeight, screen.Width, appBarHeight);
+        var appBarBounds = NativeDockMethods.SetBottomAppBar(this, reserved);
+
         var x = screen.Left + (screen.Width - Width) / 2;
-        var y = screen.Bottom - Height - LogicalToDeviceUnits(10);
+        var y = appBarBounds.Bottom - Height - LogicalToDeviceUnits(10);
         if (Location.X != x || Location.Y != y)
         {
             Location = new Point(x, y);
@@ -684,6 +689,12 @@ internal static class NativeDockMethods
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpShowWindow = 0x0040;
+    private const int AbmNew = 0x00000000;
+    private const int AbmRemove = 0x00000001;
+    private const int AbmQueryPos = 0x00000002;
+    private const int AbmSetPos = 0x00000003;
+    private const int AbeBottom = 3;
+    private static readonly Dictionary<IntPtr, int> AppBarMessages = new();
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -693,6 +704,12 @@ internal static class NativeDockMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    [DllImport("shell32.dll", SetLastError = true)]
+    private static extern IntPtr SHAppBarMessage(int dwMessage, ref AppBarData pData);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int RegisterWindowMessage(string lpString);
 
     public static void RestoreAndActivate(IntPtr handle)
     {
@@ -704,5 +721,77 @@ internal static class NativeDockMethods
     {
         if (form.IsDisposed || form.Disposing) return;
         SetWindowPos(form.Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
+    }
+
+    public static Rectangle SetBottomAppBar(Form form, Rectangle desired)
+    {
+        if (form.IsDisposed || form.Disposing || form.Handle == IntPtr.Zero) return desired;
+
+        if (!AppBarMessages.TryGetValue(form.Handle, out var callbackMessage))
+        {
+            callbackMessage = RegisterWindowMessage("MacMakeover.Dock.AppBar");
+            var newData = AppBarData.For(form.Handle, callbackMessage, desired);
+            SHAppBarMessage(AbmNew, ref newData);
+            AppBarMessages[form.Handle] = callbackMessage;
+        }
+
+        var query = AppBarData.For(form.Handle, callbackMessage, desired);
+        query.uEdge = AbeBottom;
+        SHAppBarMessage(AbmQueryPos, ref query);
+
+        query.rc.Left = desired.Left;
+        query.rc.Right = desired.Right;
+        query.rc.Top = query.rc.Bottom - desired.Height;
+        query.uEdge = AbeBottom;
+        SHAppBarMessage(AbmSetPos, ref query);
+
+        return new Rectangle(query.rc.Left, query.rc.Top, query.rc.Right - query.rc.Left, query.rc.Bottom - query.rc.Top);
+    }
+
+    public static void RemoveAppBar(Form form)
+    {
+        if (form.Handle == IntPtr.Zero || !AppBarMessages.Remove(form.Handle, out var callbackMessage)) return;
+
+        var data = AppBarData.For(form.Handle, callbackMessage, Rectangle.Empty);
+        SHAppBarMessage(AbmRemove, ref data);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AppBarData
+    {
+        public int cbSize;
+        public IntPtr hWnd;
+        public int uCallbackMessage;
+        public int uEdge;
+        public NativeRect rc;
+        public IntPtr lParam;
+
+        public static AppBarData For(IntPtr handle, int callbackMessage, Rectangle bounds)
+        {
+            return new AppBarData
+            {
+                cbSize = Marshal.SizeOf<AppBarData>(),
+                hWnd = handle,
+                uCallbackMessage = callbackMessage,
+                uEdge = AbeBottom,
+                rc = new NativeRect
+                {
+                    Left = bounds.Left,
+                    Top = bounds.Top,
+                    Right = bounds.Right,
+                    Bottom = bounds.Bottom
+                },
+                lParam = IntPtr.Zero
+            };
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 }

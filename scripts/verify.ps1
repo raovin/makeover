@@ -415,6 +415,11 @@ if (Test-Path -LiteralPath $MenuHostDockSourcePath) {
     Write-Warning "MenuHost native fallback dock is missing or no longer loading the saved Seelen dock pins."
     $VerificationFailed = $true
   }
+
+  if ($dockSource -notmatch 'SetBottomAppBar' -or $dockSource -notmatch 'SHAppBarMessage') {
+    Write-Warning "The native dock is not reserving bottom work area as an appbar. A topmost dock without appbar reservation covers maximized app content and text inputs."
+    $VerificationFailed = $true
+  }
 }
 
 if (Test-Path -LiteralPath $HotCornersConfigPath) {
