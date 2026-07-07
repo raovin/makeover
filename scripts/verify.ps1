@@ -28,6 +28,7 @@ $HotCornersScriptPath = Join-Path $PackageRoot "scripts\start-hot-corners.ps1"
 $HotCornersConfigPath = Join-Path $PackageRoot "config\hot-corners.json"
 $MenuHostProjectPath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj"
 $MenuHostExePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe"
+$MenuHostDockSourcePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\DockForm.cs"
 $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command"
 $ControlCenterCommandPath = "HKCU:\Software\Classes\macmakeover-control-center\shell\open\command"
 $NetworkCommandPath = "HKCU:\Software\Classes\macmakeover-network\shell\open\command"
@@ -99,11 +100,34 @@ Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPale
 
 Write-Host ""
 Write-Host "Core files:"
-foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $NotificationCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath)) {
+foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $NotificationCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath, $MenuHostDockSourcePath)) {
   if (Test-Path -LiteralPath $path) {
     "OK   {0}" -f $path
   } else {
     "MISS {0}" -f $path
+    $VerificationFailed = $true
+  }
+}
+
+if (Test-Path -LiteralPath $SettingsPath) {
+  Write-Host ""
+  Write-Host "Seelen performance guard:"
+  try {
+    $seelenSettings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+    $performanceMode = $seelenSettings.performanceMode
+    $performanceMode | Format-List default,onBattery,onEnergySaver
+
+    if ($performanceMode.onBattery -ne "Disabled" -or $performanceMode.onEnergySaver -ne "Disabled") {
+      Write-Warning "Seelen performance modes can hide the top toolbar and bottom dock. Keep onBattery/onEnergySaver set to Disabled."
+      $VerificationFailed = $true
+    }
+
+    if ($seelenSettings.byWidget.'@seelen/weg'.enabled -ne $false) {
+      Write-Warning "Seelen WEG should stay disabled. WEG rendered blank with hardware acceleration and snapped to the top when acceleration was disabled; the bottom dock is now owned by MacMakeover.MenuHost."
+      $VerificationFailed = $true
+    }
+  } catch {
+    Write-Warning "Could not parse Seelen settings.json: $($_.Exception.Message)"
     $VerificationFailed = $true
   }
 }
@@ -381,6 +405,14 @@ if (Test-Path -LiteralPath $menuHostSourcePath) {
 
   if ($menuHostSource -notmatch 'CreateNetwork' -or $menuHostSource -notmatch 'ReadWifiNetworks') {
     Write-Warning "MenuHost is missing the custom Network panel. Wi-Fi clicks should not depend on Seelen's brittle network popup or the native Windows taskbar flyout."
+    $VerificationFailed = $true
+  }
+}
+
+if (Test-Path -LiteralPath $MenuHostDockSourcePath) {
+  $dockSource = Get-Content -LiteralPath $MenuHostDockSourcePath -Raw
+  if ($dockSource -notmatch 'class DockForm' -or $dockSource -notmatch 'seelen-weg' -or $dockSource -notmatch 'PositionDock') {
+    Write-Warning "MenuHost native fallback dock is missing or no longer loading the saved Seelen dock pins."
     $VerificationFailed = $true
   }
 }

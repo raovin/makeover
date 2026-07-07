@@ -9,7 +9,7 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 ## What You Get
 
 - A macOS-style top menu bar using Seelen UI.
-- A bottom dock using Seelen WEG.
+- A bottom dock owned by `MacMakeover.MenuHost`, using the saved Seelen WEG pin list as its data source.
 - The custom `macos-glass` theme for the frosted menu bar and dock.
 - The current toolbar layout: Apple-style mark, focused app, centered CPU/memory/network telemetry, and right-side Network, Bluetooth, battery, Control Center sliders, date/time, and notification controls.
 - A Mac-style Apple menu on the top-left Apple mark, opened by the warmed hot-corners helper so it appears quickly and no terminal window appears.
@@ -69,7 +69,7 @@ mac-makeover/
     verify.ps1            # Check files, Seelen process health, logs, screenshot
   CLAUDE.md               # Entry point for Claude Code
   tools/
-    MacMakeover.MenuHost/  # Resident owner-drawn Apple/Control Center menu host
+    MacMakeover.MenuHost/  # Resident owner-drawn Apple/Control Center/native dock host
   manifest.json           # Backup metadata and exclusions
   README.md
 ```
@@ -163,8 +163,8 @@ Some setup must remain manual because it is account/device-specific:
 - Sign into or configure RustDesk on the new device.
 - Grant any remote-control permissions required by the OS.
 - Approve installer or UAC prompts yourself.
-- Confirm Seelen starts at login.
-- Check dock pins whose app paths differ on the new machine.
+- Confirm Seelen starts at login for the top menu bar, and the hot-corners/MenuHost helper starts for the bottom dock.
+- Check dock pins whose app paths differ on the new machine. The native dock reads the saved Seelen WEG pin file, but Seelen's own WEG widget stays disabled.
 - If the managed Windows Search policy key is locked by your organization, `restore.ps1` will warn and still apply the normal per-user Bing/web-search suppression values.
 
 On managed work devices, wallpaper may be controlled by policy. The restore script attempts a user-level wallpaper change only; it does not bypass policy.
@@ -212,7 +212,7 @@ The launcher behavior is separate from Seelen:
 - Clicking the top-left Apple mark opens the compact Apple menu for About This Mac, System Settings, App Store, Recent Items, Force Quit, Sleep, Restart, Shut Down, Lock Screen, and Log Out.
 - Restart, Shut Down, and Log Out ask for confirmation.
 - Normal Apple clicks are handled by `scripts\start-hot-corners.ps1`, which sends `apple` to `tools\MacMakeover.MenuHost`. The `macmakeover-apple-menu:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` as fallback. Registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
-- `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running or if the helper is running under `pwsh.exe`.
+- `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running, if the helper is running under `pwsh.exe`, or if Seelen WEG is re-enabled.
 - Clicking Wi-Fi opens the custom MenuHost Network panel; the icon stays visually Wi-Fi so VPN/tunnel routes do not turn it into a misleading shield or generic computer glyph.
 - Clicking Bluetooth opens the custom MenuHost Bluetooth panel.
 - Battery is a right-side Mac-style system readout, merged with charging state.
@@ -248,6 +248,8 @@ If app icons or dock pins do not launch, the executable paths probably differ on
 ```text
 %APPDATA%\com.seelen.seelen-ui\data\seelen-weg\state.yml
 ```
+
+The file is still the portable pin source, but the visible dock is rendered by `tools\MacMakeover.MenuHost\DockForm.cs`. Keep `@seelen/weg.enabled` set to `false`; Seelen WEG rendered blank with hardware acceleration and snapped to the top when hardware acceleration was disabled.
 
 If clicking the Apple mark opens a terminal, rerun:
 

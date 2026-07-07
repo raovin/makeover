@@ -1,17 +1,19 @@
 # Handoff To Claude Code: Continue Beautifying The Windows macOS Makeover
 
-Last updated: 2026-06-29 Europe/London by Codex.
+Last updated: 2026-07-07 Europe/London by Codex.
 
 You are taking over a Windows 11 desktop-customization project. The user wants this PC to feel more like macOS: a refined top menu bar, bottom dock, Apple-style top-left menu, Spotlight-like search, no Bing clutter, native Alt+Tab, and zero visible overlap/clipping.
 
 The user is very explicit about quality: do not claim a visual task is finished without a real visual QA check. For any visual change, make the change, restart/reload the affected shell, capture screenshots, inspect them, and tell the user what you verified.
 
-## Latest (2026-06-29, Codex Audit Fix)
+## Latest (2026-07-07, Codex Audit Fix)
 
 - Normal Apple clicks open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
 - The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
 - The top-right sliders control opens the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. It intentionally uses `onClick: open("macmakeover-control-center:")`; that protocol is registered to a fast `conhost --headless cmd /c echo control> \\.\pipe\MacMakeover.MenuHost` launcher with a `--show control` fallback.
 - Performance correction: normal Apple clicks remain helper-owned through `scripts\start-hot-corners.ps1`. Right-side controls are item-owned now: Network and Bluetooth use custom MenuHost panels, Calendar/Notifications must avoid Seelen Flyouts (`macmakeover-notification-center:` opens Windows Notification Center), and sliders use the fast Control Center protocol.
+- Battery/performance correction: keep Seelen `performanceMode.onBattery` and `performanceMode.onEnergySaver` set to `Disabled`. `Minimal` caused the top toolbar and bottom dock to disappear after the laptop switched off AC power.
+- Dock recovery correction: keep Seelen `@seelen/weg.enabled` set to `false`. WEG rendered blank with hardware acceleration on, then snapped to the top when hardware acceleration was disabled. The visible bottom dock is now `tools\MacMakeover.MenuHost\DockForm.cs`, which reads the saved WEG `state.yml` pins.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
 - Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
 - The three previous locations were consolidated into this single git repo at `C:\Users\VineethRao\source\repos\mac-makeover`. The old brunel copy is kept untouched as a frozen backup.
@@ -79,6 +81,10 @@ HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command
 7. Do not wire Seelen toolbar `onClick` directly to `macmakeover-apple-menu:`. Apple must stay helper-routed. The Control Center sliders item is the exception: it should use `open("macmakeover-control-center:")`, whose protocol is a fast named-pipe echo into the resident `tools\MacMakeover.MenuHost` process with a self-healing `--show control` fallback.
 
 8. Do not re-add Seelen's `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back. The right-side Control Center entry is custom and is backed by the hot-corners top-bar click router.
+
+9. Do not set Seelen battery or energy-saver performance modes to `Minimal`/`Extreme`. The user reported both the top toolbar and bottom dock disappearing immediately after Seelen switched to `Minimal` on battery. `scripts\verify.ps1` should fail if `performanceMode.onBattery` or `performanceMode.onEnergySaver` is anything other than `Disabled`.
+
+10. Do not re-enable Seelen WEG as the visible dock. It is intentionally disabled because it alternated between blank/transparent and top-snapped. The native `MacMakeover.MenuHost` dock owns the visible bottom toolbar now; WEG `state.yml` remains only the portable pin list.
 
 Correct Control Center handler shape (registered by `scripts\Install-MacControlCenterHandler.ps1`):
 

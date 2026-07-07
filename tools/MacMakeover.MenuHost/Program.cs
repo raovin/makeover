@@ -113,11 +113,14 @@ internal sealed class MenuContext : ApplicationContext
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly Control _invoker = new();
+    private readonly DockForm _dock;
     private Form? _current;
 
     public MenuContext()
     {
         _invoker.CreateControl();
+        _dock = DockForm.Create();
+        _dock.Show();
     }
 
     public CancellationToken Token => _cts.Token;
@@ -202,6 +205,7 @@ internal sealed class MenuContext : ApplicationContext
             IsDisposed = true;
             _cts.Cancel();
             _current?.Dispose();
+            _dock.Dispose();
             _invoker.Dispose();
             _cts.Dispose();
         }

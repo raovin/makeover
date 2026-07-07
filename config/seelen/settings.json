@@ -57,7 +57,7 @@
       "$shortcuts": null,
       "delayToHide": 800,
       "delayToShow": 100,
-      "enabled": true,
+      "enabled": false,
       "hideMode": "Never",
       "margin": 8,
       "middleClickAction": "OpenNewInstance",
@@ -121,8 +121,8 @@
   "oldActiveThemes": [],
   "performanceMode": {
     "default": "Disabled",
-    "onBattery": "Minimal",
-    "onEnergySaver": "Extreme"
+    "onBattery": "Disabled",
+    "onEnergySaver": "Disabled"
   },
   "pollingInterval": 3,
   "startOfWeek": "Monday",
