@@ -91,57 +91,6 @@ public static class MacMakeoverHotCornersNative {
     }, IntPtr.Zero);
   }
 
-  [DllImport("user32.dll")]
-  public static extern bool IsZoomed(IntPtr hWnd);
-
-  [DllImport("user32.dll")]
-  public static extern bool IsIconic(IntPtr hWnd);
-
-  [DllImport("user32.dll")]
-  public static extern int GetWindowLong(IntPtr hWnd, int index);
-
-  [DllImport("user32.dll")]
-  public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-
-  [DllImport("user32.dll")]
-  public static extern bool SystemParametersInfo(uint action, uint param, ref RECT rect, uint flags);
-
-  private static readonly System.Collections.Generic.Dictionary<IntPtr, DateTime> LastNudgedWindows = new System.Collections.Generic.Dictionary<IntPtr, DateTime>();
-
-  // The menu bar reserves the top work-area strip, which stops window DRAGGING from
-  // going underneath - but apps that restore/position themselves programmatically
-  // (Snipping Tool remembering an old spot, etc.) can still park their title bar
-  // under the bar. macOS simply never allows that. Evict such windows with a short
-  // cooldown: normal captioned app windows only; fullscreen surfaces, minimized/
-  // maximized windows, tool windows and Seelen's own Tauri windows are exempt.
-  public static void NudgeWindowsOutOfBar(int screenHeight) {
-    RECT work = new RECT();
-    if (!SystemParametersInfo(0x0030, 0, ref work, 0)) return; // SPI_GETWORKAREA
-    int workTop = work.Top;
-    if (workTop <= 0) return;
-    EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
-      if (!IsWindowVisible(hWnd) || IsIconic(hWnd) || IsZoomed(hWnd)) return true;
-      RECT r;
-      GetWindowRect(hWnd, out r);
-      if (r.Top < 0 || r.Top >= workTop) return true;                   // not parked in the strip
-      if ((r.Bottom - r.Top) >= (int)(screenHeight * 0.9)) return true; // fullscreen-ish, leave alone
-      int exStyle = GetWindowLong(hWnd, -20);                           // GWL_EXSTYLE
-      if ((exStyle & 0x00000080) != 0) return true;                     // WS_EX_TOOLWINDOW
-      int style = GetWindowLong(hWnd, -16);                             // GWL_STYLE
-      if ((style & 0x00C00000) == 0) return true;                       // only captioned app windows
-      var cls = new System.Text.StringBuilder(128);
-      GetClassName(hWnd, cls, 128);
-      string className = cls.ToString();
-      if (className == "Tauri Window" || className == "Tao Thread Event Target" || className == "Progman" || className == "WorkerW" || className == "Shell_TrayWnd") return true;
-      DateTime lastNudged;
-      DateTime now = DateTime.UtcNow;
-      if (LastNudgedWindows.TryGetValue(hWnd, out lastNudged) && (now - lastNudged).TotalMilliseconds < 1200) return true;
-      LastNudgedWindows[hWnd] = now;
-      SetWindowPos(hWnd, IntPtr.Zero, r.Left, workTop, 0, 0, 0x0001 | 0x0004 | 0x0010); // NOSIZE|NOZORDER|NOACTIVATE
-      return true;
-    }, IntPtr.Zero);
-  }
-
   // Bar clicks must not dismiss the popup they are opening, but lingering hover
   // tooltips should still vanish the moment anything is clicked.
   public static void HideSeelenTooltips() {
@@ -186,7 +135,7 @@ function Read-HotCornerConfig {
     topRightClick = "ShowDesktop"
     bottomLeftClick = "None"
     bottomRightClick = "None"
-    appleMenuClickEnabled = $true
+    appleMenuClickEnabled = $false
     appleMenuZoneLeft = 24
     appleMenuZoneRight = 78
     appleMenuClickCooldownMilliseconds = 300
@@ -213,8 +162,8 @@ function Read-HotCornerConfig {
     calendarPopupClickCooldownMilliseconds = 300
     topLeft = "None"
     topRight = "None"
-    bottomLeft = "ShowDesktop"
-    bottomRight = "Lock"
+    bottomLeft = "None"
+    bottomRight = "None"
     logPath = "%LOCALAPPDATA%\MacMakeover\hot-corners.log"
   }
 
@@ -709,7 +658,6 @@ $lastNotificationCenterClick = [datetime]::MinValue
 $lastCalendarPopupClick = [datetime]::MinValue
 $lastAppleMenuClick = [datetime]::MinValue
 $wasLeftMouseDown = $false
-$script:NudgeCounter = 0
 
 while ($true) {
   try {
@@ -841,14 +789,6 @@ while ($true) {
   } catch {
     Write-HotCornerLog $config "Error: $($_.Exception.Message)"
     Start-Sleep -Seconds 2
-  }
-
-  # Every ~2s: evict app windows whose title bar restored itself under the menu bar
-  # (the opaque bar would otherwise hide their caption; macOS never allows this).
-  $script:NudgeCounter++
-  if ($script:NudgeCounter -ge 35) {
-    $script:NudgeCounter = 0
-    try { [MacMakeoverHotCornersNative]::NudgeWindowsOutOfBar($bounds.Height) } catch { }
   }
 
   Clear-CompletedMenuInvocations

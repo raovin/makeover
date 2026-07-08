@@ -1,18 +1,17 @@
 # Registers the `macmakeover-apple-menu:` protocol so the top-left Apple logo opens the
-# custom Apple menu. Launches via conhost --headless (NO wscript, NO terminal flash).
-#
-# Why conhost: this PC's security policy blocks wscript.exe from spawning PowerShell
-# ("Windows Script Host failed - not enough memory resources"), which silently broke the
-# old VBS launcher. conhost --headless runs PowerShell windowless and is not blocked.
+# custom Apple menu. This uses the same fast resident MenuHost pipe path as Control
+# Center; the old PowerShell/WPF cold path was laggy and made click routing brittle.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$menuScript = Join-Path $repoRoot 'scripts\Show-MacAppleMenu.ps1'
-if (-not (Test-Path $menuScript)) { throw "Menu script not found: $menuScript" }
+$menuHostExe = Join-Path $repoRoot 'tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe'
+if (-not (Test-Path $menuHostExe)) {
+  Write-Warning "MenuHost is not built yet ($menuHostExe). Run: dotnet build tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj -c Release"
+}
 
 $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$command = '"{0}" --headless "{1}" -NoProfile -ExecutionPolicy Bypass -STA -File "{2}" "%1"' -f $conhost, $powershell, $menuScript
+$cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+$command = '"{0}" --headless "{1}" /c echo apple> \\.\pipe\MacMakeover.MenuHost || start "" "{2}" --show apple' -f $conhost, $cmd, $menuHostExe
 
 $base = 'HKCU:\Software\Classes\macmakeover-apple-menu'
 New-Item -Path "$base\shell\open\command" -Force | Out-Null

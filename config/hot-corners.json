@@ -11,7 +11,7 @@
   "topRightClick": "ShowDesktop",
   "bottomLeftClick": "None",
   "bottomRightClick": "None",
-  "appleMenuClickEnabled": true,
+  "appleMenuClickEnabled": false,
   "appleMenuZoneLeft": 8,
   "appleMenuZoneRight": 84,
   "appleMenuClickCooldownMilliseconds": 300,
@@ -38,7 +38,7 @@
   "calendarPopupClickCooldownMilliseconds": 300,
   "topLeft": "None",
   "topRight": "None",
-  "bottomLeft": "ShowDesktop",
-  "bottomRight": "Lock",
+  "bottomLeft": "None",
+  "bottomRight": "None",
   "logPath": "%LOCALAPPDATA%\\MacMakeover\\hot-corners.log"
 }

@@ -5,7 +5,7 @@ left:
   template: return "Apple";
   tooltip: return "";
   badge: null
-  onClick: null
+  onClick: 'open("macmakeover-apple-menu:")'
   onWheelUp: null
   onWheelDown: null
   style:

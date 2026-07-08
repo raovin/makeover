@@ -1,19 +1,28 @@
 # Handoff To Claude Code: Continue Beautifying The Windows macOS Makeover
 
-Last updated: 2026-07-07 Europe/London by Codex.
+Last updated: 2026-07-08 Europe/London by Codex.
 
 You are taking over a Windows 11 desktop-customization project. The user wants this PC to feel more like macOS: a refined top menu bar, bottom dock, Apple-style top-left menu, Spotlight-like search, no Bing clutter, native Alt+Tab, and zero visible overlap/clipping.
 
 The user is very explicit about quality: do not claim a visual task is finished without a real visual QA check. For any visual change, make the change, restart/reload the affected shell, capture screenshots, inspect them, and tell the user what you verified.
 
-## Latest (2026-07-07, Codex Audit Fix)
+## Latest (2026-07-08, Functional Stabilization)
+
+- Functional stability now wins over visual cleverness. The native `MacMakeover.MenuHost` dock/appbar fallback was removed because it interfered with maximize/work-area behavior. Keep Seelen `@seelen/weg.enabled` set to `true` for the visible bottom dock.
+- Apple clicks are now item-owned from the Seelen toolbar: `onClick: open("macmakeover-apple-menu:")`. The protocol handler must be the fast MenuHost pipe launcher: `conhost --headless cmd /c echo apple> \\.\pipe\MacMakeover.MenuHost || start MenuHost --show apple`.
+- Do not re-enable broad helper pixel zones for Apple/right-side top-bar controls. Those can fire while clicking maximized app chrome and make unrelated actions feel random.
+- MenuHost popups must remain non-activating tool windows (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). Do not call `form.Activate()` or `SetForegroundWindow(form.Handle)` for Apple/Control/Network/Bluetooth popups; native Alt+Tab must remain clean.
+- Hot-corner dwell actions are disabled. Keep only the tiny top-left/top-right click zones for Show Desktop.
+- `scripts\verify.ps1` has been updated to fail if native dock/appbar code, foreground-stealing menu code, helper-owned Apple pixel routing, or dwell corner actions come back.
+
+## Previous (2026-07-07, Codex Audit Fix)
 
 - Normal Apple clicks open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
-- The protocol handler must be `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` (registered by `scripts\Install-AppleMenuHandler.ps1`), because `wscript.exe` is blocked by this machine's Defender/ASR policy.
+- The Apple protocol handler must use the fast MenuHost pipe launcher registered by `scripts\Install-AppleMenuHandler.ps1`, because `wscript.exe` is blocked by this machine's Defender/ASR policy and the old PowerShell/WPF cold path was laggy.
 - The top-right sliders control opens the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. It intentionally uses `onClick: open("macmakeover-control-center:")`; that protocol is registered to a fast `conhost --headless cmd /c echo control> \\.\pipe\MacMakeover.MenuHost` launcher with a `--show control` fallback.
-- Performance correction: normal Apple clicks remain helper-owned through `scripts\start-hot-corners.ps1`. Right-side controls are item-owned now: Network and Bluetooth use custom MenuHost panels, Calendar/Notifications must avoid Seelen Flyouts (`macmakeover-notification-center:` opens Windows Notification Center), and sliders use the fast Control Center protocol.
+- Performance correction: Apple and right-side controls are item-owned now. Network and Bluetooth use custom MenuHost panels, Calendar/Notifications must avoid Seelen Flyouts (`macmakeover-notification-center:` opens Windows Notification Center), and sliders use the fast Control Center protocol.
 - Battery/performance correction: keep Seelen `performanceMode.onBattery` and `performanceMode.onEnergySaver` set to `Disabled`. `Minimal` caused the top toolbar and bottom dock to disappear after the laptop switched off AC power.
-- Dock recovery correction: keep Seelen `@seelen/weg.enabled` set to `false`. WEG rendered blank with hardware acceleration on, then snapped to the top when hardware acceleration was disabled. The visible bottom dock is now `tools\MacMakeover.MenuHost\DockForm.cs`, which reads the saved WEG `state.yml` pins and registers a bottom appbar so maximized windows do not sit underneath it.
+- Dock recovery correction: keep Seelen `@seelen/weg.enabled` set to `true`. The later native MenuHost dock/appbar experiment was removed after it interfered with maximize/work-area behavior.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
 - Top-left/top-right outer-corner clicks are handled by `scripts\start-hot-corners.ps1` and send Show Desktop. Do not re-enable Seelen's invisible `.ft-corner-button`; it stole clicks from the Apple glyph.
 - The three previous locations were consolidated into this single git repo at `C:\Users\VineethRao\source\repos\mac-makeover`. The old brunel copy is kept untouched as a frozen backup.
@@ -67,7 +76,7 @@ C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\settings_shortcuts.json
 Correct handler shape (registered by `scripts\Install-AppleMenuHandler.ps1`):
 
 ```text
-"C:\Windows\System32\conhost.exe" --headless "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacAppleMenu.ps1" "%1"
+"C:\Windows\System32\conhost.exe" --headless "C:\Windows\System32\cmd.exe" /c echo apple> \\.\pipe\MacMakeover.MenuHost || start "" "C:\Users\VineethRao\source\repos\mac-makeover\tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe" --show apple
 ```
 
 Note: `wscript.exe`/VBS launchers are blocked on this machine (Defender/ASR throws "Windows Script Host failed - not enough memory resources"). They are intentionally not packaged; do not recreate or register one.
@@ -78,15 +87,15 @@ Registry path:
 HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command
 ```
 
-7. Do not wire Seelen toolbar `onClick` directly to `macmakeover-apple-menu:`. Apple must stay helper-routed. The Control Center sliders item is the exception: it should use `open("macmakeover-control-center:")`, whose protocol is a fast named-pipe echo into the resident `tools\MacMakeover.MenuHost` process with a self-healing `--show control` fallback.
+7. Apple must be item-owned from the Seelen toolbar: `onClick: open("macmakeover-apple-menu:")`. The handler must be the fast named-pipe echo into the resident `tools\MacMakeover.MenuHost` process with a self-healing `--show apple` fallback. The old helper-owned Apple pixel zone is disabled because it can fire while clicking app chrome.
 
 8. Do not re-add Seelen's `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back. The right-side Control Center entry is custom and is backed by the hot-corners top-bar click router.
 
 9. Do not set Seelen battery or energy-saver performance modes to `Minimal`/`Extreme`. The user reported both the top toolbar and bottom dock disappearing immediately after Seelen switched to `Minimal` on battery. `scripts\verify.ps1` should fail if `performanceMode.onBattery` or `performanceMode.onEnergySaver` is anything other than `Disabled`.
 
-10. Do not re-enable Seelen WEG as the visible dock. It is intentionally disabled because it alternated between blank/transparent and top-snapped. The native `MacMakeover.MenuHost` dock owns the visible bottom toolbar now; WEG `state.yml` remains only the portable pin list.
+10. Keep Seelen WEG enabled as the visible dock. The native `MacMakeover.MenuHost` dock/appbar path was removed because it caused maximize/work-area regressions.
 
-11. Do not leave the native dock as a plain topmost overlay. It must call the bottom appbar path (`SHAppBarMessage` / `SetBottomAppBar`) so apps reserve space above it. The user immediately hit a blocked chat input when the dock was topmost without work-area reservation.
+11. Do not reintroduce `DockForm`, `SHAppBarMessage`, `SetBottomAppBar`, or any native MenuHost appbar dock. The current functional baseline uses Seelen WEG for the dock and MenuHost only for popover panels.
 
 Correct Control Center handler shape (registered by `scripts\Install-MacControlCenterHandler.ps1`):
 
@@ -118,7 +127,7 @@ The current top-left Apple glyph is a custom toolbar item:
 - id: macmakeover-apple-menu
   template: 'return "Apple";'
   tooltip: 'return "";'
-  onClick: null
+  onClick: 'open("macmakeover-apple-menu:")'
   style: {width: 30, minWidth: 30, maxWidth: 30, flexShrink: 0}
 ```
 
@@ -128,7 +137,7 @@ Live toolbar file:
 C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui\data\seelen-fancy-toolbar\state.yml
 ```
 
-Normal clicks are caught by `scripts\start-hot-corners.ps1` and shown by `tools\MacMakeover.MenuHost`. The fallback URI launches this WPF menu script via `conhost.exe --headless` (registered by `scripts\Install-AppleMenuHandler.ps1`):
+Normal clicks are handled by the toolbar item's `macmakeover-apple-menu:` URI. The URI writes `apple` into the resident `tools\MacMakeover.MenuHost` pipe and falls back to `MenuHost --show apple` if the host is missing. The old WPF script remains only historical fallback material:
 
 ```text
 C:\Users\VineethRao\source\repos\mac-makeover\scripts\Show-MacAppleMenu.ps1
@@ -200,7 +209,7 @@ The current Control Center includes:
 - Restart...
 - Shut Down...
 
-Because Seelen/Windows PowerShell URI launches were measured as laggy, Apple remains helper-routed to the resident MenuHost. The sliders item uses a URI only because the handler is a fast pipe echo with a self-healing MenuHost fallback. Network and Bluetooth are custom MenuHost item clicks; calendar and notifications remain Seelen-owned item clicks; none of these should be helper pixel zones.
+Because Seelen/Windows PowerShell URI launches were measured as laggy, Apple now uses a URI only because the handler is a fast pipe echo with a self-healing MenuHost fallback. Network and Bluetooth are custom MenuHost item clicks; calendar and notifications remain item-owned clicks; none of these should be helper pixel zones.
 
 Recent visual/performance proof screenshots:
 

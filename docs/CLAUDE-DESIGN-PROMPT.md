@@ -53,7 +53,7 @@ Current intended behavior:
 Critical guardrails:
 - Do not re-enable Seelen shortcuts or Seelen task switcher behavior.
 - Do not re-add @seelen/tb-quick-settings unless the user explicitly asks for the old Seelen flyout.
-- Do not wire the Apple toolbar item directly to macmakeover-apple-menu:. Apple remains helper-routed.
+- Keep the Apple toolbar item wired directly to `macmakeover-apple-menu:`. The handler is now a fast MenuHost pipe echo; broad helper pixel zones are disabled because they can fire while clicking app chrome.
 - The sliders item should wire directly to macmakeover-control-center:, whose protocol writes to the resident tools\MacMakeover.MenuHost named pipe and has a self-healing --show fallback.
 - The macmakeover-* URI handlers are fallback/restore plumbing only.
 - Do not reintroduce visible PowerShell, Windows Terminal, or old power-options screens.

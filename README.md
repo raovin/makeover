@@ -9,19 +9,17 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 ## What You Get
 
 - A macOS-style top menu bar using Seelen UI.
-- A bottom dock owned by `MacMakeover.MenuHost`, using the saved Seelen WEG pin list as its data source.
-- The dock registers as a bottom Windows appbar, so maximized windows reserve space above it instead of being covered.
+- A bottom dock owned by Seelen WEG. The experimental native MenuHost appbar dock was removed after it interfered with maximize/work-area behavior.
 - The custom `macos-glass` theme for the frosted menu bar and dock.
-- The current toolbar layout: Apple-style mark, focused app, centered CPU/memory/network telemetry, and right-side Network, Bluetooth, battery, Control Center sliders, date/time, and notification controls.
-- A Mac-style Apple menu on the top-left Apple mark, opened by the warmed hot-corners helper so it appears quickly and no terminal window appears.
+- The current toolbar layout: Apple-style mark, focused app, and right-side Network, Bluetooth, battery, Control Center sliders, date/time, and notification controls.
+- A Mac-style Apple menu on the top-left Apple mark, opened by an item-owned `macmakeover-apple-menu:` click through the fast resident MenuHost pipe so it appears quickly and no terminal window appears.
 - A custom Mac-style Control Center / power popover from the top-right sliders control, replacing Seelen's built-in quick-settings flyout and avoiding slow URI launches.
 - Seelen shortcuts disabled so native Windows Alt+Tab and lock-screen input remain normal.
 - Spotlight-style search through PowerToys / Command Palette on `Alt+Space`.
 - Windows Search web/Bing result suppression for the current user.
 - macOS-style hot corners:
   - top-left/top-right outer-corner click: show desktop
-  - bottom-left: show desktop
-  - bottom-right: lock screen
+  - dwell actions disabled, including bottom corners, to avoid accidental lock/sleep/show-desktop while navigating windows
 - Start-menu backed custom Spotlight commands such as `Mac Visual QA`, `Mac Backup Makeover`, and `Mac Hot Corners Stop`.
 - Wallpaper and cursor assets for optional polish.
 - Scripts for install, restore, verification, and refreshing this backup.
@@ -70,7 +68,7 @@ mac-makeover/
     verify.ps1            # Check files, Seelen process health, logs, screenshot
   CLAUDE.md               # Entry point for Claude Code
   tools/
-    MacMakeover.MenuHost/  # Resident owner-drawn Apple/Control Center/native dock host
+    MacMakeover.MenuHost/  # Resident owner-drawn Apple/Control Center/Network/Bluetooth host
   manifest.json           # Backup metadata and exclusions
   README.md
 ```
@@ -152,9 +150,9 @@ Change the corner behavior in:
 config\hot-corners.json
 ```
 
-Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, `NetworkFlyout`, `QuickSettings`, and `None`. Click actions use the smaller `clickCornerSize` zones, so top-left/top-right show-desktop clicks do not steal the normal Apple icon or right-side menu-bar clicks.
+Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, `NetworkFlyout`, `QuickSettings`, and `None`. The shipped config keeps dwell actions set to `None` and keeps only tiny top-left/top-right click zones for Show Desktop.
 
-The same helper routes the Apple mark and preserves the tiny physical Show Desktop corners. The right-side controls are item-owned instead of pixel-zone-routed: Network and Bluetooth use custom MenuHost panels, the sliders item opens `macmakeover-control-center:` through a fast MenuHost pipe launcher, date/time opens Seelen's calendar popup, and the bell opens Seelen notifications. The Apple URI remains fallback plumbing only.
+The right-side controls and Apple mark are item-owned instead of broad pixel-zone-routed: Apple opens `macmakeover-apple-menu:`, Network and Bluetooth use custom MenuHost panels, the sliders item opens `macmakeover-control-center:` through a fast MenuHost pipe launcher, date/time opens the notification/calendar surface, and the bell opens notifications. Broad top-bar helper zones are intentionally disabled because they can fire while clicking maximized app chrome.
 
 ## Manual Steps After Restore
 
@@ -164,8 +162,8 @@ Some setup must remain manual because it is account/device-specific:
 - Sign into or configure RustDesk on the new device.
 - Grant any remote-control permissions required by the OS.
 - Approve installer or UAC prompts yourself.
-- Confirm Seelen starts at login for the top menu bar, and the hot-corners/MenuHost helper starts for the bottom dock.
-- Check dock pins whose app paths differ on the new machine. The native dock reads the saved Seelen WEG pin file, but Seelen's own WEG widget stays disabled.
+- Confirm Seelen starts at login for the top menu bar and WEG dock, and the hot-corners/MenuHost helper starts for the custom menus.
+- Check dock pins whose app paths differ on the new machine. The visible dock is Seelen WEG, using the saved `seelen-weg\state.yml` pin file.
 - If the managed Windows Search policy key is locked by your organization, `restore.ps1` will warn and still apply the normal per-user Bing/web-search suppression values.
 
 On managed work devices, wallpaper may be controlled by policy. The restore script attempts a user-level wallpaper change only; it does not bypass policy.
@@ -212,8 +210,8 @@ The launcher behavior is separate from Seelen:
 
 - Clicking the top-left Apple mark opens the compact Apple menu for About This Mac, System Settings, App Store, Recent Items, Force Quit, Sleep, Restart, Shut Down, Lock Screen, and Log Out.
 - Restart, Shut Down, and Log Out ask for confirmation.
-- Normal Apple clicks are handled by `scripts\start-hot-corners.ps1`, which sends `apple` to `tools\MacMakeover.MenuHost`. The `macmakeover-apple-menu:` protocol remains registered through `conhost.exe --headless` running `scripts\Show-MacAppleMenu.ps1` as fallback. Registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
-- `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running, if the helper is running under `pwsh.exe`, or if Seelen WEG is re-enabled.
+- Normal Apple clicks are item-owned from the toolbar and open `macmakeover-apple-menu:`. The protocol writes `apple` into the resident `tools\MacMakeover.MenuHost` pipe through `conhost.exe --headless cmd`, with a `--show apple` fallback. Registering it directly to a visible PowerShell window can show a terminal. `wscript.exe`/VBS launchers are blocked by this machine's Defender/ASR policy and are intentionally not packaged.
+- `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running, if the helper is running under `pwsh.exe`, if Seelen WEG is disabled, or if native MenuHost dock/appbar code is reintroduced.
 - Clicking Wi-Fi opens the custom MenuHost Network panel; the icon stays visually Wi-Fi so VPN/tunnel routes do not turn it into a misleading shield or generic computer glyph.
 - Clicking Bluetooth opens the custom MenuHost Bluetooth panel.
 - Battery is a right-side Mac-style system readout, merged with charging state.
@@ -250,9 +248,7 @@ If app icons or dock pins do not launch, the executable paths probably differ on
 %APPDATA%\com.seelen.seelen-ui\data\seelen-weg\state.yml
 ```
 
-The file is still the portable pin source, but the visible dock is rendered by `tools\MacMakeover.MenuHost\DockForm.cs`. Keep `@seelen/weg.enabled` set to `false`; Seelen WEG rendered blank with hardware acceleration and snapped to the top when hardware acceleration was disabled.
-
-The native dock must keep its bottom appbar reservation. A plain topmost dock covers chat boxes, editors, and maximized app status bars.
+The file is the portable pin source for the visible Seelen WEG dock. Keep `@seelen/weg.enabled` set to `true`. The experimental native `MacMakeover.MenuHost` dock/appbar path was removed because it caused maximize/work-area regressions.
 
 If clicking the Apple mark opens a terminal, rerun:
 
@@ -261,7 +257,7 @@ If clicking the Apple mark opens a terminal, rerun:
 .\scripts\verify.ps1
 ```
 
-`verify.ps1` prints the registered `macmakeover-apple-menu:` command and warns if it is not using the `conhost.exe --headless` launcher set up by `Install-AppleMenuHandler.ps1`. It also fails if the Seelen toolbar is wired directly to the URI handler instead of the resident MenuHost path.
+`verify.ps1` prints the registered `macmakeover-apple-menu:` command and warns if it is not using the fast `conhost.exe --headless cmd /c echo apple> \\.\pipe\MacMakeover.MenuHost` launcher set up by `Install-AppleMenuHandler.ps1`. It also fails if the Seelen toolbar loses its item-owned Apple URI click.
 
 If the sliders control opens Seelen's old power/options screen, rerun:
 
@@ -272,7 +268,7 @@ If the sliders control opens Seelen's old power/options screen, rerun:
 .\scripts\verify.ps1
 ```
 
-`verify.ps1` prints the registered `macmakeover-control-center:` command and warns if it is not using the fast MenuHost pipe launcher. It also fails if the Apple logo is wired directly to the URI handler instead of the helper-owned path.
+`verify.ps1` prints the registered `macmakeover-control-center:` command and warns if it is not using the fast MenuHost pipe launcher. It also fails if the Apple logo loses its item-owned URI handler and falls back to broad helper-owned pixel routing.
 
 If wallpaper does not change on a managed device, check whether the organization enforces wallpaper through policy.
 

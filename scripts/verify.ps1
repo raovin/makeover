@@ -28,7 +28,6 @@ $HotCornersScriptPath = Join-Path $PackageRoot "scripts\start-hot-corners.ps1"
 $HotCornersConfigPath = Join-Path $PackageRoot "config\hot-corners.json"
 $MenuHostProjectPath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj"
 $MenuHostExePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe"
-$MenuHostDockSourcePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\DockForm.cs"
 $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command"
 $ControlCenterCommandPath = "HKCU:\Software\Classes\macmakeover-control-center\shell\open\command"
 $NetworkCommandPath = "HKCU:\Software\Classes\macmakeover-network\shell\open\command"
@@ -100,7 +99,7 @@ Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPale
 
 Write-Host ""
 Write-Host "Core files:"
-foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $NotificationCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath, $MenuHostDockSourcePath)) {
+foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $NotificationCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath)) {
   if (Test-Path -LiteralPath $path) {
     "OK   {0}" -f $path
   } else {
@@ -122,8 +121,8 @@ if (Test-Path -LiteralPath $SettingsPath) {
       $VerificationFailed = $true
     }
 
-    if ($seelenSettings.byWidget.'@seelen/weg'.enabled -ne $false) {
-      Write-Warning "Seelen WEG should stay disabled. WEG rendered blank with hardware acceleration and snapped to the top when acceleration was disabled; the bottom dock is now owned by MacMakeover.MenuHost."
+    if ($seelenSettings.byWidget.'@seelen/weg'.enabled -ne $true) {
+      Write-Warning "Seelen WEG should be enabled. The native MenuHost appbar dock was removed because it interfered with maximize/work-area behavior."
       $VerificationFailed = $true
     }
   } catch {
@@ -140,8 +139,8 @@ if (Test-Path -Path $AppleMenuCommandPath) {
   if ($appleMenuCommand -match "wscript\.exe") {
     Write-Warning "Apple menu is registered via wscript.exe, which is blocked by this PC's security policy (the menu will not open). Re-run scripts\Install-AppleMenuHandler.ps1 to switch to conhost."
     $VerificationFailed = $true
-  } elseif (-not ($appleMenuCommand -match "conhost\.exe" -and $appleMenuCommand -match "Show-MacAppleMenu\.ps1")) {
-    Write-Warning "Apple menu is not registered to the conhost launcher. Re-run scripts\Install-AppleMenuHandler.ps1."
+  } elseif (-not ($appleMenuCommand -match "MacMakeover\.MenuHost" -and $appleMenuCommand -match "echo apple")) {
+    Write-Warning "Apple menu is not registered to the fast MenuHost pipe launcher (cmd echo into \\.\pipe\MacMakeover.MenuHost with a --show fallback). Re-run scripts\Install-AppleMenuHandler.ps1."
     $VerificationFailed = $true
   }
 } else {
@@ -231,11 +230,11 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
-  if ($toolbarRaw -match 'open\("macmakeover-apple-menu:"\)') {
-    Write-Warning "Apple-logo clicks are registered directly to the macmakeover URI protocol. Normal Apple clicks should be handled by start-hot-corners.ps1 (instant); the URI is fallback plumbing."
+  if ($toolbarRaw -notmatch 'open\("macmakeover-apple-menu:"\)') {
+    Write-Warning "Apple-logo clicks must be item-owned via macmakeover-apple-menu:. Broad helper pixel zones can fire while clicking maximized app chrome."
     $VerificationFailed = $true
   } else {
-    Write-Host "  OK Apple clicks are helper-owned, not URI-launched from Seelen."
+    Write-Host "  OK Apple clicks are item-owned and position-independent."
   }
 
   $shellPopupHideCount = ([regex]::Matches($toolbarRaw, 'Seelen UI.*ShellHost.*MacMakeover\\.MenuHost|helper\\.test\\(name\\).*helper\\.test\\(title\\)')).Count
@@ -407,17 +406,14 @@ if (Test-Path -LiteralPath $menuHostSourcePath) {
     Write-Warning "MenuHost is missing the custom Network panel. Wi-Fi clicks should not depend on Seelen's brittle network popup or the native Windows taskbar flyout."
     $VerificationFailed = $true
   }
-}
 
-if (Test-Path -LiteralPath $MenuHostDockSourcePath) {
-  $dockSource = Get-Content -LiteralPath $MenuHostDockSourcePath -Raw
-  if ($dockSource -notmatch 'class DockForm' -or $dockSource -notmatch 'seelen-weg' -or $dockSource -notmatch 'PositionDock') {
-    Write-Warning "MenuHost native fallback dock is missing or no longer loading the saved Seelen dock pins."
+  if ($menuHostSource -match 'DockForm|SHAppBarMessage|SetBottomAppBar') {
+    Write-Warning "MenuHost contains native dock/appbar code again. That path interfered with maximize/work-area behavior; keep the dock owned by Seelen WEG."
     $VerificationFailed = $true
   }
 
-  if ($dockSource -notmatch 'SetBottomAppBar' -or $dockSource -notmatch 'SHAppBarMessage') {
-    Write-Warning "The native dock is not reserving bottom work area as an appbar. A topmost dock without appbar reservation covers maximized app content and text inputs."
+  if ($menuHostSource -match 'SetForegroundWindow\(form\.Handle\)|form\.Activate\(\)|ShowWithoutActivation\s*=>\s*false') {
+    Write-Warning "MenuHost popups are taking foreground focus again. They must show without activation so native Alt+Tab and the active app keep working."
     $VerificationFailed = $true
   }
 }
@@ -438,9 +434,17 @@ if (Test-Path -LiteralPath $HotCornersConfigPath) {
     $VerificationFailed = $true
   }
 
-  if (-not $hotCornersConfig.appleMenuClickEnabled) {
-    Write-Warning "Helper-owned Apple click routing is disabled."
+  if ($hotCornersConfig.appleMenuClickEnabled) {
+    Write-Warning "Helper-owned Apple pixel routing is enabled. Keep Apple clicks item-owned via macmakeover-apple-menu: to avoid firing while clicking app chrome."
     $VerificationFailed = $true
+  }
+
+  foreach ($dwellCorner in @("topLeft", "topRight", "bottomLeft", "bottomRight")) {
+    $cornerProperty = $hotCornersConfig.PSObject.Properties[$dwellCorner]
+    if ($cornerProperty -and [string]$cornerProperty.Value -ne "None") {
+      Write-Warning "$dwellCorner dwell action should be None. Dwell hot corners were too easy to trigger accidentally during normal window navigation."
+      $VerificationFailed = $true
+    }
   }
 
   foreach ($itemOwnedRoute in @(
@@ -460,13 +464,8 @@ if (Test-Path -LiteralPath $HotCornersConfigPath) {
 
 if (Test-Path -LiteralPath $HotCornersScriptPath) {
   $hotCornersScript = Get-Content -LiteralPath $HotCornersScriptPath -Raw
-  if ($hotCornersScript -match 'HashSet<IntPtr>\s+NudgedWindows|NudgedWindows\.Contains') {
-    Write-Warning "The window-under-menu-bar nudge is one-shot per HWND again. Repeated app restores can still park a title bar under the menu bar."
-    $VerificationFailed = $true
-  }
-
-  if ($hotCornersScript -match 'NudgeWindowsOutOfBar' -and ($hotCornersScript -notmatch 'LastNudgedWindows' -or $hotCornersScript -notmatch 'TotalMilliseconds\s*<\s*1200')) {
-    Write-Warning "The window-under-menu-bar nudge should use a short cooldown, not a permanent per-window block."
+  if ($hotCornersScript -match 'NudgeWindowsOutOfBar\(') {
+    Write-Warning "Hot-corners helper is moving app windows again. Do not nudge/SetWindowPos normal windows from the background helper; it caused maximize/navigation regressions."
     $VerificationFailed = $true
   }
 }

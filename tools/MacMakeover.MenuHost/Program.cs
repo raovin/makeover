@@ -113,14 +113,11 @@ internal sealed class MenuContext : ApplicationContext
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly Control _invoker = new();
-    private readonly DockForm _dock;
     private Form? _current;
 
     public MenuContext()
     {
         _invoker.CreateControl();
-        _dock = DockForm.Create();
-        _dock.Show();
     }
 
     public CancellationToken Token => _cts.Token;
@@ -175,7 +172,6 @@ internal sealed class MenuContext : ApplicationContext
     private static void BringShownMenuForward(Form form)
     {
         NativeMethods.ShowAboveEverything(form);
-        form.Activate();
     }
 
     private static void ReinforceTopMostAsync(Form form)
@@ -205,7 +201,6 @@ internal sealed class MenuContext : ApplicationContext
             IsDisposed = true;
             _cts.Cancel();
             _current?.Dispose();
-            _dock.Dispose();
             _invoker.Dispose();
             _cts.Dispose();
         }
@@ -286,7 +281,19 @@ internal sealed class MenuForm : Form
         // still handles normal click-away dismissal.
     }
 
-    protected override bool ShowWithoutActivation => false;
+    protected override bool ShowWithoutActivation => true;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            const int wsExToolWindow = 0x00000080;
+            const int wsExNoActivate = 0x08000000;
+            var cp = base.CreateParams;
+            cp.ExStyle |= wsExToolWindow | wsExNoActivate;
+            return cp;
+        }
+    }
 
     // All size/position math depends on DeviceDpi, which is only correct once the handle exists.
     protected override void OnHandleCreated(EventArgs e)
@@ -421,7 +428,7 @@ internal sealed class MenuForm : Form
         form.AddSeparator();
         form.AddItem("Force Quit...", () => Start("taskmgr.exe"), "Ctrl+Shift+Esc");
         form.AddSeparator();
-        form.AddItem("Sleep", () => Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
+        form.AddItem("Sleep...", () => Confirm("Sleep", "Put this PC to sleep now?", "rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
         form.AddSeparator();
@@ -463,7 +470,7 @@ internal sealed class MenuForm : Form
         form.AddItem("Show Desktop", ToggleDesktop);
         form.AddSeparator();
         form.AddItem("Lock Screen", () => Start("rundll32.exe", "user32.dll,LockWorkStation"));
-        form.AddItem("Sleep", () => Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
+        form.AddItem("Sleep...", () => Confirm("Sleep", "Put this PC to sleep now?", "rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
 
@@ -1139,10 +1146,8 @@ internal static class NativeMethods
     public static void ShowAboveEverything(Form form)
     {
         form.TopMost = true;
-        ShowWindow(form.Handle, 5); // SW_SHOW
-        form.BringToFront();
-        SetWindowPos(form.Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpShowWindow);
-        SetForegroundWindow(form.Handle);
+        ShowWindow(form.Handle, 8); // SW_SHOWNA: show without taking foreground focus.
+        SetWindowPos(form.Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
     }
 
     // Windows 11 native rounded corners + dark frame for a borderless popup, so the

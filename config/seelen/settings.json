@@ -57,7 +57,7 @@
       "$shortcuts": null,
       "delayToHide": 800,
       "delayToShow": 100,
-      "enabled": false,
+      "enabled": true,
       "hideMode": "Never",
       "margin": 8,
       "middleClickAction": "OpenNewInstance",
