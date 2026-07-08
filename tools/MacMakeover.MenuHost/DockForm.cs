@@ -8,6 +8,7 @@ namespace MacMakeover.MenuHost;
 
 internal sealed class DockForm : Form
 {
+    private static readonly Color TransparentChrome = Color.FromArgb(2, 4, 8);
     private readonly List<DockItem> _items;
     private readonly Dictionary<string, Image> _icons = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, bool> _running = new(StringComparer.OrdinalIgnoreCase);
@@ -20,13 +21,14 @@ internal sealed class DockForm : Form
     {
         _items = items.Count > 0 ? items : DockItem.FallbackItems();
         AutoScaleMode = AutoScaleMode.None;
-        BackColor = Color.FromArgb(24, 29, 39);
+        BackColor = TransparentChrome;
         DoubleBuffered = true;
         Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
         FormBorderStyle = FormBorderStyle.None;
         Opacity = 0.94;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
+        TransparencyKey = TransparentChrome;
         TopMost = true;
 
         foreach (var item in _items)
@@ -85,7 +87,6 @@ internal sealed class DockForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        NativeMethods.ApplyRoundedDarkChrome(Handle);
         RefreshRunningState();
         PositionDock();
         NativeDockMethods.KeepAbove(this);
@@ -133,7 +134,7 @@ internal sealed class DockForm : Form
 
     protected override void OnPaintBackground(PaintEventArgs e)
     {
-        e.Graphics.Clear(Color.Transparent);
+        e.Graphics.Clear(TransparentChrome);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -142,18 +143,13 @@ internal sealed class DockForm : Form
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
 
-        var shell = Rectangle.Inflate(ClientRectangle, -1, -1);
+        var shell = Rectangle.Inflate(ClientRectangle, -2, -2);
         using (var path = RoundedRect(shell, LogicalToDeviceUnits(16)))
         using (var brush = new LinearGradientBrush(shell, Color.FromArgb(66, 82, 104), Color.FromArgb(31, 37, 50), LinearGradientMode.Vertical))
         {
             e.Graphics.FillPath(brush, path);
-            using var glowPen = new Pen(Color.FromArgb(82, 255, 255, 255));
-            e.Graphics.DrawPath(glowPen, path);
-        }
-
-        using (var shadowPen = new Pen(Color.FromArgb(80, 0, 0, 0)))
-        {
-            e.Graphics.DrawLine(shadowPen, shell.Left + LogicalToDeviceUnits(18), shell.Top + 1, shell.Right - LogicalToDeviceUnits(18), shell.Top + 1);
+            using var borderPen = new Pen(Color.FromArgb(90, 190, 210, 235));
+            e.Graphics.DrawPath(borderPen, path);
         }
 
         for (var i = 0; i < _items.Count; i++)
@@ -207,9 +203,6 @@ internal sealed class DockForm : Form
         if (Size != newSize)
         {
             Size = newSize;
-            Region?.Dispose();
-            using var path = RoundedRect(new Rectangle(0, 0, Width, Height), LogicalToDeviceUnits(16));
-            Region = new Region(path);
         }
 
         var appBarHeight = height + LogicalToDeviceUnits(22);
