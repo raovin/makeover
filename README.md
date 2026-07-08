@@ -58,6 +58,7 @@ mac-makeover/
     install-apps.ps1      # Install Seelen, optionally RustDesk/Tailscale
     install-hot-corners.ps1
     install-spotlight-shortcuts.ps1
+    fit-windows-to-workarea.ps1 # One-shot repair for stale full-screen app bounds behind the dock
     Install-AppleMenuHandler.ps1  # Registers the Apple-menu protocol (conhost --headless)
     Show-MacAppleMenu.ps1         # Fallback Apple menu UI (WPF protocol path)
     Install-MacControlCenterHandler.ps1 # Registers the Control Center protocol
@@ -249,6 +250,14 @@ If app icons or dock pins do not launch, the executable paths probably differ on
 ```
 
 The file is the portable pin source for the visible Seelen WEG dock. Keep `@seelen/weg.enabled` set to `true`. The experimental native `MacMakeover.MenuHost` dock/appbar path was removed because it caused maximize/work-area regressions.
+
+If a previously maximized app is still sitting behind the dock after a restore/restart, make Windows recalculate that window against its monitor's current work area:
+
+```powershell
+.\scripts\fit-windows-to-workarea.ps1
+```
+
+That script is intentionally one-shot. Do not replace it with a background window mover; the always-running nudge approach caused unrelated maximize/navigation regressions.
 
 If clicking the Apple mark opens a terminal, rerun:
 

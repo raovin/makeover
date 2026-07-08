@@ -13,6 +13,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 - Do not re-enable broad helper pixel zones for Apple/right-side top-bar controls. Those can fire while clicking maximized app chrome and make unrelated actions feel random.
 - MenuHost popups must remain non-activating tool windows (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). Do not call `form.Activate()` or `SetForegroundWindow(form.Handle)` for Apple/Control/Network/Bluetooth popups; native Alt+Tab must remain clean.
 - Hot-corner dwell actions are disabled. Keep only the tiny top-left/top-right click zones for Show Desktop.
+- If a stale maximized app is still behind the dock after restore/restart, run `scripts\fit-windows-to-workarea.ps1`. It repairs each candidate against that window's own monitor work area. Keep this as a one-shot repair; do not revive the always-running background window nudge.
 - `scripts\verify.ps1` has been updated to fail if native dock/appbar code, foreground-stealing menu code, helper-owned Apple pixel routing, or dwell corner actions come back.
 
 ## Previous (2026-07-07, Codex Audit Fix)

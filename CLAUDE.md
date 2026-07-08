@@ -23,6 +23,7 @@ Guardrails:
 - UX model for the top bar: informational readouts (CPU, MEM, NET, battery) live in the CENTER cluster and are not clickable; interactive controls live on the RIGHT and each opens its own distinct surface (Network popup, Bluetooth popup, Control Center, calendar, notifications). Never give several icons the same target.
 - Do not re-add `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back.
 - Hot corners are handled by `scripts/start-hot-corners.ps1` through a current-user Startup shortcut. Keep dwell actions disabled (`topLeft/topRight/bottomLeft/bottomRight = None`) and keep only the tiny top-left/top-right click zones for Show Desktop. Do not add background window nudging or broad top-bar pixel routing.
+- If a stale maximized app is still behind the dock, run `scripts/fit-windows-to-workarea.ps1`. It repairs each candidate against that window's own monitor work area. Keep it one-shot; do not reintroduce a background window mover.
 - Do not restore RustDesk/Tailscale secrets from this repo. They are intentionally excluded.
 - Verify visual changes with screenshots at 1280x800. Do not call visual work finished without visual QA.
 - Treat delayed UI automations as reliability-critical: never chain one delayed UI task through another, verify the saved automation state after creating/updating it, and require a visible success/failure report after it fires.

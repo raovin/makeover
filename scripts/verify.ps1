@@ -26,6 +26,7 @@ $BluetoothInstallerPath = Join-Path $PackageRoot "scripts\Install-MacBluetoothHa
 $NotificationCenterInstallerPath = Join-Path $PackageRoot "scripts\Install-MacNotificationCenterHandler.ps1"
 $HotCornersScriptPath = Join-Path $PackageRoot "scripts\start-hot-corners.ps1"
 $HotCornersConfigPath = Join-Path $PackageRoot "config\hot-corners.json"
+$WorkAreaFitScriptPath = Join-Path $PackageRoot "scripts\fit-windows-to-workarea.ps1"
 $MenuHostProjectPath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj"
 $MenuHostExePath = Join-Path $PackageRoot "tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe"
 $AppleMenuCommandPath = "HKCU:\Software\Classes\macmakeover-apple-menu\shell\open\command"
@@ -99,7 +100,7 @@ Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPale
 
 Write-Host ""
 Write-Host "Core files:"
-foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $NotificationCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $MenuHostProjectPath, $MenuHostExePath)) {
+foreach ($path in @($SettingsPath, $ShortcutPath, $ToolbarPath, $ThemePath, $AppleMenuScriptPath, $AppleMenuInstallerPath, $ControlCenterScriptPath, $ControlCenterInstallerPath, $NetworkInstallerPath, $BluetoothInstallerPath, $NotificationCenterInstallerPath, $HotCornersScriptPath, $HotCornersConfigPath, $WorkAreaFitScriptPath, $MenuHostProjectPath, $MenuHostExePath)) {
   if (Test-Path -LiteralPath $path) {
     "OK   {0}" -f $path
   } else {
@@ -379,6 +380,15 @@ if (Test-Path -LiteralPath $ThemePath) {
   }
 }
 
+$WegThemePath = Join-Path $SeelenRoaming "themes\macos-glass\styles\weg.css"
+if (Test-Path -LiteralPath $WegThemePath) {
+  $wegCss = Get-Content -LiteralPath $WegThemePath -Raw
+  if ($wegCss -notmatch 'rgba\(50,\s*56,\s*68,\s*1\)' -or $wegCss -notmatch 'rgba\(30,\s*35,\s*45,\s*1\)') {
+    Write-Warning "The dock capsule has become translucent again. Keep WEG dock background fully opaque so app content does not show through it."
+    $VerificationFailed = $true
+  }
+}
+
 if ((Test-Path -LiteralPath $NetworkPluginPath) -and (Test-Path -LiteralPath $ToolbarPath) -and ((Get-Content -LiteralPath $ToolbarPath -Raw) -match '@vineeth/tb-network-status')) {
   $networkPluginRaw = Get-Content -LiteralPath $NetworkPluginPath -Raw
   if ($networkPluginRaw -notmatch 'open\("macmakeover-network:"\)') {
@@ -390,6 +400,14 @@ if ((Test-Path -LiteralPath $NetworkPluginPath) -and (Test-Path -LiteralPath $To
   # ICON itself. The shield for active tunnels is that distinction - keep it.
   if ($networkPluginRaw -notmatch 'return icon\("LuShieldCheck"\)') {
     Write-Warning "The network status plugin lost its VPN shield branch. Active tunnels (PROP_VIRTUAL/TUNNEL/PPP or VPN-named adapters) must show LuShieldCheck."
+    $VerificationFailed = $true
+  }
+}
+
+if (Test-Path -LiteralPath $WorkAreaFitScriptPath) {
+  $workAreaFitRaw = Get-Content -LiteralPath $WorkAreaFitScriptPath -Raw
+  if ($workAreaFitRaw -notmatch 'Screen\]::FromHandle') {
+    Write-Warning "fit-windows-to-workarea.ps1 must repair windows against each window's own monitor work area, not only the primary monitor."
     $VerificationFailed = $true
   }
 }

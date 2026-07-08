@@ -1,9 +1,9 @@
 /* macOS Glass - reimagined floating dock */
 .taskbar {
   background:
-    linear-gradient(180deg, rgba(38, 44, 58, 0.74), rgba(16, 20, 29, 0.82)) !important;
-  backdrop-filter: blur(30px) saturate(1.55) contrast(1.04);
-  -webkit-backdrop-filter: blur(30px) saturate(1.55) contrast(1.04);
+    linear-gradient(180deg, rgba(50, 56, 68, 1), rgba(30, 35, 45, 1)) !important;
+  backdrop-filter: blur(18px) saturate(1.15) contrast(1.02);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15) contrast(1.02);
   border: 1px solid rgba(255, 255, 255, 0.24);
   box-shadow:
     0 22px 58px -16px rgba(0, 0, 0, 0.82),
