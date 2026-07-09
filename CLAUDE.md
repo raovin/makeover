@@ -22,6 +22,7 @@ Guardrails:
 - MenuHost popups must show without foreground activation (`WS_EX_NOACTIVATE` / `ShowWithoutActivation`). Do not call `form.Activate()` or `SetForegroundWindow(form.Handle)` for Apple/Control/Network/Bluetooth popups; native Alt+Tab must remain clean.
 - UX model for the top bar: informational readouts (CPU, MEM, NET, battery) live in the CENTER cluster and are not clickable; interactive controls live on the RIGHT and each opens its own distinct surface (Network popup, Bluetooth popup, Control Center, calendar, notifications). Never give several icons the same target.
 - Do not re-add `@seelen/tb-quick-settings` unless the user explicitly asks for the old Seelen flyout back.
+- MenuHost popups are topmost/no-activate surfaces, but they must not survive system switching. Keep the Alt/foreground-change close guard in `Program.cs`; otherwise Alt+Tab appears broken when a menu is open.
 - Hot corners are handled by `scripts/start-hot-corners.ps1` through a current-user Startup shortcut. Keep dwell actions disabled (`topLeft/topRight/bottomLeft/bottomRight = None`) and keep only the tiny top-left/top-right click zones for Show Desktop. Do not add background window nudging or broad top-bar pixel routing.
 - If a stale maximized app is still behind the dock, run `scripts/fit-windows-to-workarea.ps1`. It repairs each candidate against that window's own monitor work area. Keep it one-shot; do not reintroduce a background window mover.
 - Do not restore RustDesk/Tailscale secrets from this repo. They are intentionally excluded.

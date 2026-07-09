@@ -430,8 +430,13 @@ if (Test-Path -LiteralPath $menuHostSourcePath) {
     $VerificationFailed = $true
   }
 
-  if ($menuHostSource -match 'SetForegroundWindow\(form\.Handle\)|form\.Activate\(\)|ShowWithoutActivation\s*=>\s*false') {
+  if ($menuHostSource -match 'SetForegroundWindow|form\.Activate\(\)|ShowWithoutActivation\s*=>\s*false') {
     Write-Warning "MenuHost popups are taking foreground focus again. They must show without activation so native Alt+Tab and the active app keep working."
+    $VerificationFailed = $true
+  }
+
+  if ($menuHostSource -notmatch 'CloseIfSystemSwitcherStarts' -or $menuHostSource -notmatch 'IsAltPressed' -or $menuHostSource -notmatch 'GetForegroundWindowHandle') {
+    Write-Warning "MenuHost popups must close when Alt/system switching starts or foreground ownership changes, otherwise topmost menus can make Alt+Tab feel broken."
     $VerificationFailed = $true
   }
 }

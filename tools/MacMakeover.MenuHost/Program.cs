@@ -223,6 +223,7 @@ internal sealed class MenuForm : Form
     private readonly Color _secondaryText = Color.FromArgb(184, 192, 205);
     private readonly List<MenuRow> _rows = [];
     private readonly System.Windows.Forms.Timer _outsideClickTimer;
+    private readonly System.Windows.Forms.Timer _systemSwitchTimer;
     private readonly Font _regularFont;
     private readonly Font _boldFont;
     private readonly Font _smallFont;
@@ -233,6 +234,7 @@ internal sealed class MenuForm : Form
     private int _logicalTop = 38;
     private int _logicalMargin = 8;
     private DateTime _shownAt;
+    private IntPtr _foregroundAtShown;
     private bool _wasLeftMouseDown;
     private bool _hasShown;
     private int _hoverIndex = -1;
@@ -261,13 +263,21 @@ internal sealed class MenuForm : Form
 
         _outsideClickTimer = new System.Windows.Forms.Timer { Interval = 25 };
         _outsideClickTimer.Tick += (_, _) => CloseAfterOutsideClick();
+        _systemSwitchTimer = new System.Windows.Forms.Timer { Interval = 25 };
+        _systemSwitchTimer.Tick += (_, _) => CloseIfSystemSwitcherStarts();
         Shown += (_, _) =>
         {
             _shownAt = DateTime.UtcNow;
+            _foregroundAtShown = NativeMethods.GetForegroundWindowHandle();
             _hasShown = true;
             _outsideClickTimer.Start();
+            _systemSwitchTimer.Start();
         };
-        FormClosed += (_, _) => _outsideClickTimer.Dispose();
+        FormClosed += (_, _) =>
+        {
+            _outsideClickTimer.Dispose();
+            _systemSwitchTimer.Dispose();
+        };
         KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Escape)
@@ -997,6 +1007,29 @@ internal sealed class MenuForm : Form
         _wasLeftMouseDown = leftMouseDown;
     }
 
+    private void CloseIfSystemSwitcherStarts()
+    {
+        if (NativeMethods.IsAltPressed())
+        {
+            Close();
+            return;
+        }
+
+        if ((DateTime.UtcNow - _shownAt).TotalMilliseconds < 420)
+        {
+            return;
+        }
+
+        var foreground = NativeMethods.GetForegroundWindowHandle();
+        if (_foregroundAtShown != IntPtr.Zero
+            && foreground != IntPtr.Zero
+            && foreground != Handle
+            && foreground != _foregroundAtShown)
+        {
+            Close();
+        }
+    }
+
     private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
     {
         var diameter = radius * 2;
@@ -1014,6 +1047,7 @@ internal sealed class MenuForm : Form
         if (disposing)
         {
             _outsideClickTimer.Dispose();
+            _systemSwitchTimer.Dispose();
             _regularFont.Dispose();
             _boldFont.Dispose();
             _smallFont.Dispose();
@@ -1138,7 +1172,10 @@ internal static class NativeMethods
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -1148,6 +1185,18 @@ internal static class NativeMethods
         form.TopMost = true;
         ShowWindow(form.Handle, 8); // SW_SHOWNA: show without taking foreground focus.
         SetWindowPos(form.Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
+    }
+
+    public static bool IsAltPressed()
+    {
+        const int vkMenu = 0x12;
+        var state = GetAsyncKeyState(vkMenu);
+        return (state & unchecked((short)0x8000)) != 0 || (state & 0x0001) != 0;
+    }
+
+    public static IntPtr GetForegroundWindowHandle()
+    {
+        return GetForegroundWindow();
     }
 
     // Windows 11 native rounded corners + dark frame for a borderless popup, so the

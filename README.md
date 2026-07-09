@@ -268,6 +268,16 @@ If clicking the Apple mark opens a terminal, rerun:
 
 `verify.ps1` prints the registered `macmakeover-apple-menu:` command and warns if it is not using the fast `conhost.exe --headless cmd /c echo apple> \\.\pipe\MacMakeover.MenuHost` launcher set up by `Install-AppleMenuHandler.ps1`. It also fails if the Seelen toolbar loses its item-owned Apple URI click.
 
+If Alt+Tab appears to stop working while an Apple, Control Center, Network, or Bluetooth menu is open, rebuild/restart MenuHost:
+
+```powershell
+dotnet build .\tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj -c Release
+Get-Process MacMakeover.MenuHost -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Process .\tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe -WindowStyle Hidden
+```
+
+Current MenuHost popups close when Alt/system switching starts or when foreground ownership changes, so topmost menus do not linger over native Alt+Tab.
+
 If the sliders control opens Seelen's old power/options screen, rerun:
 
 ```powershell

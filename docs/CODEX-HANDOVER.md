@@ -12,6 +12,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 - Apple clicks are now item-owned from the Seelen toolbar: `onClick: open("macmakeover-apple-menu:")`. The protocol handler must be the fast MenuHost pipe launcher: `conhost --headless cmd /c echo apple> \\.\pipe\MacMakeover.MenuHost || start MenuHost --show apple`.
 - Do not re-enable broad helper pixel zones for Apple/right-side top-bar controls. Those can fire while clicking maximized app chrome and make unrelated actions feel random.
 - MenuHost popups must remain non-activating tool windows (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). Do not call `form.Activate()` or `SetForegroundWindow(form.Handle)` for Apple/Control/Network/Bluetooth popups; native Alt+Tab must remain clean.
+- MenuHost popups must close on Alt/system switching and foreground-owner changes. This prevents topmost Apple/Control/Network/Bluetooth menus from lingering over the native Alt+Tab switcher.
 - Hot-corner dwell actions are disabled. Keep only the tiny top-left/top-right click zones for Show Desktop.
 - If a stale maximized app is still behind the dock after restore/restart, run `scripts\fit-windows-to-workarea.ps1`. It repairs each candidate against that window's own monitor work area. Keep this as a one-shot repair; do not revive the always-running background window nudge.
 - `scripts\verify.ps1` has been updated to fail if native dock/appbar code, foreground-stealing menu code, helper-owned Apple pixel routing, or dwell corner actions come back.
