@@ -40,20 +40,26 @@ function Get-ImageAverageLuma {
   param(
     [string]$Path,
     [int]$Y,
-    [int]$Height
+    [int]$Height,
+    [int]$X = 0,
+    [int]$Width = 0
   )
 
   Add-Type -AssemblyName System.Drawing
   $image = [System.Drawing.Bitmap]::FromFile($Path)
   try {
+    $xStart = [Math]::Max(0, $X)
+    $xEnd = if ($Width -gt 0) { [Math]::Min($image.Width, $X + $Width) } else { $image.Width }
     $yEnd = [Math]::Min($image.Height, $Y + $Height)
-    $xStep = [Math]::Max(1, [int]($image.Width / 160))
+    if ($xStart -ge $xEnd -or $Y -ge $yEnd) { return $null }
+
+    $xStep = [Math]::Max(1, [int](($xEnd - $xStart) / 160))
     $yStep = [Math]::Max(1, [int](($yEnd - $Y) / 12))
     $total = 0.0
     $count = 0
 
     for ($yy = $Y; $yy -lt $yEnd; $yy += $yStep) {
-      for ($xx = 0; $xx -lt $image.Width; $xx += $xStep) {
+      for ($xx = $xStart; $xx -lt $xEnd; $xx += $xStep) {
         $pixel = $image.GetPixel($xx, $yy)
         $total += (0.2126 * $pixel.R) + (0.7152 * $pixel.G) + (0.0722 * $pixel.B)
         $count++
@@ -439,6 +445,11 @@ if (Test-Path -LiteralPath $menuHostSourcePath) {
     Write-Warning "MenuHost popups must close when Alt/system switching starts or foreground ownership changes, otherwise topmost menus can make Alt+Tab feel broken."
     $VerificationFailed = $true
   }
+
+  if ($menuHostSource -match 'Screen\.PrimaryScreen' -or $menuHostSource -notmatch 'Screen\.FromPoint') {
+    Write-Warning "MenuHost popups must anchor to the display under the initiating pointer. Hard-wiring Screen.PrimaryScreen breaks toolbar actions on secondary monitors."
+    $VerificationFailed = $true
+  }
 }
 
 if (Test-Path -LiteralPath $HotCornersConfigPath) {
@@ -608,10 +619,7 @@ if ($CaptureScreenshot) {
   $bottom = Join-Path $qaDir "bottom-240.png"
   $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
 
-  if ($ffmpeg) {
-    & $ffmpeg.Source -hide_banner -loglevel error -y -f gdigrab -draw_mouse 0 -framerate 1 -i desktop -vframes 1 $desktop
-  } else {
-    $dpiSignature = @"
+  $dpiSignature = @"
 using System;
 using System.Runtime.InteropServices;
 
@@ -620,20 +628,27 @@ public static class MacMakeoverVerifyDpi {
   public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
 }
 "@
-    Add-Type -TypeDefinition $dpiSignature -ErrorAction SilentlyContinue
-    [MacMakeoverVerifyDpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+  Add-Type -TypeDefinition $dpiSignature -ErrorAction SilentlyContinue
+  [MacMakeoverVerifyDpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+  $screens = @(
+    [System.Windows.Forms.Screen]::AllScreens |
+      Sort-Object -Property @{Expression = "Primary"; Descending = $true}, DeviceName
+  )
+  $virtualBounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+
+  if ($ffmpeg) {
+    & $ffmpeg.Source -hide_banner -loglevel error -y -f gdigrab -draw_mouse 0 -framerate 1 -i desktop -vframes 1 $desktop
+  } else {
+    $bmp = New-Object System.Drawing.Bitmap $virtualBounds.Width, $virtualBounds.Height
     $graphics = [System.Drawing.Graphics]::FromImage($bmp)
-    $graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bmp.Size)
+    $graphics.CopyFromScreen($virtualBounds.X, $virtualBounds.Y, 0, 0, $bmp.Size)
     $bmp.Save($desktop, [System.Drawing.Imaging.ImageFormat]::Png)
     $graphics.Dispose()
     $bmp.Dispose()
   }
 
-  Add-Type -AssemblyName System.Drawing
   $image = [System.Drawing.Bitmap]::FromFile($desktop)
   try {
     $imageWidth = $image.Width
@@ -642,28 +657,91 @@ public static class MacMakeoverVerifyDpi {
     $image.Dispose()
   }
 
-  Save-Crop -Source $desktop -Destination $top -Rectangle ([System.Drawing.Rectangle]::FromLTRB(0, 0, $imageWidth, [Math]::Min(130, $imageHeight)))
-  Save-Crop -Source $desktop -Destination $bottom -Rectangle ([System.Drawing.Rectangle]::FromLTRB(0, [Math]::Max(0, $imageHeight - 240), $imageWidth, $imageHeight))
+  if ($imageWidth -ne $virtualBounds.Width -or $imageHeight -ne $virtualBounds.Height) {
+    Write-Warning "Captured virtual desktop is ${imageWidth}x${imageHeight}, but DPI-aware virtual bounds are $($virtualBounds.Width)x$($virtualBounds.Height). Per-monitor crops would be unreliable."
+    $VerificationFailed = $true
+  }
+
+  $screenCaptures = @()
+  for ($index = 0; $index -lt $screens.Count; $index++) {
+    $screen = $screens[$index]
+    $role = if ($screen.Primary) { "primary" } else { "secondary" }
+    $prefix = "monitor-{0:D2}-{1}" -f ($index + 1), $role
+    $screenFull = Join-Path $qaDir ($prefix + "-desktop.png")
+    $screenTop = Join-Path $qaDir ($prefix + "-top-130.png")
+    $screenBottom = Join-Path $qaDir ($prefix + "-bottom-240.png")
+    $screenX = $screen.Bounds.Left - $virtualBounds.Left
+    $screenY = $screen.Bounds.Top - $virtualBounds.Top
+    $screenRect = [System.Drawing.Rectangle]::FromLTRB(
+      $screenX,
+      $screenY,
+      $screenX + $screen.Bounds.Width,
+      $screenY + $screen.Bounds.Height
+    )
+    $screenTopRect = [System.Drawing.Rectangle]::FromLTRB(
+      $screenRect.Left,
+      $screenRect.Top,
+      $screenRect.Right,
+      $screenRect.Top + [Math]::Min(130, $screenRect.Height)
+    )
+    $screenBottomRect = [System.Drawing.Rectangle]::FromLTRB(
+      $screenRect.Left,
+      $screenRect.Bottom - [Math]::Min(240, $screenRect.Height),
+      $screenRect.Right,
+      $screenRect.Bottom
+    )
+
+    Save-Crop -Source $desktop -Destination $screenFull -Rectangle $screenRect
+    Save-Crop -Source $desktop -Destination $screenTop -Rectangle $screenTopRect
+    Save-Crop -Source $desktop -Destination $screenBottom -Rectangle $screenBottomRect
+
+    $screenCaptures += [pscustomobject]@{
+      Device = $screen.DeviceName
+      Primary = $screen.Primary
+      Bounds = $screen.Bounds
+      Full = $screenFull
+      Top = $screenTop
+      Bottom = $screenBottom
+      TopLuma = Get-ImageAverageLuma -Path $desktop -X $screenRect.Left -Width $screenRect.Width -Y $screenRect.Top -Height ([Math]::Min(38, $screenRect.Height))
+      BottomLuma = Get-ImageAverageLuma -Path $desktop -X $screenRect.Left -Width $screenRect.Width -Y ([Math]::Max($screenRect.Top, $screenRect.Bottom - 92)) -Height ([Math]::Min(92, $screenRect.Height))
+    }
+  }
+
+  $primaryCapture = $screenCaptures | Where-Object Primary | Select-Object -First 1
+  if (-not $primaryCapture) {
+    throw "No primary display was found while creating visual QA crops."
+  }
+  Copy-Item -LiteralPath $primaryCapture.Top -Destination $top -Force
+  Copy-Item -LiteralPath $primaryCapture.Bottom -Destination $bottom -Force
 
   $lockProcesses = @(Get-Process -Name LockApp,LogonUI -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName)
-  $topLuma = Get-ImageAverageLuma -Path $desktop -Y 0 -Height 38
-  $bottomLuma = Get-ImageAverageLuma -Path $desktop -Y ([Math]::Max(0, $imageHeight - 92)) -Height 92
+  $topLuma = $primaryCapture.TopLuma
+  $bottomLuma = $primaryCapture.BottomLuma
 
   Write-Host ""
   Write-Host "Visual QA capture:"
-  Write-Host "  Full:   $desktop"
-  Write-Host "  Top:    $top"
-  Write-Host "  Bottom: $bottom"
+  Write-Host "  Full virtual desktop: $desktop"
+  Write-Host "  Primary top:          $top"
+  Write-Host "  Primary bottom:       $bottom"
+  foreach ($capture in $screenCaptures) {
+    Write-Host "  $($capture.Device) primary=$($capture.Primary) bounds=$($capture.Bounds)"
+    Write-Host "    Full:   $($capture.Full)"
+    Write-Host "    Top:    $($capture.Top)"
+    Write-Host "    Bottom: $($capture.Bottom)"
+    Write-Host "    Luma:   top=$($capture.TopLuma), bottom=$($capture.BottomLuma)"
+  }
   Write-Host "  Lock-screen processes: $($lockProcesses -join ', ')"
-  Write-Host "  Top-strip average luminance: $topLuma"
-  Write-Host "  Bottom-strip average luminance: $bottomLuma"
+  Write-Host "  Primary top-strip average luminance: $topLuma"
+  Write-Host "  Primary bottom-strip average luminance: $bottomLuma"
 
   if ($lockProcesses -contains "LogonUI") {
     Write-Warning "LogonUI is running. If the screenshot shows the lock screen, unlock and rerun for visual signoff."
   }
 
-  if ($topLuma -and $topLuma -gt 150) {
-    Write-Warning "Top strip is bright. That can mean the Seelen menu bar is missing, hidden, or the capture is the lock screen."
+  foreach ($capture in $screenCaptures) {
+    if ($capture.TopLuma -and $capture.TopLuma -gt 150) {
+      Write-Warning "$($capture.Device) top strip is bright. That can mean the Seelen menu bar is missing, hidden, or the capture is the lock screen."
+    }
   }
 }
 

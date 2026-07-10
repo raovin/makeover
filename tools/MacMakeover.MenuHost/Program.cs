@@ -229,6 +229,7 @@ internal sealed class MenuForm : Form
     private readonly Font _smallFont;
     private readonly Font _smallBoldFont;
     private readonly Font _iconFont;
+    private readonly Screen _targetScreen;
     private readonly int _logicalWidth;
     private bool _anchorRight;
     private int _logicalTop = 38;
@@ -256,6 +257,11 @@ internal sealed class MenuForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
+        // Capture the initiating pointer's monitor before the handle exists. Setting an
+        // initial location on that monitor also lets WinForms create the handle at the
+        // correct per-monitor DPI instead of creating on primary and moving afterward.
+        _targetScreen = Screen.FromPoint(System.Windows.Forms.Cursor.Position);
+        Location = _targetScreen.Bounds.Location;
         TopMost = true;
         _logicalWidth = width;
         KeyPreview = true;
@@ -314,17 +320,16 @@ internal sealed class MenuForm : Form
         Width = LogicalToDeviceUnits(_logicalWidth);
         FitHeight();
 
-        // Screen.PrimaryScreen.Bounds and window Location share the same (physical)
-        // coordinate space in this DPI-aware process, so plain Right-anchoring is
-        // correct at every scale factor. Do NOT rescale Right by 96/DeviceDpi - that
-        // lands the panel mid-screen at 150% (right edge at 1280 physical of 1920).
-        var screen = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1920, 1200);
+        // Screen bounds and window Location share the same physical coordinate space in
+        // this DPI-aware process. Anchor to the screen that contained the initiating
+        // pointer, not always to primary. Do NOT rescale Right by 96/DeviceDpi.
+        var screen = _targetScreen.Bounds;
         var x = _anchorRight
             ? screen.Right - Width - LogicalToDeviceUnits(_logicalMargin)
             : screen.Left + LogicalToDeviceUnits(_logicalMargin);
         var top = screen.Top + LogicalToDeviceUnits(_logicalTop);
         Location = new Point(x, top);
-        Program.Log($"Positioned {Text} at {Location.X},{Location.Y} on screen {screen.Width}x{screen.Height} dpi={DeviceDpi}");
+        Program.Log($"Positioned {Text} at {Location.X},{Location.Y} on {_targetScreen.DeviceName} {screen.Width}x{screen.Height} dpi={DeviceDpi}");
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
