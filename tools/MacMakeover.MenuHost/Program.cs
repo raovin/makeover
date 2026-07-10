@@ -1187,6 +1187,7 @@ internal sealed class MenuForm : Form
 internal static class NativeMethods
 {
     private static readonly IntPtr HwndTop = IntPtr.Zero;
+    private static readonly IntPtr HwndTopMost = new(-1);
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoActivate = 0x0010;
@@ -1216,9 +1217,16 @@ internal static class NativeMethods
 
     public static void ShowWithoutActivation(Form form)
     {
-        form.TopMost = false;
-        ShowWindow(form.Handle, 8); // SW_SHOWNA: show without taking foreground focus.
-        SetWindowPos(form.Handle, HwndTop, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
+        // Topmost-while-open is the only reliable way for a NO-ACTIVATE popup to appear
+        // above the user's active window: HWND_TOP cannot elevate an inactive window over
+        // the foreground one, so panels opened BEHIND the app the user was working in
+        // (useless). Taking activation is not an option either - Windows' foreground
+        // lock denies focus grabs to a background pipe server. The R-04 "lingering over
+        // Alt+Tab" hazard is prevented by DISMISSAL, not z-order: the foreground-change
+        // timer and Alt detection close the panel the instant any other window takes
+        // focus, so the topmost flag never outlives the popup's few seconds on screen.
+        ShowWindow(form.Handle, 8); // SW_SHOWNA: show without taking keyboard focus.
+        SetWindowPos(form.Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
     }
 
     public static bool IsAltPressed()

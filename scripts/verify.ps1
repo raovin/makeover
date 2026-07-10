@@ -448,8 +448,13 @@ if (Test-Path -LiteralPath $menuHostSourcePath) {
     $VerificationFailed = $true
   }
 
-  if ($menuHostSource -match 'TopMost\s*=\s*true|HwndTopMost|HWND_TOPMOST') {
-    Write-Warning "MenuHost is forcing custom panels into the system topmost band. That blocks Snipping Tool overlays and makes Alt+Tab look broken."
+  # Topmost-while-open is REQUIRED for visibility: a no-activate popup cannot rise
+  # above the user's active window via HWND_TOP (panels opened behind the app -
+  # useless), and activation is denied to a background pipe server by the foreground
+  # lock. The lingering hazard (R-04) is controlled by the dismissal pair below:
+  # topmost is only acceptable together with Alt/foreground-change dismissal.
+  if ($menuHostSource -notmatch 'HwndTopMost') {
+    Write-Warning "MenuHost panels are not topmost-while-open, so they open BEHIND the active window. Show with HWND_TOPMOST + SWP_NOACTIVATE and rely on foreground-change dismissal (R-04)."
     $VerificationFailed = $true
   }
 
