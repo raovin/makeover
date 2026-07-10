@@ -17,8 +17,8 @@ left:
 - id: focused-app-name-codex
   scopes:
   - FocusedApp
-  template: if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; const helper = /^(Seelen UI|ShellHost|MacMakeover\.MenuHost)$/i; if (shell.test(name) || shell.test(title)) return "Finder"; if (helper.test(name) || helper.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center|Network)$/.test(title)) return ""; return name || title;
-  tooltip: if (typeof focusedApp === "undefined" || !focusedApp) return ""; return focusedApp.title || focusedApp.name || "";
+  template: if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; const helper = /^(Seelen UI|ShellHost|MacMakeover\.MenuHost|Windows Shell Experience Host|ShellExperienceHost)$/i; if (shell.test(name) || shell.test(title)) return "Finder"; if (helper.test(name) || helper.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center|Network)$/.test(title)) return ""; return name || title;
+  tooltip: if (typeof focusedApp === "undefined" || !focusedApp) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const helper = /^(Seelen UI|ShellHost|MacMakeover\.MenuHost|Windows Shell Experience Host|ShellExperienceHost)$/i; if (helper.test(name) || helper.test(title)) return ""; return title || name;
   badge: null
   onClick: null
   onWheelUp: null
@@ -29,8 +29,8 @@ left:
 - id: focused-window-title-codex
   scopes:
   - FocusedApp
-  template: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; const helper = /^(Seelen UI|ShellHost|MacMakeover\.MenuHost)$/i; if (shell.test(name) || shell.test(title)) return ""; if (helper.test(name) || helper.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center|Network)$/.test(title)) return ""; if (!title || title === name) return ""; return title;
-  tooltip: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; return focusedApp.title;
+  template: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const shell = /^(Windows Explorer|File Explorer|Explorer|Program Manager)$/i; const helper = /^(Seelen UI|ShellHost|MacMakeover\.MenuHost|Windows Shell Experience Host|ShellExperienceHost)$/i; if (shell.test(name) || shell.test(title)) return ""; if (helper.test(name) || helper.test(title)) return ""; if (/^(Windows PowerShell|PowerShell|pwsh)$/i.test(name) && /^(Apple Menu|Control Center|Network)$/.test(title)) return ""; if (!title || title === name) return ""; return title;
+  tooltip: if (typeof focusedApp === "undefined" || !focusedApp || !focusedApp.title) return ""; const name = (focusedApp.name || "").trim(); const title = (focusedApp.title || "").trim(); const helper = /^(Seelen UI|ShellHost|MacMakeover\.MenuHost|Windows Shell Experience Host|ShellExperienceHost)$/i; if (helper.test(name) || helper.test(title)) return ""; return title;
   badge: null
   onClick: null
   onWheelUp: null

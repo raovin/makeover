@@ -250,6 +250,11 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
+  if ($toolbarRaw -notmatch 'Windows Shell Experience Host\|ShellExperienceHost') {
+    Write-Warning "Focused-app labels should hide Windows Shell Experience Host. Native notification and calendar surfaces must not leak implementation names into the menu bar."
+    $VerificationFailed = $true
+  }
+
   if ($toolbarRaw -notmatch 'Windows Explorer\|File Explorer\|Explorer\|Program Manager' -or $toolbarRaw -notmatch 'return "Finder"') {
     Write-Warning "Focused-app labels should map desktop/File Explorer shell focus to Finder. Otherwise minimized/show-desktop states leak 'Windows Explorer' into the Mac menu bar."
     $VerificationFailed = $true

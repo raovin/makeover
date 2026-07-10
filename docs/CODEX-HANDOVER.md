@@ -22,7 +22,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 - Normal Apple clicks open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
 - The Apple protocol handler must use the fast MenuHost pipe launcher registered by `scripts\Install-AppleMenuHandler.ps1`, because `wscript.exe` is blocked by this machine's Defender/ASR policy and the old PowerShell/WPF cold path was laggy.
 - The top-right sliders control opens the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. It intentionally uses `onClick: open("macmakeover-control-center:")`; that protocol is registered to a fast `conhost --headless cmd /c echo control> \\.\pipe\MacMakeover.MenuHost` launcher with a `--show control` fallback.
-- Performance correction: Apple and right-side controls are item-owned now. Network and Bluetooth use custom MenuHost panels, Calendar/Notifications must avoid Seelen Flyouts (`macmakeover-notification-center:` opens Windows Notification Center), and sliders use the fast Control Center protocol.
+- Performance correction: Apple and normally responsive right-side controls are item-owned. Network and Bluetooth use custom MenuHost panels, Calendar/Notifications avoid Seelen Flyouts, and Battery/sliders use the fast Control Center protocol. A guarded y=0..18 helper fallback now covers only the mixed-DPI toolbar instance that `WindowFromPoint` reports as click-through.
 - Battery/performance correction: keep Seelen `performanceMode.onBattery` and `performanceMode.onEnergySaver` set to `Disabled`. `Minimal` caused the top toolbar and bottom dock to disappear after the laptop switched off AC power.
 - Dock recovery correction: keep Seelen `@seelen/weg.enabled` set to `true`. The later native MenuHost dock/appbar experiment was removed after it interfered with maximize/work-area behavior.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
@@ -31,7 +31,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 
 ## Current State In One Screenful
 
-- Repo (single source of truth): `C:\Users\VineethRao\source\repos\mac-makeover` — a standalone git repo (default branch `main`, no remote yet).
+- Repo (single source of truth): `C:\Users\VineethRao\source\repos\mac-makeover` — default branch `main`, remote `origin` = `git@github.com:raovin/makeover.git`.
 - Frozen backup only: `C:\Users\VineethRao\source\repos\brunel\workspace\desktop\mac-makeover` (GitHub `raovin/brunel`). Do not edit; it is historical.
 - Latest commit: run `git -C C:\Users\VineethRao\source\repos\mac-makeover log -1 --oneline`.
 - Seelen config root: `C:\Users\VineethRao\AppData\Roaming\com.seelen.seelen-ui`
@@ -211,7 +211,7 @@ The current Control Center includes:
 - Restart...
 - Shut Down...
 
-Because Seelen/Windows PowerShell URI launches were measured as laggy, Apple now uses a URI only because the handler is a fast pipe echo with a self-healing MenuHost fallback. Network and Bluetooth are custom MenuHost item clicks; calendar and notifications remain item-owned clicks; none of these should be helper pixel zones.
+Because Seelen/Windows PowerShell URI launches were measured as laggy, Apple uses a fast pipe echo with a self-healing MenuHost fallback. Network and Bluetooth are custom MenuHost item clicks. Calendar and notifications remain item-owned when Seelen receives the click, but the mixed-DPI compatibility router mirrors them only when the toolbar is genuinely click-through.
 
 Recent visual/performance proof screenshots:
 
@@ -313,7 +313,7 @@ C:\Users\VineethRao\source\repos\mac-makeover\config\hot-corners.json
 
 The top-left hot corner and Apple glyph are close together. Top-left/top-right outer-corner clicks use `clickCornerSize` from `config\hot-corners.json` and send Show Desktop. Be careful when changing hit targets; do not reintroduce invisible click stealing.
 
-The same helper owns the Apple click zone through `appleMenuClickEnabled` and `appleMenuZone*`. Right-side controls are item-owned now; keep the helper's network/battery/control/notification/calendar pixel-zone booleans disabled unless deliberately reverting to the older coordinate-based model. The exact physical top-left/top-right corners remain reserved for Show Desktop.
+Apple remains item-owned (`appleMenuClickEnabled=false`). Keep the six right-side compatibility booleans enabled only with all three guards intact: y=0..18, `WindowFromPoint` says the target is not Seelen, and verifier-confirmed non-overlapping ranges. The exact physical top-left/top-right corners remain reserved for Show Desktop.
 
 ## The Repo / Git Backup
 
@@ -342,7 +342,7 @@ git -C C:\Users\VineethRao\source\repos\mac-makeover add .
 git -C C:\Users\VineethRao\source\repos\mac-makeover commit -m "Update mac makeover polish"
 ```
 
-There is no remote yet, so there is nothing to push.
+Push reviewed recovery commits to `origin` only when the current release gates are explicitly accepted.
 
 ## Beautification Ideas For Claude
 
@@ -423,5 +423,5 @@ For any beautification iteration:
 - Capture and inspect screenshots.
 - If behavior is clickable, test the actual click path.
 - Mirror any lasting change from the live config into this repo so it survives a restore.
-- Commit changes from the repo root when appropriate (no remote yet, so no push).
+- Commit changes from the repo root when appropriate; push to `origin` only after release gates pass or the user explicitly accepts them.
 - Tell the user exactly what changed and what visual QA passed.

@@ -2,7 +2,7 @@
 
 Decision: **simplify** the current Seelen + MenuHost architecture; do not rebuild. Baseline commit: `6819380`.
 
-Execution status: Tasks 1-4 pass for Snipping Tool, Alt+Tab, notification clipping, dock/work-area, visual, and warm performance gates. The negative-coordinate Show Desktop regression is directly fixed. A guarded compatibility route is live for Seelen's primary mixed-DPI click-through toolbar; its final user-observed click pass remains explicit.
+Execution status: Tasks 1-4 pass for the original Snipping Tool, Alt+Tab, notification clipping, dock/work-area, visual, and warm performance gates. The negative-coordinate Show Desktop regression is directly fixed. A guarded compatibility route is live for Seelen's primary mixed-DPI click-through toolbar; its final user-observed click pass remains explicit. The second acceptance round reproduced a separate bell/date failure: Notification Center becomes hidden while retaining foreground ownership, so this path is not release-ready.
 
 ## Immediate redesign recovery executed
 
@@ -56,6 +56,7 @@ Execution status: Tasks 1-4 pass for Snipping Tool, Alt+Tab, notification clippi
 - Remove only after replacement tests exist: dormant broad pixel-zone functions, unused WPF warm-runspace fallback paths, duplicated handler registration code, and stale architecture claims.
 - Move Network/Bluetooth state collection off the MenuHost UI thread and make timeouts real.
 - Add an explicit `close` before notification/calendar activation if direct interaction testing confirms stacking.
+- Replace or harden the synthetic Win+N notification path. Acceptance requires a visible native surface, a screenshot, and successful Rider/Snipping Tool activation immediately afterward; hiding the `Windows Shell Experience Host` label alone is not sufficient.
 - Replace version-specific dock executable paths with UMID/path-aware restoration.
 - Stop if: simplification weakens self-healing startup or restore portability.
 

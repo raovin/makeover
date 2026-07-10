@@ -154,7 +154,7 @@ config\hot-corners.json
 
 Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, `NetworkFlyout`, `QuickSettings`, and `None`. The shipped config keeps dwell actions set to `None` and keeps only tiny top-left/top-right click zones for Show Desktop.
 
-The right-side controls and Apple mark are item-owned instead of broad pixel-zone-routed: Apple opens `macmakeover-apple-menu:`, Network and Bluetooth use custom MenuHost panels, the sliders item opens `macmakeover-control-center:` through a fast MenuHost pipe launcher, date/time opens the notification/calendar surface, and the bell opens notifications. Broad top-bar helper zones are intentionally disabled because they can fire while clicking maximized app chrome.
+The Apple mark and normally responsive right-side controls are item-owned: Apple opens `macmakeover-apple-menu:`, Network and Bluetooth use custom MenuHost panels, Battery/sliders open `macmakeover-control-center:`, and bell/date route to native Notification Center. Seelen 2.7.4 exposes a click-through toolbar on the current mixed-DPI primary display, so the helper also carries six non-overlapping compatibility zones limited to the top 19 pixels. Those zones run only when `WindowFromPoint` proves Seelen did not receive the click, preventing app-chrome and double-fire regressions.
 
 ## Manual Steps After Restore
 
@@ -192,7 +192,7 @@ git add .
 git commit -m "Update mac makeover backup"
 ```
 
-There is no remote configured yet, so there is nothing to push. If you later add one, `git push` after committing.
+The `origin` remote is `git@github.com:raovin/makeover.git`. Push reviewed commits with `git push origin main` when the local recovery stack is ready.
 
 ## Safety Notes
 
@@ -216,10 +216,9 @@ The launcher behavior is separate from Seelen:
 - `scripts\install-hot-corners.ps1` starts the helper and resident MenuHost. `verify.ps1` fails if the host is missing/not running, if the helper is running under `pwsh.exe`, if Seelen WEG is disabled, or if native MenuHost dock/appbar code is reintroduced.
 - Clicking Wi-Fi opens the custom MenuHost Network panel; the icon stays visually Wi-Fi so VPN/tunnel routes do not turn it into a misleading shield or generic computer glyph.
 - Clicking Bluetooth opens the custom MenuHost Bluetooth panel.
-- Battery is a right-side Mac-style system readout, merged with charging state.
+- Battery is a right-side Mac-style system readout, merged with charging state, and opens the custom Control Center when clicked.
 - Clicking the sliders control opens the custom Control Center with Wi-Fi/Bluetooth live tiles, display and sound sliders, System Settings, Show Desktop, Lock Screen, Sleep, Restart, and Shut Down.
-- Clicking the bell opens Seelen's notifications panel separately from Control Center.
-- Clicking the date/time opens Seelen's calendar popup and dismisses any custom Apple/Control Center panel first, so panels do not stack.
+- Bell and date/time currently call `macmakeover-notification-center:` to request the native Windows Notification Center rather than Seelen Flyouts. The 2026-07-10 second acceptance round reproduced an open issue where the native window became hidden while retaining foreground focus; treat this interaction as a release gate until visible-surface and subsequent app-focus tests pass.
 - Normal sliders/Control Center clicks are handled by the sliders item's `onClick`, which opens `macmakeover-control-center:`. That protocol writes `control` into the resident `tools\MacMakeover.MenuHost` pipe and falls back to starting MenuHost with `--show control` if needed.
 - Do not re-add Seelen's `@seelen/tb-quick-settings` item unless the user explicitly asks to restore the old flyout.
 - `Alt+Space` opens Microsoft Command Palette / PowerToys-style search.
