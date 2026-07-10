@@ -24,6 +24,7 @@ Reviewed: 2026-07-10. Ratings are qualitative: Low, Medium, High.
 | R-18 | QA automation cannot activate no-activate shell surfaces | Medium | Medium | Treat protocol/static tests as partial only; require user-observed click pass when automation blocks | explicit result labels in matrix | Encountered during baseline |
 | R-19 | Documentation contradicts live ownership model | Medium | High | consolidate handover after runtime stabilization | source-to-doc review | Observed |
 | R-20 | Lock-screen test itself disrupts access | Critical | Low | never automate credentials; keep shortcut static guards; user performs final lock/unlock observation | user confirmation of normal PIN input | Not executed automatically |
+| R-21 | Any click on a display above/left of primary is classified as PrimaryScreen top-left | Critical | High on negative-coordinate layouts | Use `Screen.FromPoint`; reject points outside selected monitor bounds; verifier forbids `PrimaryScreen.Bounds` in the helper | Run helper and single/double-click Bruno body on the negative-coordinate display; inspect hot-corner log | Resolved after real-use regression report; direct Bruno retest PASS, no new Show Desktop log entry |
 
 ## Risk acceptance
 

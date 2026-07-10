@@ -630,6 +630,14 @@ function Get-CornerAtPoint {
   $right = $Bounds.Right - 1
   $bottom = $Bounds.Bottom - 1
 
+  # Never classify a point that is outside this monitor. The previous comparisons
+  # only checked the upper thresholds, so every negative-coordinate click on a
+  # monitor above/left of primary looked like PrimaryScreen's top-left corner and
+  # fired Show Desktop.
+  if ($X -lt $left -or $X -gt $right -or $Y -lt $top -or $Y -gt $bottom) {
+    return $null
+  }
+
   if ($X -le ($left + $CornerSize) -and $Y -le ($top + $CornerSize)) { return "TopLeft" }
   if ($X -ge ($right - $CornerSize) -and $Y -le ($top + $CornerSize)) { return "TopRight" }
   if ($X -le ($left + $CornerSize) -and $Y -ge ($bottom - $CornerSize)) { return "BottomLeft" }
@@ -664,7 +672,10 @@ while ($true) {
     $point = New-Object MacMakeoverHotCornersNative+POINT
     [MacMakeoverHotCornersNative]::GetCursorPos([ref]$point) | Out-Null
 
-    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    # Resolve the monitor under the pointer. PrimaryScreen is incorrect for the
+    # negative coordinates used by displays positioned above or left of primary.
+    $screenPoint = [System.Drawing.Point]::new($point.X, $point.Y)
+    $bounds = [System.Windows.Forms.Screen]::FromPoint($screenPoint).Bounds
     $corner = Get-CornerAtPoint -X $point.X -Y $point.Y -Bounds $bounds -CornerSize ([int]$config.cornerSize)
     $clickCorner = Get-CornerAtPoint -X $point.X -Y $point.Y -Bounds $bounds -CornerSize ([int]$config.clickCornerSize)
     $leftMouseState = [int][MacMakeoverHotCornersNative]::GetAsyncKeyState(0x01)

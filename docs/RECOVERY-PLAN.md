@@ -12,6 +12,7 @@ Execution status: Tasks 1-4 now pass for the reported Snipping Tool, Alt+Tab, no
 - Removed `HWND_TOPMOST`/`TopMost=true` from MenuHost. Panels now use `HWND_TOP` without activation and yield to Alt+Tab and screen-capture surfaces.
 - Made Control Center probes cancellable with a real timeout/child-process kill and idempotent form cleanup.
 - Refreshed stale Outlook, Codex, and Claude WindowsApps pin paths that produced WEG `NotFound` errors after application updates.
+- Corrected hot-corner monitor selection: the helper now uses the monitor under the pointer and rejects points outside that monitor before classifying a corner. This prevents every negative-coordinate click on the upper-left display from firing Show Desktop.
 
 ## Ordered tasks
 

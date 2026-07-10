@@ -1,6 +1,6 @@
 # Mac Makeover Recovery Audit Spec
 
-Status: recovery baseline, redesign implementation, and post-change verification recorded on 2026-07-10 (Europe/London). The reported Snipping Tool, Alt+Tab, clipped notification count, dock/work-area, and Control Center churn regressions now have direct passing evidence. Overall product acceptance remains partial because exact corner/bell/date and some toolbar-click tests are still open.
+Status: recovery baseline, redesign implementation, and post-change verification recorded on 2026-07-10 (Europe/London). A real-use regression report subsequently exposed that the hot-corner helper treated negative-coordinate application clicks as PrimaryScreen's top-left corner. That critical defect was corrected and directly retested in Bruno with the helper running. Overall product acceptance remains partial because exact bell/date and some toolbar-click tests are still open.
 
 Baseline: `main` at `6819380`; the worktree was clean and matched `origin/main` before this audit began.
 
@@ -152,6 +152,7 @@ A rebuild is not justified: the baseline passes static guards, renders coherentl
 - MenuHost no longer enters the system topmost band; Apple and Control panels both yielded to native Alt+Tab.
 - Snipping Tool `New` reached capture mode, and the overlay was dismissed back to a clean desktop.
 - Control Center's blocking output read was replaced by cancellable process waiting, timed-out child-tree termination, and per-form cancellation. A warm repeat batch settled at +4 handles with no child process.
+- Hot-corner detection now resolves `Screen.FromPoint` and performs a full monitor-bounds check before classifying a corner. The pre-fix log showed repeated `TopLeft click -> ShowDesktop` entries for Bruno clicks; post-fix single and double body clicks left Bruno visible with no new entry.
 - Final inspected screenshot set: `qa/visual-qa-20260710-140026/`, including both displays' full/top/bottom files after the redesign.
 - Product acceptance is not complete: physical corner clicks, bell/date surface capture, minimized desktop, the wider maximize app set, and a user-observed lock/PIN check remain open.
 

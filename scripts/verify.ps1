@@ -519,6 +519,16 @@ if (Test-Path -LiteralPath $HotCornersScriptPath) {
     Write-Warning "Hot-corners helper is moving app windows again. Do not nudge/SetWindowPos normal windows from the background helper; it caused maximize/navigation regressions."
     $VerificationFailed = $true
   }
+
+  if ($hotCornersScript -match '\[System\.Windows\.Forms\.Screen\]::PrimaryScreen\.Bounds' -or $hotCornersScript -notmatch 'Screen\]::FromPoint') {
+    Write-Warning "Hot-corner click detection is primary-monitor-only. Negative-coordinate app clicks can be mistaken for the top-left Show Desktop corner."
+    $VerificationFailed = $true
+  }
+
+  if ($hotCornersScript -notmatch '\$X -lt \$left.*\$X -gt \$right.*\$Y -lt \$top.*\$Y -gt \$bottom') {
+    Write-Warning "Hot-corner detection does not reject points outside the selected monitor bounds. Ordinary app clicks may trigger Show Desktop."
+    $VerificationFailed = $true
+  }
 }
 
 if (Test-Path -LiteralPath $ShortcutPath) {

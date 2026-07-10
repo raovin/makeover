@@ -1,6 +1,6 @@
 # Mac Makeover QA Test Matrix
 
-Status date: 2026-07-10. `PASS` means directly evidenced in this audit; `OPEN` is not accepted; `STATIC` means configuration/source evidence only. The 14:00-14:18 recovery run applied the image-generated redesign to the live desktop and retested Snipping Tool, native Alt+Tab, Control Center dismissal, notification count layout, maximized work areas, both monitors, and panel churn.
+Status date: 2026-07-10. `PASS` means directly evidenced in this audit; `OPEN` is not accepted; `STATIC` means configuration/source evidence only. The 14:00-14:18 recovery run applied the image-generated redesign and tested the main recovery gates. A later real-use report exposed a critical multi-monitor hot-corner defect; the 15:39 correction and direct Bruno click retest are recorded below.
 
 ## Commands
 
@@ -69,6 +69,7 @@ Inspect every visual for overlap, clipping, vertical/text baseline alignment, ic
 | I-12 | Restart Seelen | restart scheduled task, wait ready, verify | both toolbars/docks return and logs have no schema failure | PASS: both displays Ready; post-restart capture passed |
 | I-13 | Maximize/restore apps | Chrome, Explorer, Terminal, and available tools | no client content behind dock/top bar | Explorer direct maximize/restore PASS; wider app set remains OPEN |
 | I-14 | Snipping Tool New | activate Snipping Tool and invoke `New screenshot` | editor hides and capture overlay starts; overlay can be dismissed without a stuck custom panel | PASS: app reported zero visible editor windows in capture mode; capture overlay appeared in `visual-qa-20260710-135941`; Escape/app activation returned to a clean desktop |
+| I-15 | Negative-coordinate app body clicks | with the hot-corner helper running, single-click and double-click Bruno's JSON request body on the display above/left of primary | Bruno stays visible; text caret/selection responds; no `ShowDesktop` log entry | PASS after correction: both direct clicks retained Bruno and no new `TopLeft click -> ShowDesktop` entry appeared after the helper's 15:39 restart |
 
 ## Performance checks
 
@@ -88,4 +89,4 @@ Inspect every visual for overlap, clipping, vertical/text baseline alignment, ic
 
 Do not call the recovery complete unless all `OPEN` interaction items required by the product are either directly passed or explicitly handed off for a user-observed run. A passing verifier and static source checks do not override a failed or unperformed interaction.
 
-The reported blocking regressions are now directly covered: I-01/I-03/I-05/I-14, V-10/V-11, and P-06/P-09 pass. Overall acceptance is still partial for the remaining physical-click cases (I-04, I-06 through I-11), V-08/V-09, and I-13's wider app set.
+The blocking regressions are now directly covered: I-01/I-03/I-05/I-14/I-15, V-10/V-11, and P-06/P-09 pass. Overall acceptance is still partial for the remaining physical-click cases (I-04, I-06 through I-11), V-08/V-09, and I-13's wider app set.
