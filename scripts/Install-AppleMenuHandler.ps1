@@ -1,6 +1,7 @@
-# Registers the `macmakeover-apple-menu:` protocol so the top-left Apple logo opens the
-# custom Apple menu. This uses the same fast resident MenuHost pipe path as Control
-# Center; the old PowerShell/WPF cold path was laggy and made click routing brittle.
+# Registers the `macmakeover-apple-menu:` protocol. Opens the resident MenuHost Apple
+# panel via the named pipe (fast, no window); falls back to starting MenuHost with
+# --show apple if the pipe is gone. The old conhost+PowerShell+WPF chain is retired -
+# it was the measured source of Apple-menu lag.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
