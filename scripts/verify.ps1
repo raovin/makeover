@@ -498,17 +498,47 @@ if (Test-Path -LiteralPath $HotCornersConfigPath) {
     }
   }
 
-  foreach ($itemOwnedRoute in @(
+  if ([int]$hotCornersConfig.topBarClickHeight -gt 19) {
+    Write-Warning "Top-bar fallback routing extends into application title bars. Keep topBarClickHeight at or below the actual 19px toolbar."
+    $VerificationFailed = $true
+  }
+
+  foreach ($fallbackRoute in @(
     "networkFlyoutClickEnabled",
+    "bluetoothClickEnabled",
     "batteryQuickSettingsClickEnabled",
     "controlCenterClickEnabled",
     "notificationCenterClickEnabled",
     "calendarPopupClickEnabled"
   )) {
-    $routeProperty = $hotCornersConfig.PSObject.Properties[$itemOwnedRoute]
-    if ($routeProperty -and [bool]$routeProperty.Value) {
-      Write-Warning "$itemOwnedRoute should be false. Right-side menu-bar controls are item-owned now, not pixel-zone-routed by the helper."
+    $routeProperty = $hotCornersConfig.PSObject.Properties[$fallbackRoute]
+    if (-not $routeProperty -or -not [bool]$routeProperty.Value) {
+      Write-Warning "$fallbackRoute should be true so right-side controls remain usable when Seelen renders a click-through toolbar on a DPI-scaled monitor."
       $VerificationFailed = $true
+    }
+  }
+
+  $fallbackZones = @(
+    [pscustomobject]@{ Name = "Network"; LeftOffset = [int]$hotCornersConfig.networkFlyoutZoneLeftOffset; RightOffset = [int]$hotCornersConfig.networkFlyoutZoneRightOffset },
+    [pscustomobject]@{ Name = "Bluetooth"; LeftOffset = [int]$hotCornersConfig.bluetoothZoneLeftOffset; RightOffset = [int]$hotCornersConfig.bluetoothZoneRightOffset },
+    [pscustomobject]@{ Name = "Battery"; LeftOffset = [int]$hotCornersConfig.batteryQuickSettingsZoneLeftOffset; RightOffset = [int]$hotCornersConfig.batteryQuickSettingsZoneRightOffset },
+    [pscustomobject]@{ Name = "Control Center"; LeftOffset = [int]$hotCornersConfig.controlCenterStatusZoneLeftOffset; RightOffset = [int]$hotCornersConfig.controlCenterStatusZoneRightOffset },
+    [pscustomobject]@{ Name = "Notifications"; LeftOffset = [int]$hotCornersConfig.notificationCenterZoneLeftOffset; RightOffset = [int]$hotCornersConfig.notificationCenterZoneRightOffset },
+    [pscustomobject]@{ Name = "Date"; LeftOffset = [int]$hotCornersConfig.calendarPopupZoneLeftOffset; RightOffset = [int]$hotCornersConfig.calendarPopupZoneRightOffset }
+  )
+
+  for ($zoneIndex = 0; $zoneIndex -lt $fallbackZones.Count; $zoneIndex++) {
+    $zone = $fallbackZones[$zoneIndex]
+    if ($zone.LeftOffset -le $zone.RightOffset) {
+      Write-Warning "$($zone.Name) top-bar fallback zone has an empty or reversed range."
+      $VerificationFailed = $true
+    }
+    if ($zoneIndex -gt 0) {
+      $previousZone = $fallbackZones[$zoneIndex - 1]
+      if ($previousZone.RightOffset -le $zone.LeftOffset) {
+        Write-Warning "$($previousZone.Name) and $($zone.Name) top-bar fallback zones overlap; one click could launch two actions."
+        $VerificationFailed = $true
+      }
     }
   }
 }
@@ -527,6 +557,11 @@ if (Test-Path -LiteralPath $HotCornersScriptPath) {
 
   if ($hotCornersScript -notmatch '\$X -lt \$left.*\$X -gt \$right.*\$Y -lt \$top.*\$Y -gt \$bottom') {
     Write-Warning "Hot-corner detection does not reject points outside the selected monitor bounds. Ordinary app clicks may trigger Show Desktop."
+    $VerificationFailed = $true
+  }
+
+  if ($hotCornersScript -notmatch 'IsFancyToolbarAtPoint' -or $hotCornersScript -notmatch '\$fallbackTopBarClick') {
+    Write-Warning "Top-bar fallback routing cannot distinguish a working Seelen hit target from a click-through one. This can double-fire responsive toolbar items."
     $VerificationFailed = $true
   }
 }

@@ -1,6 +1,6 @@
 # Mac Makeover QA Test Matrix
 
-Status date: 2026-07-10. `PASS` means directly evidenced in this audit; `OPEN` is not accepted; `STATIC` means configuration/source evidence only. The 14:00-14:18 recovery run applied the image-generated redesign and tested the main recovery gates. A later real-use report exposed a critical multi-monitor hot-corner defect; the 15:39 correction and direct Bruno click retest are recorded below.
+Status date: 2026-07-10. `PASS` means directly evidenced in this audit; `OPEN` is not accepted; `STATIC` means configuration/source evidence only. The 14:00-14:18 recovery run applied the image-generated redesign. Real-use reports then exposed the negative-coordinate Show Desktop defect and a primary mixed-DPI Seelen toolbar whose full-width render had only a 15x15 native hit target. The 15:39 Bruno correction and 16:13 guarded-toolbar recovery are recorded below.
 
 ## Commands
 
@@ -26,7 +26,7 @@ If a Seelen config/theme file changes, stop Seelen before the edit, restart it, 
 |---|---|---|---|---|
 | S-01 | Shortcuts/task switcher | Inspect live/repo JSON and `settings.json`; run verifier | shortcuts JSON is disabled and task switcher is false | PASS |
 | S-02 | WEG and performance modes | Run verifier | WEG true; default/onBattery/onEnergySaver all Disabled | PASS |
-| S-03 | Item-owned routes | Inspect toolbar/plugin; run verifier | Apple, Network, Bluetooth, Control use URI handlers; all helper broad zones false | PASS |
+| S-03 | Item-owned routes plus guarded fallback | Inspect toolbar/plugin/helper; run verifier | normal item routes use URI handlers; fallback is y<=18, only when Seelen is not under the pointer, and zones do not overlap | PASS |
 | S-04 | No old quick settings | Search toolbar and run verifier | no `@seelen/tb-quick-settings` | PASS |
 | S-05 | MenuHost activation guard | Search/build | `WS_EX_NOACTIVATE` and `ShowWithoutActivation`; no `Activate`/`SetForegroundWindow` | PASS |
 | S-06 | No native appbar/background mover | Search/run verifier | no DockForm/appbar APIs; no helper window nudge | PASS |
@@ -37,9 +37,9 @@ If a Seelen config/theme file changes, stop Seelen before the edit, restart it, 
 
 | ID | State | Screenshot(s) | Pass criteria | Baseline |
 |---|---|---|---|---|
-| V-01 | Full virtual desktop, maximized apps | `qa/visual-qa-20260710-140026/desktop.png` | both bars/docks present; no app content under dock | PASS after redesign |
+| V-01 | Full virtual desktop, maximized apps | `qa/visual-qa-20260710-161422/desktop.png` | both bars/docks present; no app content under dock | PASS after final toolbar rollback/restart |
 | V-02 | Legacy top/bottom crops | final `qa/visual-qa-20260710-123039/top-130.png`, `bottom-240.png` | must describe the same intended monitor | PASS: exact hashes match primary monitor files |
-| V-03 | Per-monitor full/top/bottom | `qa/visual-qa-20260710-140026/monitor-*-desktop.png`, `monitor-*-top-130.png`, `monitor-*-bottom-240.png` | every active monitor has all three crops | PASS: 1920x1200 primary and 1920x1080 secondary |
+| V-03 | Per-monitor full/top/bottom | `qa/visual-qa-20260710-161422/monitor-*-desktop.png`, `monitor-*-top-130.png`, `monitor-*-bottom-240.png` | every active monitor has all three crops | PASS: 1920x1200 primary and 1920x1080 secondary |
 | V-04 | Apple menu | `qa/recovery-audit-20260710/baseline-apple-menu-open.png` | aligned rows, no clipping/ghost tooltip/terminal | PASS visually; wrong monitor |
 | V-05 | Control Center | `qa/recovery-audit-20260710/baseline-control-center-open.png` | intended panel, aligned tiles/sliders/rows, no old Seelen flyout | PASS via protocol |
 | V-06 | Network | `qa/recovery-audit-20260710/baseline-network-panel-open-pipe.png` | compact Network panel, readable connection state | PASS via pipe |
@@ -47,7 +47,7 @@ If a Seelen config/theme file changes, stop Seelen before the edit, restart it, 
 | V-08 | Notification/calendar | `qa/recovery-audit-20260710/baseline-notification-calendar-open.png` | Windows surface visible, no custom panel beneath | FAIL/OPEN: surface not captured |
 | V-09 | Minimized desktop | post-change `minimized-desktop.png` plus per-monitor crops | wallpaper, bars, docks correct with no app windows | OPEN |
 | V-10 | Maximized common app | direct File Explorer maximize/restore plus final per-monitor crops | client bottom <= monitor work-area bottom; dock opaque | PASS: Explorer used y=31..742 on the 800-logical-pixel primary display, leaving the dock reservation intact; dry run found no repair candidates |
-| V-11 | Notification count | primary and secondary 28 px toolbar captures plus `qa/visual-qa-20260710-140026/monitor-*-top-130.png` | count fully visible with no y=0 badge overflow | PASS: count `15` renders inline beside the DND glyph inside a bounded target |
+| V-11 | Notification count | `qa/visual-qa-20260710-161422/monitor-*-top-130.png` | count fully visible with no y=0 badge overflow | PASS: count `23` renders inline beside the DND glyph inside a bounded 34-52px target on both 19px bars |
 
 Inspect every visual for overlap, clipping, vertical/text baseline alignment, icon spacing, badge placement, hairlines, dock opacity, active indicators, and accurate click affordances.
 
@@ -58,11 +58,11 @@ Inspect every visual for overlap, clipping, vertical/text baseline alignment, ic
 | I-01 | Normal Alt+Tab | focus Rider; press Alt+Tab | foreground app changes through native switcher | PASS: focused-app label changed to Snipping Tool/Finder during repeated runs |
 | I-02 | Apple actual click | click toolbar Apple item | Apple menu <= 500 ms, no visible terminal, one host | Baseline click PASS except wrong monitor; placement fix passed via pointer+pipe; actual-click recheck OPEN |
 | I-03 | Apple then Alt+Tab | open Apple panel; Alt+Tab | menu is absent after switch; switch completes | PASS: MenuHost logged `Closing Apple Menu: Alt/system switcher detected` |
-| I-04 | Control actual click | click sliders item | custom Control Center, not Seelen quick settings | OPEN; protocol path passed |
+| I-04 | Control actual click | click sliders item | custom Control Center, not Seelen quick settings | PASS on responsive secondary toolbar at 16:04; primary guarded fallback user recheck OPEN |
 | I-05 | Control then Alt+Tab | open Control Center; Alt+Tab | popup closes and switch completes | PASS: final host logged foreground/system-switch dismissal and no post-fix thread exception |
-| I-06 | Wi-Fi actual click | click toolbar network item | compact MenuHost Network panel | OPEN; handler/pipe passed |
-| I-07 | Bluetooth actual click | click toolbar Bluetooth item | compact MenuHost Bluetooth panel | OPEN; handler/pipe passed |
-| I-08 | Bell actual click | click bell | Windows notification surface, not Control Center | OPEN; static route only |
+| I-06 | Wi-Fi actual click | click toolbar network item | compact MenuHost Network panel | PASS on responsive secondary toolbar at 16:05; MenuHost logged `Post network`; primary guarded fallback user recheck OPEN |
+| I-07 | Bluetooth actual click | click toolbar Bluetooth item | compact MenuHost Bluetooth panel | PASS on responsive secondary toolbar at 16:05; MenuHost logged `Post bluetooth`; primary guarded fallback user recheck OPEN |
+| I-08 | Bell actual click | click bell | Windows notification surface, not Control Center | Click injection passed on responsive secondary toolbar; durable surface capture and primary fallback remain OPEN |
 | I-09 | Date/time actual click | open custom panel, click date | Windows calendar/notification surface; custom panel closes with no stacking | OPEN |
 | I-10 | Outside click | for each MenuHost panel, click a normal app | panel closes after grace period | Apple implicitly passed via switching; other panels OPEN |
 | I-11 | Physical top corners | click exact top-left and top-right on each monitor | Show Desktop occurs once; nearby app chrome does not trigger | OPEN |
@@ -70,6 +70,7 @@ Inspect every visual for overlap, clipping, vertical/text baseline alignment, ic
 | I-13 | Maximize/restore apps | Chrome, Explorer, Terminal, and available tools | no client content behind dock/top bar | Explorer direct maximize/restore PASS; wider app set remains OPEN |
 | I-14 | Snipping Tool New | activate Snipping Tool and invoke `New screenshot` | editor hides and capture overlay starts; overlay can be dismissed without a stuck custom panel | PASS: app reported zero visible editor windows in capture mode; capture overlay appeared in `visual-qa-20260710-135941`; Escape/app activation returned to a clean desktop |
 | I-15 | Negative-coordinate app body clicks | with the hot-corner helper running, single-click and double-click Bruno's JSON request body on the display above/left of primary | Bruno stays visible; text caret/selection responds; no `ShowDesktop` log entry | PASS after correction: both direct clicks retained Bruno and no new `TopLeft click -> ShowDesktop` entry appeared after the helper's 15:39 restart |
+| I-16 | Primary toolbar click-through recovery | inspect both toolbar handles; click Network/Bluetooth/Battery/Control/Bell/Date on primary | native Seelen click when available; otherwise exactly one calibrated fallback action; no underlying app minimization | STATIC/RUNTIME PARTIAL: primary hit-test failure proven (`FolderView` under rendered icon), guarded non-overlapping router live, verifier PASS; automation safely refused the through-click, so user click recheck is OPEN |
 
 ## Performance checks
 
@@ -82,11 +83,11 @@ Inspect every visual for overlap, clipping, vertical/text baseline alignment, ic
 | P-05 | Duplicate host | repeated Apple/Control open-close | exactly one same MenuHost PID | PASS: PID 38024 remained single |
 | P-06 | Resource settling | repeated Control Center open-close batches | no continuing growth across repeated warm batches; no orphan probes | PASS after fix: real cancellable process timeout added; final warm confirmation batch settled at +4 handles and no child probes, versus the pre-fix +89 handles with a live PowerShell child |
 | P-09 | Probe cancellation | churn Control Center faster than Wi-Fi/Bluetooth/brightness probes can finish | closing a form cancels and kills only its probe tree; no thread exception | PASS after idempotent disposal correction and final Alt+Tab run |
-| P-07 | Hot-corner helper | process sample and config | one Windows PowerShell process; 25-40 ms polling; no visible flicker | STATIC PASS; physical clicks OPEN |
+| P-07 | Hot-corner helper | process sample and config | one Windows PowerShell process; 25-40 ms polling; no visible flicker; no overlapping fallback ranges | PASS for process/config/verifier and Bruno body-click regression; primary fallback click OPEN |
 | P-08 | Telemetry/layout shifting | inspect consecutive top-bar captures | no flicker or horizontal shift | Not applicable: center telemetry is empty |
 
 ## Post-change acceptance gate
 
 Do not call the recovery complete unless all `OPEN` interaction items required by the product are either directly passed or explicitly handed off for a user-observed run. A passing verifier and static source checks do not override a failed or unperformed interaction.
 
-The blocking regressions are now directly covered: I-01/I-03/I-05/I-14/I-15, V-10/V-11, and P-06/P-09 pass. Overall acceptance is still partial for the remaining physical-click cases (I-04, I-06 through I-11), V-08/V-09, and I-13's wider app set.
+The blocking regressions are now covered at source/runtime level: I-01/I-03/I-05/I-14/I-15, V-10/V-11, and P-06/P-09 pass; I-04/I-06/I-07 also passed on the responsive secondary toolbar. Overall acceptance remains partial for I-16's primary fallback, durable bell/date capture, physical top corners, V-08/V-09, and I-13's wider app set.

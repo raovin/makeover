@@ -64,6 +64,25 @@ public static class MacMakeoverHotCornersNative {
   [DllImport("user32.dll")]
   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+  [DllImport("user32.dll")]
+  public static extern IntPtr WindowFromPoint(POINT point);
+
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+
+  public static bool IsFancyToolbarAtPoint(int x, int y) {
+    var point = new POINT { X = x, Y = y };
+    var hWnd = WindowFromPoint(point);
+    if (hWnd == IntPtr.Zero) return false;
+    var root = GetAncestor(hWnd, 2); // GA_ROOT
+    if (root != IntPtr.Zero) hWnd = root;
+    var title = new System.Text.StringBuilder(128);
+    var className = new System.Text.StringBuilder(128);
+    GetWindowText(hWnd, title, 128);
+    GetClassName(hWnd, className, 128);
+    return title.ToString() == "Fancy Toolbar" && className.ToString() == "Tauri Window";
+  }
+
   // Seelen flyout popups are sticky: they do not dismiss on an outside click. Hide any
   // visible Tauri popup window ("Bluetooth Popup", "Calendar Popup", ..., and the
   // network panel which is titled just "Network") that does not contain the click
@@ -139,26 +158,30 @@ function Read-HotCornerConfig {
     appleMenuZoneLeft = 24
     appleMenuZoneRight = 78
     appleMenuClickCooldownMilliseconds = 300
-    networkFlyoutClickEnabled = $false
-    networkFlyoutZoneLeftOffset = 355
-    networkFlyoutZoneRightOffset = 310
+    networkFlyoutClickEnabled = $true
+    networkFlyoutZoneLeftOffset = 292
+    networkFlyoutZoneRightOffset = 265
     networkFlyoutClickCooldownMilliseconds = 300
-    batteryQuickSettingsClickEnabled = $false
-    batteryQuickSettingsZoneLeftOffset = 310
-    batteryQuickSettingsZoneRightOffset = 222
+    bluetoothClickEnabled = $true
+    bluetoothZoneLeftOffset = 264
+    bluetoothZoneRightOffset = 241
+    bluetoothClickCooldownMilliseconds = 300
+    batteryQuickSettingsClickEnabled = $true
+    batteryQuickSettingsZoneLeftOffset = 240
+    batteryQuickSettingsZoneRightOffset = 169
     batteryQuickSettingsClickCooldownMilliseconds = 300
-    controlCenterClickEnabled = $false
-    topBarClickHeight = 40
-    controlCenterStatusZoneLeftOffset = 222
-    controlCenterStatusZoneRightOffset = 188
+    controlCenterClickEnabled = $true
+    topBarClickHeight = 18
+    controlCenterStatusZoneLeftOffset = 168
+    controlCenterStatusZoneRightOffset = 139
     controlCenterClickCooldownMilliseconds = 300
-    notificationCenterClickEnabled = $false
-    notificationCenterZoneLeftOffset = 186
-    notificationCenterZoneRightOffset = 140
+    notificationCenterClickEnabled = $true
+    notificationCenterZoneLeftOffset = 138
+    notificationCenterZoneRightOffset = 94
     notificationCenterClickCooldownMilliseconds = 300
-    calendarPopupClickEnabled = $false
-    calendarPopupZoneLeftOffset = 138
-    calendarPopupZoneRightOffset = 24
+    calendarPopupClickEnabled = $true
+    calendarPopupZoneLeftOffset = 93
+    calendarPopupZoneRightOffset = 4
     calendarPopupClickCooldownMilliseconds = 300
     topLeft = "None"
     topRight = "None"
@@ -567,6 +590,29 @@ function Test-BatteryQuickSettingsClickZone {
   return $X -ge $batteryZoneLeft -and $X -le $batteryZoneRight
 }
 
+function Test-BluetoothClickZone {
+  param(
+    [int]$X,
+    [int]$Y,
+    [System.Drawing.Rectangle]$Bounds,
+    [object]$Config
+  )
+
+  if (-not $Config.bluetoothClickEnabled) { return $false }
+  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+
+  $right = $Bounds.Right - 1
+  $top = $Bounds.Top
+  $cornerSize = [int]$Config.clickCornerSize
+  if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
+    return $false
+  }
+
+  $zoneLeft = $right - [int]$Config.bluetoothZoneLeftOffset
+  $zoneRight = $right - [int]$Config.bluetoothZoneRightOffset
+  return $X -ge $zoneLeft -and $X -le $zoneRight
+}
+
 function Test-NotificationCenterClickZone {
   param(
     [int]$X,
@@ -660,6 +706,7 @@ $enteredAt = Get-Date
 $lastTriggered = @{}
 $lastClickTriggered = @{}
 $lastNetworkFlyoutClick = [datetime]::MinValue
+$lastBluetoothClick = [datetime]::MinValue
 $lastBatteryQuickSettingsClick = [datetime]::MinValue
 $lastControlCenterClick = [datetime]::MinValue
 $lastNotificationCenterClick = [datetime]::MinValue
@@ -681,6 +728,12 @@ while ($true) {
     $leftMouseState = [int][MacMakeoverHotCornersNative]::GetAsyncKeyState(0x01)
     $leftMouseDown = ($leftMouseState -band 0x8000) -ne 0
     $leftMousePressed = (($leftMouseState -band 0x0001) -ne 0) -or ($leftMouseDown -and -not $wasLeftMouseDown)
+    $toolbarReceivesClick = if ($leftMousePressed) {
+      try { [MacMakeoverHotCornersNative]::IsFancyToolbarAtPoint($point.X, $point.Y) } catch { $false }
+    } else {
+      $false
+    }
+    $fallbackTopBarClick = $leftMousePressed -and -not $toolbarReceivesClick
     $now = Get-Date
 
     # Click-away dismissal for sticky Seelen popups (Network/Bluetooth/Calendar/
@@ -704,47 +757,57 @@ while ($true) {
       }
     }
 
-    if ($leftMousePressed -and (Test-NetworkFlyoutClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-NetworkFlyoutClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
       $networkFlyoutCooldownElapsed = ($now - $lastNetworkFlyoutClick).TotalMilliseconds -ge [int]$config.networkFlyoutClickCooldownMilliseconds
       if ($networkFlyoutCooldownElapsed) {
-        Write-HotCornerLog $config "TopBar click -> NetworkFlyout"
-        Invoke-HotCornerAction -Action "NetworkFlyout" -Config $config
+        Write-HotCornerLog $config "TopBar fallback click -> Network"
+        Start-MacMakeoverMenu -Command "network" -Config $config
         $lastNetworkFlyoutClick = $now
       }
     }
 
-    if ($leftMousePressed -and (Test-BatteryQuickSettingsClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-BluetoothClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+      $bluetoothCooldownElapsed = ($now - $lastBluetoothClick).TotalMilliseconds -ge [int]$config.bluetoothClickCooldownMilliseconds
+      if ($bluetoothCooldownElapsed) {
+        Write-HotCornerLog $config "TopBar fallback click -> Bluetooth"
+        Start-MacMakeoverMenu -Command "bluetooth" -Config $config
+        $lastBluetoothClick = $now
+      }
+    }
+
+    if ($fallbackTopBarClick -and (Test-BatteryQuickSettingsClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
       $batteryQuickSettingsCooldownElapsed = ($now - $lastBatteryQuickSettingsClick).TotalMilliseconds -ge [int]$config.batteryQuickSettingsClickCooldownMilliseconds
       if ($batteryQuickSettingsCooldownElapsed) {
-        Write-HotCornerLog $config "TopBar click -> QuickSettings"
-        Invoke-HotCornerAction -Action "QuickSettings" -Config $config
+        Write-HotCornerLog $config "TopBar fallback click -> ControlCenter (battery)"
+        Start-MacMakeoverMenu -Command "control" -Config $config
         $lastBatteryQuickSettingsClick = $now
       }
     }
 
-    if ($leftMousePressed -and (Test-NotificationCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-NotificationCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
       $notificationCenterCooldownElapsed = ($now - $lastNotificationCenterClick).TotalMilliseconds -ge [int]$config.notificationCenterClickCooldownMilliseconds
       if ($notificationCenterCooldownElapsed) {
-        Write-HotCornerLog $config "TopBar click -> NotificationCenter"
+        Write-HotCornerLog $config "TopBar fallback click -> NotificationCenter"
         Close-MacMakeoverMenuHostPanels -Config $config
         Invoke-HotCornerAction -Action "NotificationCenter" -Config $config
         $lastNotificationCenterClick = $now
       }
     }
 
-    if ($leftMousePressed -and (Test-CalendarPopupClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-CalendarPopupClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
       $calendarPopupCooldownElapsed = ($now - $lastCalendarPopupClick).TotalMilliseconds -ge [int]$config.calendarPopupClickCooldownMilliseconds
       if ($calendarPopupCooldownElapsed) {
-        Write-HotCornerLog $config "TopBar click -> CalendarPopup"
+        Write-HotCornerLog $config "TopBar fallback click -> CalendarPopup"
         Close-MacMakeoverMenuHostPanels -Config $config
+        Invoke-HotCornerAction -Action "NotificationCenter" -Config $config
         $lastCalendarPopupClick = $now
       }
     }
 
-    if ($leftMousePressed -and (Test-ControlCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-ControlCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
       $controlCenterCooldownElapsed = ($now - $lastControlCenterClick).TotalMilliseconds -ge [int]$config.controlCenterClickCooldownMilliseconds
       if ($controlCenterCooldownElapsed) {
-        Write-HotCornerLog $config "TopBar click -> ControlCenter"
+        Write-HotCornerLog $config "TopBar fallback click -> ControlCenter"
         Start-MacMakeoverMenu -Command "control" -Config $config
         $lastControlCenterClick = $now
       }

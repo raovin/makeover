@@ -1,6 +1,6 @@
 # Mac Makeover Recovery Audit Spec
 
-Status: recovery baseline, redesign implementation, and post-change verification recorded on 2026-07-10 (Europe/London). A real-use regression report subsequently exposed that the hot-corner helper treated negative-coordinate application clicks as PrimaryScreen's top-left corner. That critical defect was corrected and directly retested in Bruno with the helper running. Overall product acceptance remains partial because exact bell/date and some toolbar-click tests are still open.
+Status: recovery baseline, redesign implementation, and post-change verification recorded on 2026-07-10 (Europe/London). Real-use reports subsequently exposed two critical input defects: negative-coordinate application clicks could fire Show Desktop, and Seelen's primary DPI-scaled toolbar rendered full width while Windows exposed only a 15x15 hit target. The Show Desktop defect was directly corrected and retested in Bruno. The toolbar now has a guarded 19px fallback router that engages only when `WindowFromPoint` proves the Seelen toolbar did not receive the click. Overall acceptance remains partial until the primary-display fallback and date/notification surface receive a user-observed click pass.
 
 Baseline: `main` at `6819380`; the worktree was clean and matched `origin/main` before this audit began.
 
@@ -16,7 +16,7 @@ The recovery goal is a fast, restrained, Mac-inspired Windows desktop whose cust
 - Seelen shortcuts and task-switcher behavior remain disabled.
 - Apple, Control Center, Network, and Bluetooth actions open the intended surface without a visible terminal and without spawning duplicate MenuHost processes.
 - Bell and date/time open the Windows notification/calendar surface and do not stack over a custom popup.
-- The Apple and right-side controls remain item-owned; broad top-bar pixel zones remain disabled.
+- The Apple and normally responsive right-side controls remain item-owned; a bounded 19px fallback handles only a Seelen toolbar that Windows reports as click-through.
 - Top toolbar and WEG dock survive normal operation and a Seelen restart on every active monitor.
 - Maximized client content ends at each monitor's work area and is not covered by the dock.
 - Desktop-visible and maximized-window states are both visually coherent.
@@ -55,7 +55,8 @@ flowchart LR
     Protocols -->|"named-pipe command; start fallback"| MenuHost
     Toolbar -->|"bell / date"| Native
     MenuHost -->|"settings, lock, power actions"| Native
-    HotCorners -->|"top corner click = Show Desktop"| Native
+    HotCorners -->|"top corner click = Show Desktop; guarded right-side fallback"| Native
+    HotCorners -->|"network / Bluetooth / battery / sliders fallback"| MenuHost
     Launcher -->|"Alt+Space"| Native
 ```
 
@@ -65,12 +66,12 @@ Ownership boundaries:
 - MenuHost owns only Apple, Control Center, Network, and Bluetooth popups. It uses `WS_EX_NOACTIVATE`, `ShowWithoutActivation`, and an Alt/foreground dismissal timer.
 - Protocol handlers use headless `conhost` launchers to write to the resident MenuHost pipe, with a self-healing `--show` fallback.
 - Windows owns Alt+Tab, notification/calendar UI, settings, lock, sleep, restart, and shutdown.
-- The hot-corner helper polls only for configured corner clicks and popup cleanup; all broad item routing is disabled in current configuration.
+- The hot-corner helper polls for configured corner clicks, popup cleanup, and six non-overlapping right-side fallback zones. Those zones are evaluated only when `WindowFromPoint` does not resolve to Seelen's `Fancy Toolbar`, preventing double firing on the responsive display.
 
 ## Environment and baseline evidence
 
 - Active displays: two. DPI-aware bounds are 1920x1200 primary and 1920x1080 secondary, with the secondary positioned above and left of the primary.
-- Both displays now expose the intended 28 px toolbar and a smaller compact-dock reservation; a direct maximized Explorer run stopped above both custom surfaces.
+- Both displays now expose a stable compact 19px toolbar and a smaller compact-dock reservation; a direct maximized Explorer run stopped above both custom surfaces. The experimental 28px toolbar was rolled back when it did not correct Seelen's primary-display hit region.
 - Running core components: Seelen UI 2.7.4, `slu-service`, one `MacMakeover.MenuHost`, Windows PowerShell hot-corner helper, PowerToys, and Command Palette.
 - RustDesk, Tailscale, and TeamViewer processes were observed but not inspected or changed.
 - Repo and live copies match for the changed Seelen settings, toolbar state, toolbar CSS, dock CSS, and the network plugin.
@@ -108,9 +109,9 @@ Repeated open-close cycles kept one responsive MenuHost PID, but resource use di
 
 Seelen rewrote live WEG state with runtime package paths and a transient Terminal entry. Recent Seelen logs contain a missing Codex icon path error. Absolute versioned WindowsApps paths make restore snapshots fragile across app updates and machines.
 
-### Low: documentation contains stale architecture claims
+### High, mitigated pending user click: primary DPI-scaled toolbar is visually full-width but click-through
 
-The handover still says some normal clicks are caught by the hot-corner top-bar router even though all broad click-zone booleans are disabled and the toolbar owns the actions. It also contains old repository/remote statements. These contradictions increase recovery risk.
+Computer-use capture reports the secondary toolbar as a 1920x19 window, but the primary toolbar as a 15x15 target plus a related 1280x19 render. A coordinate click on a primary status icon was rejected because `WindowFromPoint` resolved to Explorer's `FolderView`, not Seelen. Restarting Seelen and restoring the prior 19px visual settings did not change this native hit region, so the image-generated 28px CSS was not the cause. The helper now checks the real window under every top-bar click and routes calibrated Network, Bluetooth, Battery, Control, Notifications, and Date zones only on the click-through instance. The primary route remains user-observed rather than automation-proven because safe UI automation refuses to inject a click through a mismatched target.
 
 ### Visual baseline
 
@@ -123,7 +124,7 @@ The two toolbars and docks are present, dock backgrounds are opaque, maximized c
 | Seelen toolbar/WEG ownership | Both monitors render; work areas are reserved; verifier guards performance modes and WEG enablement | Medium: schema and app-path drift remain external dependencies |
 | MenuHost popup ownership | Fast warm launches, no activation, one process, Alt dismissal works for Apple | Medium-high: primary-monitor anchoring and synchronous probes |
 | URI launch layer | Correct registry commands; no visible terminal in Apple test | Medium: duplicated installers and transient shell ownership |
-| Hot-corner helper | Dwell and broad zones disabled; one Windows PowerShell instance | Medium: large dormant routing/fallback surface around a small active requirement |
+| Hot-corner helper | Monitor-aware bounds; one process; guarded 19px fallback; verifier rejects overlapping zones | Medium: positional fallback remains a compatibility layer for Seelen's mixed-DPI hit-test defect |
 | QA harness | Static guard coverage is strong | High until per-monitor captures and missing interactions are gated explicitly |
 
 ## Architecture decision: simplify current architecture
@@ -132,7 +133,7 @@ Keep the successful ownership model, but reduce and harden it rather than rebuil
 
 1. Keep Seelen as the sole toolbar/dock owner and keep native Windows Alt+Tab/search/notification surfaces.
 2. Keep one resident MenuHost for the four custom panels; keep popup placement monitor-aware and keep background probes cancellable with real timeouts.
-3. Keep item-owned toolbar actions and delete dormant broad pixel-zone and WPF warm-runspace paths only after equivalent startup/recovery tests exist.
+3. Keep item-owned toolbar actions. Retain the bounded, `WindowFromPoint`-guarded fallback only while Seelen's primary mixed-DPI toolbar remains click-through; replace it with native item clicks when the upstream hit region is fixed.
 4. Consolidate protocol registration and notification/menu dismissal behavior in a later task instead of adding another helper.
 5. Make per-monitor screenshot output and interaction gates first-class verification artifacts.
 
@@ -148,16 +149,18 @@ A rebuild is not justified: the baseline passes static guards, renders coherentl
 - `fit-windows-to-workarea.ps1 -WhatIf` returned no repair candidates.
 - Final inspected screenshot set: `qa/visual-qa-20260710-123039/`, including both displays' full/top/bottom files.
 - Both docks remained opaque and below maximized client content; both menu bars remained aligned with no hairline or clipping regression.
-- Image-generated direction was implemented as an opaque 28 px navy toolbar, inline bounded notification count, and a compact opaque dock with reduced magnification and no compositor blur.
+- The image-generated 28px toolbar direction was rolled back after it did not repair the native hit target. The final live state uses the stable compact 19px frosted bar, keeps the redesigned compact opaque dock, and retains the inline bounded notification count.
 - MenuHost no longer enters the system topmost band; Apple and Control panels both yielded to native Alt+Tab.
 - Snipping Tool `New` reached capture mode, and the overlay was dismissed back to a clean desktop.
 - Control Center's blocking output read was replaced by cancellable process waiting, timed-out child-tree termination, and per-form cancellation. A warm repeat batch settled at +4 handles with no child process.
 - Hot-corner detection now resolves `Screen.FromPoint` and performs a full monitor-bounds check before classifying a corner. The pre-fix log showed repeated `TopLeft click -> ShowDesktop` entries for Bruno clicks; post-fix single and double body clicks left Bruno visible with no new entry.
+- Primary-toolbar fallback routing now resolves `WindowFromPoint`, stays inside y=0..18, and uses six calibrated non-overlapping zones. Network, Bluetooth, Battery, and Control item clicks passed on the responsive secondary toolbar; the primary fallback needs the final user click check.
+- Final post-rollback inspected screenshot set: `qa/visual-qa-20260710-161422/`. Both displays show the compact bar, the notification total `23` fully inside its target, and healthy docks after a Seelen restart.
 - Final inspected screenshot set: `qa/visual-qa-20260710-140026/`, including both displays' full/top/bottom files after the redesign.
 - Product acceptance is not complete: physical corner clicks, bell/date surface capture, minimized desktop, the wider maximize app set, and a user-observed lock/PIN check remain open.
 
 ## Recovery-pass scope and stop gates
 
-This pass changed only MenuHost behavior/lifecycle, the verifier, Seelen toolbar/dock settings and themes, current WEG pin paths, the generated design reference, and the four recovery documents.
+This pass changed only MenuHost behavior/lifecycle, the verifier, Seelen toolbar/dock settings and themes, the hot-corner compatibility router, current WEG pin paths, the generated design reference, and the four recovery documents.
 
 Stop and roll back a runtime change if any of the following occurs: MenuHost activates or enters Alt+Tab; a panel fails to paint; Seelen bars/docks disappear; work-area bounds change; a new MenuHost process remains; parser/build/static verification fails; or post-change screenshots are worse than the baseline.

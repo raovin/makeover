@@ -61,7 +61,7 @@ right:
   template: 'if (typeof batteries === "undefined" || !batteries.length) return icon("TbPlugConnected"); const pct = Math.round(batteries.reduce((total, battery) => total + battery.percentage, 0) / batteries.length); const charging = (typeof power !== "undefined" && power.acLineStatus === 1) || batteries.some((battery) => battery.state === "charging"); const lvl = pct > 90 ? icon("PiBatteryFullFill") : pct > 66 ? icon("PiBatteryHighFill") : pct > 33 ? icon("PiBatteryMediumFill") : pct > 5 ? icon("PiBatteryLowFill") : icon("PiBatteryWarning"); const out = []; if (charging) { out.push(icon("BsLightningChargeFill")); out.push(" "); } out.push(lvl); out.push(" " + pct + "%"); return out;'
   tooltip: return "";
   badge: null
-  onClick: null
+  onClick: 'open("macmakeover-control-center:")'
   onWheelUp: null
   onWheelDown: null
   style:

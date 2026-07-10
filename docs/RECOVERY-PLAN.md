@@ -2,17 +2,18 @@
 
 Decision: **simplify** the current Seelen + MenuHost architecture; do not rebuild. Baseline commit: `6819380`.
 
-Execution status: Tasks 1-4 now pass for the reported Snipping Tool, Alt+Tab, notification clipping, dock/work-area, visual, and warm performance gates. Remaining physical click-path coverage stays explicit rather than blocking this focused recovery.
+Execution status: Tasks 1-4 pass for Snipping Tool, Alt+Tab, notification clipping, dock/work-area, visual, and warm performance gates. The negative-coordinate Show Desktop regression is directly fixed. A guarded compatibility route is live for Seelen's primary mixed-DPI click-through toolbar; its final user-observed click pass remains explicit.
 
 ## Immediate redesign recovery executed
 
-- Replaced the 19 px blurred toolbar with a calm opaque 28 px navy bar based on `docs/design/macos-recovery-concept-20260710.png`.
+- Tried the image-generated 28px navy toolbar direction, then rolled it back after proving it did not repair Seelen's native primary hit region. The final live bar is the stable compact 19px frosted layout.
 - Moved notification counts out of Seelen's screen-edge badge layer and inline into a 34-52 px target, eliminating clipping.
 - Reduced WEG size, spacing, padding, and magnification; removed compositor blur and blue glow while retaining an opaque reserved work area.
 - Removed `HWND_TOPMOST`/`TopMost=true` from MenuHost. Panels now use `HWND_TOP` without activation and yield to Alt+Tab and screen-capture surfaces.
 - Made Control Center probes cancellable with a real timeout/child-process kill and idempotent form cleanup.
 - Refreshed stale Outlook, Codex, and Claude WindowsApps pin paths that produced WEG `NotFound` errors after application updates.
 - Corrected hot-corner monitor selection: the helper now uses the monitor under the pointer and rejects points outside that monitor before classifying a corner. This prevents every negative-coordinate click on the upper-left display from firing Show Desktop.
+- Added a guarded right-side compatibility router for the DPI-scaled primary toolbar. It runs only when `WindowFromPoint` does not find Seelen, is limited to y=0..18, has non-overlapping Network/Bluetooth/Battery/Control/Notifications/Date zones, and is rejected by the verifier if those safety properties drift.
 
 ## Ordered tasks
 
@@ -63,7 +64,7 @@ Highest-priority follow-up is the Control Center resource-retention failure: iso
 ## Required evidence bundle
 
 - Pre-change: `qa/visual-qa-20260710-121233/` and `qa/recovery-audit-20260710/baseline-*`.
-- Post-change: `qa/visual-qa-20260710-123039/`, containing the virtual desktop, legacy primary crops, and both monitors' full/top/bottom images after Seelen restart.
+- Post-change: `qa/visual-qa-20260710-161422/`, containing the virtual desktop, legacy primary crops, and both monitors' full/top/bottom images after the final 19px toolbar rollback and Seelen restart.
 - Interaction screenshots: Apple, Control Center, Network, Bluetooth, notification/calendar, minimized desktop, maximized app, and post-Alt+Tab dismissal.
 - Text evidence: verifier output, Release build output, parser result, Seelen log health, MenuHost process/resource sample, `git diff --check`, and final `git status --short`.
 
@@ -71,4 +72,4 @@ Highest-priority follow-up is the Control Center resource-retention failure: iso
 
 Commit only the coherent recovery change set. Local QA screenshots are transient/ignored unless explicitly requested for source control. If direct interaction coverage remains blocked, commit the audit and bounded fixes only if their own verification passes, and leave the overall product acceptance state as partial.
 
-The bounded fixes passed their build/parser/verifier/visual/restart gates. The open physical interaction and performance items remain explicit release gates rather than blockers to retaining these two independently verified improvements.
+The bounded fixes passed parser/verifier/visual/restart gates. The secondary toolbar's Network, Bluetooth, Battery, and Control clicks passed directly. The primary fallback, bell/date surface capture, and remaining physical interaction items stay explicit release gates.
