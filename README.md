@@ -52,6 +52,7 @@ mac-makeover/
     CODEX-HANDOVER.md     # Historical project handover, sanitized
     CLAUDE.mac-makeover.md # Seelen/Apple-menu guardrails for Claude Code
     CLAUDE-DESIGN-PROMPT.md # Paste-ready prompt for a Claude Design visual pass
+    SPEC-KIT-REVIEW-PROMPT.md # Paste-ready full audit/recovery prompt
   registry/               # User-level appearance registry exports
   scripts/
     backup-current.ps1    # Refresh this package from the current machine
