@@ -14,13 +14,14 @@ $hotCornerCreatedNew = $false
 $script:HotCornerMutex = New-Object System.Threading.Mutex($true, "Local\MacMakeoverHotCorners", [ref]$hotCornerCreatedNew)
 if (-not $hotCornerCreatedNew) { exit }
 
-Add-Type -AssemblyName System.Windows.Forms
-
 $signature = @"
 using System;
 using System.Runtime.InteropServices;
 
 public static class MacMakeoverHotCornersNative {
+  [DllImport("user32.dll")]
+  public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
+
   [StructLayout(LayoutKind.Sequential)]
   public struct POINT {
     public int X;
@@ -128,6 +129,8 @@ public static class MacMakeoverHotCornersNative {
 }
 "@
 Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue
+[MacMakeoverHotCornersNative]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null # PER_MONITOR_AWARE_V2
+Add-Type -AssemblyName System.Windows.Forms
 
 $script:PackageRoot = Split-Path -Parent $PSScriptRoot
 $script:AppleMenuScriptPath = Join-Path $PSScriptRoot "Show-MacAppleMenu.ps1"
@@ -520,23 +523,25 @@ function Test-ControlCenterClickZone {
     [int]$X,
     [int]$Y,
     [System.Drawing.Rectangle]$Bounds,
-    [object]$Config
+    [object]$Config,
+    [int]$TopBarHeight,
+    [double]$HorizontalScale
   )
 
   if (-not $Config.controlCenterClickEnabled) { return $false }
-  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+  if ($Y -gt ($Bounds.Top + $TopBarHeight)) { return $false }
 
   $right = $Bounds.Right - 1
   $top = $Bounds.Top
-  $cornerSize = [int]$Config.clickCornerSize
+  $cornerSize = [int][Math]::Round([int]$Config.clickCornerSize * $HorizontalScale)
 
   # Preserve the exact physical corner for Show Desktop.
   if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
     return $false
   }
 
-  $statusZoneLeft = $right - [int]$Config.controlCenterStatusZoneLeftOffset
-  $statusZoneRight = $right - [int]$Config.controlCenterStatusZoneRightOffset
+  $statusZoneLeft = $right - [int][Math]::Round([int]$Config.controlCenterStatusZoneLeftOffset * $HorizontalScale)
+  $statusZoneRight = $right - [int][Math]::Round([int]$Config.controlCenterStatusZoneRightOffset * $HorizontalScale)
   return $X -ge $statusZoneLeft -and $X -le $statusZoneRight
 }
 
@@ -545,23 +550,25 @@ function Test-NetworkFlyoutClickZone {
     [int]$X,
     [int]$Y,
     [System.Drawing.Rectangle]$Bounds,
-    [object]$Config
+    [object]$Config,
+    [int]$TopBarHeight,
+    [double]$HorizontalScale
   )
 
   if (-not $Config.networkFlyoutClickEnabled) { return $false }
-  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+  if ($Y -gt ($Bounds.Top + $TopBarHeight)) { return $false }
 
   $right = $Bounds.Right - 1
   $top = $Bounds.Top
-  $cornerSize = [int]$Config.clickCornerSize
+  $cornerSize = [int][Math]::Round([int]$Config.clickCornerSize * $HorizontalScale)
 
   # Preserve the exact physical corner for Show Desktop.
   if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
     return $false
   }
 
-  $networkZoneLeft = $right - [int]$Config.networkFlyoutZoneLeftOffset
-  $networkZoneRight = $right - [int]$Config.networkFlyoutZoneRightOffset
+  $networkZoneLeft = $right - [int][Math]::Round([int]$Config.networkFlyoutZoneLeftOffset * $HorizontalScale)
+  $networkZoneRight = $right - [int][Math]::Round([int]$Config.networkFlyoutZoneRightOffset * $HorizontalScale)
   return $X -ge $networkZoneLeft -and $X -le $networkZoneRight
 }
 
@@ -570,23 +577,25 @@ function Test-BatteryQuickSettingsClickZone {
     [int]$X,
     [int]$Y,
     [System.Drawing.Rectangle]$Bounds,
-    [object]$Config
+    [object]$Config,
+    [int]$TopBarHeight,
+    [double]$HorizontalScale
   )
 
   if (-not $Config.batteryQuickSettingsClickEnabled) { return $false }
-  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+  if ($Y -gt ($Bounds.Top + $TopBarHeight)) { return $false }
 
   $right = $Bounds.Right - 1
   $top = $Bounds.Top
-  $cornerSize = [int]$Config.clickCornerSize
+  $cornerSize = [int][Math]::Round([int]$Config.clickCornerSize * $HorizontalScale)
 
   # Preserve the exact physical corner for Show Desktop.
   if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
     return $false
   }
 
-  $batteryZoneLeft = $right - [int]$Config.batteryQuickSettingsZoneLeftOffset
-  $batteryZoneRight = $right - [int]$Config.batteryQuickSettingsZoneRightOffset
+  $batteryZoneLeft = $right - [int][Math]::Round([int]$Config.batteryQuickSettingsZoneLeftOffset * $HorizontalScale)
+  $batteryZoneRight = $right - [int][Math]::Round([int]$Config.batteryQuickSettingsZoneRightOffset * $HorizontalScale)
   return $X -ge $batteryZoneLeft -and $X -le $batteryZoneRight
 }
 
@@ -595,21 +604,23 @@ function Test-BluetoothClickZone {
     [int]$X,
     [int]$Y,
     [System.Drawing.Rectangle]$Bounds,
-    [object]$Config
+    [object]$Config,
+    [int]$TopBarHeight,
+    [double]$HorizontalScale
   )
 
   if (-not $Config.bluetoothClickEnabled) { return $false }
-  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+  if ($Y -gt ($Bounds.Top + $TopBarHeight)) { return $false }
 
   $right = $Bounds.Right - 1
   $top = $Bounds.Top
-  $cornerSize = [int]$Config.clickCornerSize
+  $cornerSize = [int][Math]::Round([int]$Config.clickCornerSize * $HorizontalScale)
   if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
     return $false
   }
 
-  $zoneLeft = $right - [int]$Config.bluetoothZoneLeftOffset
-  $zoneRight = $right - [int]$Config.bluetoothZoneRightOffset
+  $zoneLeft = $right - [int][Math]::Round([int]$Config.bluetoothZoneLeftOffset * $HorizontalScale)
+  $zoneRight = $right - [int][Math]::Round([int]$Config.bluetoothZoneRightOffset * $HorizontalScale)
   return $X -ge $zoneLeft -and $X -le $zoneRight
 }
 
@@ -618,23 +629,25 @@ function Test-NotificationCenterClickZone {
     [int]$X,
     [int]$Y,
     [System.Drawing.Rectangle]$Bounds,
-    [object]$Config
+    [object]$Config,
+    [int]$TopBarHeight,
+    [double]$HorizontalScale
   )
 
   if (-not $Config.notificationCenterClickEnabled) { return $false }
-  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+  if ($Y -gt ($Bounds.Top + $TopBarHeight)) { return $false }
 
   $right = $Bounds.Right - 1
   $top = $Bounds.Top
-  $cornerSize = [int]$Config.clickCornerSize
+  $cornerSize = [int][Math]::Round([int]$Config.clickCornerSize * $HorizontalScale)
 
   # Preserve the exact physical corner for Show Desktop.
   if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
     return $false
   }
 
-  $notificationZoneLeft = $right - [int]$Config.notificationCenterZoneLeftOffset
-  $notificationZoneRight = $right - [int]$Config.notificationCenterZoneRightOffset
+  $notificationZoneLeft = $right - [int][Math]::Round([int]$Config.notificationCenterZoneLeftOffset * $HorizontalScale)
+  $notificationZoneRight = $right - [int][Math]::Round([int]$Config.notificationCenterZoneRightOffset * $HorizontalScale)
   return $X -ge $notificationZoneLeft -and $X -le $notificationZoneRight
 }
 
@@ -643,23 +656,25 @@ function Test-CalendarPopupClickZone {
     [int]$X,
     [int]$Y,
     [System.Drawing.Rectangle]$Bounds,
-    [object]$Config
+    [object]$Config,
+    [int]$TopBarHeight,
+    [double]$HorizontalScale
   )
 
   if (-not $Config.calendarPopupClickEnabled) { return $false }
-  if ($Y -gt ($Bounds.Top + [int]$Config.topBarClickHeight)) { return $false }
+  if ($Y -gt ($Bounds.Top + $TopBarHeight)) { return $false }
 
   $right = $Bounds.Right - 1
   $top = $Bounds.Top
-  $cornerSize = [int]$Config.clickCornerSize
+  $cornerSize = [int][Math]::Round([int]$Config.clickCornerSize * $HorizontalScale)
 
   # Preserve the exact physical corner for Show Desktop.
   if ($X -ge ($right - $cornerSize) -and $Y -le ($top + $cornerSize)) {
     return $false
   }
 
-  $calendarZoneLeft = $right - [int]$Config.calendarPopupZoneLeftOffset
-  $calendarZoneRight = $right - [int]$Config.calendarPopupZoneRightOffset
+  $calendarZoneLeft = $right - [int][Math]::Round([int]$Config.calendarPopupZoneLeftOffset * $HorizontalScale)
+  $calendarZoneRight = $right - [int][Math]::Round([int]$Config.calendarPopupZoneRightOffset * $HorizontalScale)
   return $X -ge $calendarZoneLeft -and $X -le $calendarZoneRight
 }
 
@@ -701,6 +716,13 @@ if (-not $config.enabled) {
 Write-HotCornerLog $config "Hot corners started from $PSCommandPath with config $ConfigPath."
 Invoke-MacMakeoverMenuWarmUp $config
 
+foreach ($startupScreen in [System.Windows.Forms.Screen]::AllScreens) {
+  $logicalTopBarPixels = [Math]::Max(1, [int]$config.topBarClickHeight + 1)
+  $physicalTopBarPixels = [Math]::Max($logicalTopBarPixels, $startupScreen.WorkingArea.Top - $startupScreen.Bounds.Top)
+  $fallbackScale = $physicalTopBarPixels / [double]$logicalTopBarPixels
+  Write-HotCornerLog $config ("DPI screen {0} bounds={1} work={2} topBarPixels={3} fallbackScale={4:N3}" -f $startupScreen.DeviceName, $startupScreen.Bounds, $startupScreen.WorkingArea, $physicalTopBarPixels, $fallbackScale)
+}
+
 $activeCorner = $null
 $enteredAt = Get-Date
 $lastTriggered = @{}
@@ -722,7 +744,12 @@ while ($true) {
     # Resolve the monitor under the pointer. PrimaryScreen is incorrect for the
     # negative coordinates used by displays positioned above or left of primary.
     $screenPoint = [System.Drawing.Point]::new($point.X, $point.Y)
-    $bounds = [System.Windows.Forms.Screen]::FromPoint($screenPoint).Bounds
+    $screen = [System.Windows.Forms.Screen]::FromPoint($screenPoint)
+    $bounds = $screen.Bounds
+    $logicalTopBarPixels = [Math]::Max(1, [int]$config.topBarClickHeight + 1)
+    $physicalTopBarPixels = [Math]::Max($logicalTopBarPixels, $screen.WorkingArea.Top - $bounds.Top)
+    $effectiveTopBarHeight = $physicalTopBarPixels - 1
+    $topBarHorizontalScale = $physicalTopBarPixels / [double]$logicalTopBarPixels
     $corner = Get-CornerAtPoint -X $point.X -Y $point.Y -Bounds $bounds -CornerSize ([int]$config.cornerSize)
     $clickCorner = Get-CornerAtPoint -X $point.X -Y $point.Y -Bounds $bounds -CornerSize ([int]$config.clickCornerSize)
     $leftMouseState = [int][MacMakeoverHotCornersNative]::GetAsyncKeyState(0x01)
@@ -736,12 +763,17 @@ while ($true) {
     $fallbackTopBarClick = $leftMousePressed -and -not $toolbarReceivesClick
     $now = Get-Date
 
+    if ($fallbackTopBarClick -and $point.Y -ge $bounds.Top -and $point.Y -le ($bounds.Top + $effectiveTopBarHeight)) {
+      $rightOffset = ($bounds.Right - 1) - $point.X
+      Write-HotCornerLog $config ("TopBar fallback probe screen={0} x={1} y={2} rightOffset={3} scale={4:N3}" -f $screen.DeviceName, $point.X, $point.Y, $rightOffset, $topBarHorizontalScale)
+    }
+
     # Click-away dismissal for sticky Seelen popups (Network/Bluetooth/Calendar/
     # Notifications): any click below the top bar hides popups that do not contain the
     # click point. Clicks ON the bar only clear lingering hover tooltips, so the popup
     # being opened by that click is never dismissed by us in the same instant.
     if ($leftMousePressed) {
-      if ($point.Y -gt ($bounds.Top + [int]$config.topBarClickHeight)) {
+      if ($point.Y -gt ($bounds.Top + $effectiveTopBarHeight)) {
         try { [MacMakeoverHotCornersNative]::HideSeelenPopupsOutside($point.X, $point.Y) } catch { }
       } else {
         try { [MacMakeoverHotCornersNative]::HideSeelenTooltips() } catch { }
@@ -757,7 +789,7 @@ while ($true) {
       }
     }
 
-    if ($fallbackTopBarClick -and (Test-NetworkFlyoutClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-NetworkFlyoutClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config -TopBarHeight $effectiveTopBarHeight -HorizontalScale $topBarHorizontalScale)) {
       $networkFlyoutCooldownElapsed = ($now - $lastNetworkFlyoutClick).TotalMilliseconds -ge [int]$config.networkFlyoutClickCooldownMilliseconds
       if ($networkFlyoutCooldownElapsed) {
         Write-HotCornerLog $config "TopBar fallback click -> Network"
@@ -766,7 +798,7 @@ while ($true) {
       }
     }
 
-    if ($fallbackTopBarClick -and (Test-BluetoothClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-BluetoothClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config -TopBarHeight $effectiveTopBarHeight -HorizontalScale $topBarHorizontalScale)) {
       $bluetoothCooldownElapsed = ($now - $lastBluetoothClick).TotalMilliseconds -ge [int]$config.bluetoothClickCooldownMilliseconds
       if ($bluetoothCooldownElapsed) {
         Write-HotCornerLog $config "TopBar fallback click -> Bluetooth"
@@ -775,7 +807,7 @@ while ($true) {
       }
     }
 
-    if ($fallbackTopBarClick -and (Test-BatteryQuickSettingsClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-BatteryQuickSettingsClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config -TopBarHeight $effectiveTopBarHeight -HorizontalScale $topBarHorizontalScale)) {
       $batteryQuickSettingsCooldownElapsed = ($now - $lastBatteryQuickSettingsClick).TotalMilliseconds -ge [int]$config.batteryQuickSettingsClickCooldownMilliseconds
       if ($batteryQuickSettingsCooldownElapsed) {
         Write-HotCornerLog $config "TopBar fallback click -> ControlCenter (battery)"
@@ -784,7 +816,7 @@ while ($true) {
       }
     }
 
-    if ($fallbackTopBarClick -and (Test-NotificationCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-NotificationCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config -TopBarHeight $effectiveTopBarHeight -HorizontalScale $topBarHorizontalScale)) {
       $notificationCenterCooldownElapsed = ($now - $lastNotificationCenterClick).TotalMilliseconds -ge [int]$config.notificationCenterClickCooldownMilliseconds
       if ($notificationCenterCooldownElapsed) {
         Write-HotCornerLog $config "TopBar fallback click -> NotificationCenter"
@@ -794,7 +826,7 @@ while ($true) {
       }
     }
 
-    if ($fallbackTopBarClick -and (Test-CalendarPopupClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-CalendarPopupClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config -TopBarHeight $effectiveTopBarHeight -HorizontalScale $topBarHorizontalScale)) {
       $calendarPopupCooldownElapsed = ($now - $lastCalendarPopupClick).TotalMilliseconds -ge [int]$config.calendarPopupClickCooldownMilliseconds
       if ($calendarPopupCooldownElapsed) {
         Write-HotCornerLog $config "TopBar fallback click -> CalendarPopup"
@@ -804,7 +836,7 @@ while ($true) {
       }
     }
 
-    if ($fallbackTopBarClick -and (Test-ControlCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config)) {
+    if ($fallbackTopBarClick -and (Test-ControlCenterClickZone -X $point.X -Y $point.Y -Bounds $bounds -Config $config -TopBarHeight $effectiveTopBarHeight -HorizontalScale $topBarHorizontalScale)) {
       $controlCenterCooldownElapsed = ($now - $lastControlCenterClick).TotalMilliseconds -ge [int]$config.controlCenterClickCooldownMilliseconds
       if ($controlCenterCooldownElapsed) {
         Write-HotCornerLog $config "TopBar fallback click -> ControlCenter"

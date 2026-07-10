@@ -569,6 +569,11 @@ if (Test-Path -LiteralPath $HotCornersScriptPath) {
     Write-Warning "Top-bar fallback routing cannot distinguish a working Seelen hit target from a click-through one. This can double-fire responsive toolbar items."
     $VerificationFailed = $true
   }
+
+  if ($hotCornersScript -notmatch 'SetThreadDpiAwarenessContext' -or $hotCornersScript -notmatch '\$physicalTopBarPixels' -or $hotCornersScript -notmatch '\$topBarHorizontalScale') {
+    Write-Warning "Top-bar fallback routing is not DPI-coordinate-safe. GetCursorPos uses physical pixels, so monitor bounds, toolbar height, and horizontal offsets must use the same per-monitor coordinate space."
+    $VerificationFailed = $true
+  }
 }
 
 if (Test-Path -LiteralPath $ShortcutPath) {

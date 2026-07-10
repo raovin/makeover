@@ -1,6 +1,6 @@
 # Mac Makeover Recovery Audit Spec
 
-Status: recovery baseline, redesign implementation, and post-change verification recorded on 2026-07-10 (Europe/London). Real-use reports subsequently exposed two critical input defects: negative-coordinate application clicks could fire Show Desktop, and Seelen's primary DPI-scaled toolbar rendered full width while Windows exposed only a 15x15 hit target. The Show Desktop defect was directly corrected and retested in Bruno. The toolbar now has a guarded 19px fallback router that engages only when `WindowFromPoint` proves the Seelen toolbar did not receive the click. A second acceptance round at 19:39-20:00 passed Bruno, Alt+Tab, restart, work-area, visual, build, parser, and popup performance checks, but proved that the bell path can leave a hidden Notification Center window owning foreground focus. Overall acceptance remains partial until that native notification failure and the primary-display fallback receive user-observed passes.
+Status: recovery baseline, redesign implementation, and post-change verification recorded on 2026-07-10 (Europe/London). Real-use reports subsequently exposed two critical input defects: negative-coordinate application clicks could fire Show Desktop, and Seelen's primary DPI-scaled toolbar rendered full width while Windows exposed only a 15x15 hit target. The Show Desktop defect was directly corrected and retested in Bruno. The toolbar now has a guarded, per-monitor-scaled fallback router that engages only when `WindowFromPoint` proves the Seelen toolbar did not receive the click. A second acceptance round at 19:39-20:00 passed Bruno, Alt+Tab, restart, work-area, visual, build, parser, and popup performance checks, but proved that the bell path can leave a hidden Notification Center window owning foreground focus. Overall acceptance remains partial until that native notification failure and the primary-display fallback receive user-observed passes.
 
 Baseline: `main` at `6819380`; the worktree was clean and matched `origin/main` before this audit began.
 
@@ -16,7 +16,7 @@ The recovery goal is a fast, restrained, Mac-inspired Windows desktop whose cust
 - Seelen shortcuts and task-switcher behavior remain disabled.
 - Apple, Control Center, Network, and Bluetooth actions open the intended surface without a visible terminal and without spawning duplicate MenuHost processes.
 - Bell and date/time open the Windows notification/calendar surface and do not stack over a custom popup.
-- The Apple and normally responsive right-side controls remain item-owned; a bounded 19px fallback handles only a Seelen toolbar that Windows reports as click-through.
+- The Apple and normally responsive right-side controls remain item-owned; a work-area-bounded, per-monitor-scaled fallback handles only a Seelen toolbar that Windows reports as click-through.
 - Top toolbar and WEG dock survive normal operation and a Seelen restart on every active monitor.
 - Maximized client content ends at each monitor's work area and is not covered by the dock.
 - Desktop-visible and maximized-window states are both visually coherent.
@@ -124,7 +124,7 @@ The two toolbars and docks are present, dock backgrounds are opaque, maximized c
 | Seelen toolbar/WEG ownership | Both monitors render; work areas are reserved; verifier guards performance modes and WEG enablement | Medium: schema and app-path drift remain external dependencies |
 | MenuHost popup ownership | Fast warm launches, no activation, one process, Alt dismissal works for Apple | Medium-high: primary-monitor anchoring and synchronous probes |
 | URI launch layer | Correct registry commands; no visible terminal in Apple test | Medium: duplicated installers and transient shell ownership |
-| Hot-corner helper | Monitor-aware bounds; one process; guarded 19px fallback; verifier rejects overlapping zones | Medium: positional fallback remains a compatibility layer for Seelen's mixed-DPI hit-test defect |
+| Hot-corner helper | Per-monitor-v2 bounds; one process; work-area-bounded fallback; verifier rejects overlapping/unscaled zones | Medium: positional fallback remains a compatibility layer for Seelen's mixed-DPI hit-test defect |
 | QA harness | Static guard coverage is strong | High until per-monitor captures and missing interactions are gated explicitly |
 
 ## Architecture decision: simplify current architecture
@@ -154,7 +154,8 @@ A rebuild is not justified: the baseline passes static guards, renders coherentl
 - Snipping Tool `New` reached capture mode, and the overlay was dismissed back to a clean desktop.
 - Control Center's blocking output read was replaced by cancellable process waiting, timed-out child-tree termination, and per-form cancellation. A warm repeat batch settled at +4 handles with no child process.
 - Hot-corner detection now resolves `Screen.FromPoint` and performs a full monitor-bounds check before classifying a corner. The pre-fix log showed repeated `TopLeft click -> ShowDesktop` entries for Bruno clicks; post-fix single and double body clicks left Bruno visible with no new entry.
-- Primary-toolbar fallback routing now resolves `WindowFromPoint`, stays inside y=0..18, and uses six calibrated non-overlapping zones. Network, Bluetooth, Battery, and Control item clicks passed on the responsive secondary toolbar; the primary fallback needs the final user click check.
+- Primary-toolbar fallback routing now resolves `WindowFromPoint`, stays inside the monitor's reserved toolbar work area, and uses six calibrated non-overlapping zones. Network, Bluetooth, Battery, and Control item clicks passed on the responsive secondary toolbar; the primary fallback needs the final user click check.
+- A later user check proved the first primary fallback was inert: `GetCursorPos` supplied physical 1920px coordinates while `Screen.FromPoint` supplied DPI-virtualized 1280px bounds, so all right-side clicks missed their zones. The helper now sets its polling thread to per-monitor-v2 DPI awareness, derives the physical toolbar height from the monitor work area, and scales horizontal offsets by that height. Live startup evidence is `DISPLAY1 1920x1200`, `topBarPixels=29`, `fallbackScale=1.526`; the final physical user click remains the acceptance gate.
 - Final post-rollback inspected screenshot set: `qa/visual-qa-20260710-161422/`. Both displays show the compact bar, the notification total `23` fully inside its target, and healthy docks after a Seelen restart.
 - The second acceptance round found and fixed an implementation-label leak: after the bell test, `Windows Shell Experience Host` appeared in both menu bars. Toolbar templates and the verifier now hide that native helper by name/title; `qa/visual-qa-20260710-200033/` confirms both bars are clean after restart.
 - That same round did not accept the bell/date interaction: the `Notification Center` CoreWindow became hidden while remaining the foreground window, preventing safe automation from activating Rider or Snipping Tool. Microsoft documents Win+N as the user shortcut but no supported URI for directly opening Notification Center; the current synthetic-key handler remains an open release gate.

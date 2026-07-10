@@ -22,7 +22,7 @@ The user is very explicit about quality: do not claim a visual task is finished 
 - Normal Apple clicks open through `tools\MacMakeover.MenuHost`, a resident owner-drawn .NET WinForms host. This replaced the laggy PowerShell/WPF click path.
 - The Apple protocol handler must use the fast MenuHost pipe launcher registered by `scripts\Install-AppleMenuHandler.ps1`, because `wscript.exe` is blocked by this machine's Defender/ASR policy and the old PowerShell/WPF cold path was laggy.
 - The top-right sliders control opens the custom MenuHost Control Center instead of Seelen's built-in quick-settings/power flyout. It intentionally uses `onClick: open("macmakeover-control-center:")`; that protocol is registered to a fast `conhost --headless cmd /c echo control> \\.\pipe\MacMakeover.MenuHost` launcher with a `--show control` fallback.
-- Performance correction: Apple and normally responsive right-side controls are item-owned. Network and Bluetooth use custom MenuHost panels, Calendar/Notifications avoid Seelen Flyouts, and Battery/sliders use the fast Control Center protocol. A guarded y=0..18 helper fallback now covers only the mixed-DPI toolbar instance that `WindowFromPoint` reports as click-through.
+- Performance correction: Apple and normally responsive right-side controls are item-owned. Network and Bluetooth use custom MenuHost panels, Calendar/Notifications avoid Seelen Flyouts, and Battery/sliders use the fast Control Center protocol. A work-area-bounded, per-monitor-scaled helper fallback covers only the mixed-DPI toolbar instance that `WindowFromPoint` reports as click-through.
 - Battery/performance correction: keep Seelen `performanceMode.onBattery` and `performanceMode.onEnergySaver` set to `Disabled`. `Minimal` caused the top toolbar and bottom dock to disappear after the laptop switched off AC power.
 - Dock recovery correction: keep Seelen `@seelen/weg.enabled` set to `true`. The later native MenuHost dock/appbar experiment was removed after it interfered with maximize/work-area behavior.
 - `scripts\verify.ps1` is the gatekeeper: it fails if the live Apple-menu handler is missing, still points at `wscript.exe`, or is not registered to the conhost launcher.
@@ -313,7 +313,7 @@ C:\Users\VineethRao\source\repos\mac-makeover\config\hot-corners.json
 
 The top-left hot corner and Apple glyph are close together. Top-left/top-right outer-corner clicks use `clickCornerSize` from `config\hot-corners.json` and send Show Desktop. Be careful when changing hit targets; do not reintroduce invisible click stealing.
 
-Apple remains item-owned (`appleMenuClickEnabled=false`). Keep the six right-side compatibility booleans enabled only with all three guards intact: y=0..18, `WindowFromPoint` says the target is not Seelen, and verifier-confirmed non-overlapping ranges. The exact physical top-left/top-right corners remain reserved for Show Desktop.
+Apple remains item-owned (`appleMenuClickEnabled=false`). Keep the six right-side compatibility booleans enabled only with all guards intact: physical per-monitor bounds, the reserved toolbar work area, `WindowFromPoint` says the target is not Seelen, and verifier-confirmed scaled non-overlapping ranges. The exact physical top-left/top-right corners remain reserved for Show Desktop.
 
 ## The Repo / Git Backup
 

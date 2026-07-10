@@ -154,7 +154,7 @@ config\hot-corners.json
 
 Supported hover and click actions are `Spotlight`, `TaskView`, `ShowDesktop`, `Lock`, `Sleep`, `ClipboardHistory`, `NetworkFlyout`, `QuickSettings`, and `None`. The shipped config keeps dwell actions set to `None` and keeps only tiny top-left/top-right click zones for Show Desktop.
 
-The Apple mark and normally responsive right-side controls are item-owned: Apple opens `macmakeover-apple-menu:`, Network and Bluetooth use custom MenuHost panels, Battery/sliders open `macmakeover-control-center:`, and bell/date route to native Notification Center. Seelen 2.7.4 exposes a click-through toolbar on the current mixed-DPI primary display, so the helper also carries six non-overlapping compatibility zones limited to the top 19 pixels. Those zones run only when `WindowFromPoint` proves Seelen did not receive the click, preventing app-chrome and double-fire regressions.
+The Apple mark and normally responsive right-side controls are item-owned: Apple opens `macmakeover-apple-menu:`, Network and Bluetooth use custom MenuHost panels, Battery/sliders open `macmakeover-control-center:`, and bell/date route to native Notification Center. Seelen 2.7.4 exposes a click-through toolbar on the current mixed-DPI primary display, so the helper also carries six non-overlapping compatibility zones limited to the actual reserved toolbar height. The helper switches its polling thread to per-monitor DPI awareness so physical mouse pixels, monitor bounds, and scaled offsets share one coordinate space. Those zones run only when `WindowFromPoint` proves Seelen did not receive the click, preventing app-chrome and double-fire regressions.
 
 ## Manual Steps After Restore
 

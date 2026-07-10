@@ -13,7 +13,8 @@ Execution status: Tasks 1-4 pass for the original Snipping Tool, Alt+Tab, notifi
 - Made Control Center probes cancellable with a real timeout/child-process kill and idempotent form cleanup.
 - Refreshed stale Outlook, Codex, and Claude WindowsApps pin paths that produced WEG `NotFound` errors after application updates.
 - Corrected hot-corner monitor selection: the helper now uses the monitor under the pointer and rejects points outside that monitor before classifying a corner. This prevents every negative-coordinate click on the upper-left display from firing Show Desktop.
-- Added a guarded right-side compatibility router for the DPI-scaled primary toolbar. It runs only when `WindowFromPoint` does not find Seelen, is limited to y=0..18, has non-overlapping Network/Bluetooth/Battery/Control/Notifications/Date zones, and is rejected by the verifier if those safety properties drift.
+- Added a guarded right-side compatibility router for the DPI-scaled primary toolbar. It runs only when `WindowFromPoint` does not find Seelen, is limited to the monitor's reserved toolbar work area, has non-overlapping Network/Bluetooth/Battery/Control/Notifications/Date zones, and is rejected by the verifier if those safety properties drift.
+- Corrected the router's coordinate system after a real user retest: the polling thread now uses per-monitor-v2 DPI awareness, takes the physical bar height from each monitor's reserved work area, and scales horizontal offsets before classification.
 
 ## Ordered tasks
 
