@@ -1,8 +1,17 @@
 # Mac Makeover Recovery Plan
 
-Decision: simplify the current Seelen + MenuHost architecture. Baseline commit: `6819380`.
+Decision: **simplify** the current Seelen + MenuHost architecture; do not rebuild. Baseline commit: `6819380`.
 
-Execution status: Tasks 1-3 passed. Task 4 is partial because Windows UI automation stopped activating windows after the shell interaction test. Task 5 remains a separate follow-up.
+Execution status: Tasks 1-4 now pass for the reported Snipping Tool, Alt+Tab, notification clipping, dock/work-area, visual, and warm performance gates. Remaining physical click-path coverage stays explicit rather than blocking this focused recovery.
+
+## Immediate redesign recovery executed
+
+- Replaced the 19 px blurred toolbar with a calm opaque 28 px navy bar based on `docs/design/macos-recovery-concept-20260710.png`.
+- Moved notification counts out of Seelen's screen-edge badge layer and inline into a 34-52 px target, eliminating clipping.
+- Reduced WEG size, spacing, padding, and magnification; removed compositor blur and blue glow while retaining an opaque reserved work area.
+- Removed `HWND_TOPMOST`/`TopMost=true` from MenuHost. Panels now use `HWND_TOP` without activation and yield to Alt+Tab and screen-capture surfaces.
+- Made Control Center probes cancellable with a real timeout/child-process kill and idempotent form cleanup.
+- Refreshed stale Outlook, Codex, and Claude WindowsApps pin paths that produced WEG `NotFound` errors after application updates.
 
 ## Ordered tasks
 

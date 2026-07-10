@@ -19,7 +19,7 @@ center:
   id: b1660cbb-e9a8-4c75-be3b-4f3313161107
   displayName: Outlook
   umid: Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows
-  path: C:\Program Files\WindowsApps\Microsoft.OutlookForWindows_1.2026.623.400_x64__8wekyb3d8bbwe\olk.exe
+  path: C:\Program Files\WindowsApps\Microsoft.OutlookForWindows_1.2026.630.300_x64__8wekyb3d8bbwe\olk.exe
   pinned: true
   preventPinning: false
   relaunch: null
@@ -43,7 +43,7 @@ center:
   id: 6899418c-c5b3-4499-9b26-4e9e3585e0fe
   displayName: Codex
   umid: OpenAI.Codex_2p2nqsd0c76g0!App
-  path: C:\Program Files\WindowsApps\OpenAI.Codex_26.623.19656.0_x64__2p2nqsd0c76g0\app\Codex.exe
+  path: C:\Program Files\WindowsApps\OpenAI.Codex_26.707.3748.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe
   pinned: true
   preventPinning: false
   relaunch: null
@@ -51,7 +51,7 @@ center:
   id: 227cf55f-ea92-42a5-8e39-0d1a724863ad
   displayName: Claude
   umid: Claude_pzs8sxrjxfjjc!Claude
-  path: C:\Program Files\WindowsApps\Claude_1.18286.2.0_x64__pzs8sxrjxfjjc\app\claude.exe
+  path: C:\Program Files\WindowsApps\Claude_1.19367.0.0_x64__pzs8sxrjxfjjc\app\Claude.exe
   pinned: true
   preventPinning: false
   relaunch: null

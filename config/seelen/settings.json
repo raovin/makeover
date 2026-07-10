@@ -16,9 +16,9 @@
       "delayToShow": 100,
       "enabled": true,
       "hideMode": "Never",
-      "itemSize": 15,
+      "itemSize": 18,
       "margin": 0,
-      "padding": 2,
+      "padding": 5,
       "position": "Top"
     },
     "@seelen/launcher": {
@@ -59,21 +59,21 @@
       "delayToShow": 100,
       "enabled": true,
       "hideMode": "Never",
-      "margin": 8,
+      "margin": 10,
       "middleClickAction": "OpenNewInstance",
       "mode": "MinContent",
-      "padding": 8,
+      "padding": 6,
       "pinnedItemsVisibility": "Always",
       "position": "Bottom",
       "showEndTask": false,
       "showInstanceCounter": true,
       "showWindowTitle": false,
-      "size": 40,
-      "spaceBetweenItems": 8,
+      "size": 36,
+      "spaceBetweenItems": 5,
       "splitWindows": false,
       "temporalItemsVisibility": "All",
       "visibleSeparators": true,
-      "zoomSize": 70
+      "zoomSize": 46
     },
     "@seelen/window-manager": {
       "$shortcuts": null,

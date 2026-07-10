@@ -315,6 +315,11 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
+  if ($toolbarRaw -notmatch '(?s)id:\s*macmakeover-notification-center.*?badge:\s*null.*?open\("macmakeover-notification-center:"\)') {
+    Write-Warning "Notification counts must render inline inside the bell target. A Seelen badge at the y=0 screen edge will be clipped."
+    $VerificationFailed = $true
+  }
+
   if ($toolbarRaw -notmatch 'macmakeover-date' -or $toolbarRaw -notmatch '(?s)right:\s*.*macmakeover-date') {
     Write-Warning "Date/time should live on the right side of the menu bar, macOS-style, without Seelen Flyouts."
     $VerificationFailed = $true
@@ -389,7 +394,9 @@ if (Test-Path -LiteralPath $ThemePath) {
 $WegThemePath = Join-Path $SeelenRoaming "themes\macos-glass\styles\weg.css"
 if (Test-Path -LiteralPath $WegThemePath) {
   $wegCss = Get-Content -LiteralPath $WegThemePath -Raw
-  if ($wegCss -notmatch 'rgba\(50,\s*56,\s*68,\s*1\)' -or $wegCss -notmatch 'rgba\(30,\s*35,\s*45,\s*1\)') {
+  $taskbarBlock = [regex]::Match($wegCss, '(?s)\.taskbar\s*\{(?<body>.*?)\}').Groups["body"].Value
+  $opaqueStops = [regex]::Matches($taskbarBlock, 'rgba\([^\)]*,\s*1\)')
+  if ($opaqueStops.Count -lt 2) {
     Write-Warning "The dock capsule has become translucent again. Keep WEG dock background fully opaque so app content does not show through it."
     $VerificationFailed = $true
   }
@@ -433,6 +440,16 @@ if (Test-Path -LiteralPath $menuHostSourcePath) {
 
   if ($menuHostSource -match 'DockForm|SHAppBarMessage|SetBottomAppBar') {
     Write-Warning "MenuHost contains native dock/appbar code again. That path interfered with maximize/work-area behavior; keep the dock owned by Seelen WEG."
+    $VerificationFailed = $true
+  }
+
+  if ($menuHostSource -match 'TopMost\s*=\s*true|HwndTopMost|HWND_TOPMOST') {
+    Write-Warning "MenuHost is forcing custom panels into the system topmost band. That blocks Snipping Tool overlays and makes Alt+Tab look broken."
+    $VerificationFailed = $true
+  }
+
+  if ($menuHostSource -notmatch 'WaitForExitAsync' -or $menuHostSource -notmatch 'Kill\(entireProcessTree:\s*true\)' -or $menuHostSource -notmatch '_lifetimeCts') {
+    Write-Warning "MenuHost background probes do not have a real timeout and per-panel cancellation. Rapid Control Center churn can retain processes and handles."
     $VerificationFailed = $true
   }
 

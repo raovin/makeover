@@ -1,6 +1,6 @@
 # Mac Makeover Recovery Audit Spec
 
-Status: recovery baseline, bounded implementation, and post-change verification recorded on 2026-07-10 (Europe/London). Overall product acceptance remains partial because exact corner/bell/date and some toolbar-click tests are still open.
+Status: recovery baseline, redesign implementation, and post-change verification recorded on 2026-07-10 (Europe/London). The reported Snipping Tool, Alt+Tab, clipped notification count, dock/work-area, and Control Center churn regressions now have direct passing evidence. Overall product acceptance remains partial because exact corner/bell/date and some toolbar-click tests are still open.
 
 Baseline: `main` at `6819380`; the worktree was clean and matched `origin/main` before this audit began.
 
@@ -70,12 +70,12 @@ Ownership boundaries:
 ## Environment and baseline evidence
 
 - Active displays: two. DPI-aware bounds are 1920x1200 primary and 1920x1080 secondary, with the secondary positioned above and left of the primary.
-- Both displays expose a 29/19 px top work-area inset and an approximately 108/91 px bottom reservation in DPI-aware/non-DPI-aware coordinates respectively.
+- Both displays now expose the intended 28 px toolbar and a smaller compact-dock reservation; a direct maximized Explorer run stopped above both custom surfaces.
 - Running core components: Seelen UI 2.7.4, `slu-service`, one `MacMakeover.MenuHost`, Windows PowerShell hot-corner helper, PowerToys, and Command Palette.
 - RustDesk, Tailscale, and TeamViewer processes were observed but not inspected or changed.
-- Repo and live copies match for Seelen settings, toolbar state, toolbar CSS, dock CSS, and the network plugin.
+- Repo and live copies match for the changed Seelen settings, toolbar state, toolbar CSS, dock CSS, and the network plugin.
 - `settings_shortcuts.json` differs only by trailing whitespace/newline and is semantically the required disabled JSON.
-- Live WEG state has runtime drift: newer Claude/Codex paths and an unpinned Terminal item; the repo remains restore-oriented and contains version-specific absolute package paths.
+- Versioned Outlook, Codex, and Claude WEG paths were refreshed to the installed packages. Live state still carries normal unpinned runtime items, so future package-version drift remains a maintenance risk.
 - Baseline `scripts/verify.ps1 -CaptureScreenshot` passed and produced `qa/visual-qa-20260710-121233/`.
 
 ## Findings, ordered by severity
@@ -131,7 +131,7 @@ The two toolbars and docks are present, dock backgrounds are opaque, maximized c
 Keep the successful ownership model, but reduce and harden it rather than rebuilding:
 
 1. Keep Seelen as the sole toolbar/dock owner and keep native Windows Alt+Tab/search/notification surfaces.
-2. Keep one resident MenuHost for the four custom panels; make popup placement monitor-aware and move blocking state probes off the UI thread in a later bounded task.
+2. Keep one resident MenuHost for the four custom panels; keep popup placement monitor-aware and keep background probes cancellable with real timeouts.
 3. Keep item-owned toolbar actions and delete dormant broad pixel-zone and WPF warm-runspace paths only after equivalent startup/recovery tests exist.
 4. Consolidate protocol registration and notification/menu dismissal behavior in a later task instead of adding another helper.
 5. Make per-monitor screenshot output and interaction gates first-class verification artifacts.
@@ -148,14 +148,15 @@ A rebuild is not justified: the baseline passes static guards, renders coherentl
 - `fit-windows-to-workarea.ps1 -WhatIf` returned no repair candidates.
 - Final inspected screenshot set: `qa/visual-qa-20260710-123039/`, including both displays' full/top/bottom files.
 - Both docks remained opaque and below maximized client content; both menu bars remained aligned with no hairline or clipping regression.
-- Product acceptance is not complete: Control-to-Alt+Tab, physical corner clicks, bell/date behavior, minimized desktop, and a user-observed lock/PIN check remain open. Notification protocol execution did not yield a durable notification/calendar screenshot.
+- Image-generated direction was implemented as an opaque 28 px navy toolbar, inline bounded notification count, and a compact opaque dock with reduced magnification and no compositor blur.
+- MenuHost no longer enters the system topmost band; Apple and Control panels both yielded to native Alt+Tab.
+- Snipping Tool `New` reached capture mode, and the overlay was dismissed back to a clean desktop.
+- Control Center's blocking output read was replaced by cancellable process waiting, timed-out child-tree termination, and per-form cancellation. A warm repeat batch settled at +4 handles with no child process.
+- Final inspected screenshot set: `qa/visual-qa-20260710-140026/`, including both displays' full/top/bottom files after the redesign.
+- Product acceptance is not complete: physical corner clicks, bell/date surface capture, minimized desktop, the wider maximize app set, and a user-observed lock/PIN check remain open.
 
 ## Recovery-pass scope and stop gates
 
-This pass may change only:
-
-- `tools/MacMakeover.MenuHost/Program.cs` for monitor-aware popup placement.
-- `scripts/verify.ps1` for DPI-aware virtual-desktop and per-monitor crops.
-- The four recovery documents.
+This pass changed only MenuHost behavior/lifecycle, the verifier, Seelen toolbar/dock settings and themes, current WEG pin paths, the generated design reference, and the four recovery documents.
 
 Stop and roll back a runtime change if any of the following occurs: MenuHost activates or enters Alt+Tab; a panel fails to paint; Seelen bars/docks disappear; work-area bounds change; a new MenuHost process remains; parser/build/static verification fails; or post-change screenshots are worse than the baseline.

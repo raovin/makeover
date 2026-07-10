@@ -1,62 +1,50 @@
-/* macOS Glass - reimagined floating dock */
+/* macOS Glass - compact, stable floating dock */
 .taskbar {
-  background:
-    linear-gradient(180deg, rgba(50, 56, 68, 1), rgba(30, 35, 45, 1)) !important;
-  backdrop-filter: blur(18px) saturate(1.15) contrast(1.02);
-  -webkit-backdrop-filter: blur(18px) saturate(1.15) contrast(1.02);
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: linear-gradient(180deg, rgba(31, 38, 50, 1), rgba(18, 23, 32, 1)) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow:
-    0 22px 58px -16px rgba(0, 0, 0, 0.82),
-    0 7px 20px -14px rgba(118, 176, 255, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+    0 14px 34px -14px rgba(0, 0, 0, 0.86),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
 
 .taskbar[data-has-margin="true"],
-.taskbar[data-size="min-content"] {
-  border-radius: 24px;
-}
-
+.taskbar[data-size="min-content"],
 .taskbar[data-has-margin="true"] > .weg-items-container,
 .taskbar[data-size="min-content"] > .weg-items-container {
-  border-radius: 24px;
+  border-radius: 18px;
 }
 
 .weg-item {
   background-color: transparent !important;
-  border-radius: 15px;
+  border-radius: 11px;
   box-shadow: none !important;
   overflow: visible !important;
-  transition:
-    background-color 0.16s ease,
-    filter 0.16s ease,
-    transform 0.16s ease !important;
+  transition: background-color 120ms ease, filter 120ms ease, transform 120ms ease !important;
 }
 
 .weg-item:hover {
-  background-color: rgba(255, 255, 255, 0.16) !important;
-  transform: translateY(-3px);
+  background-color: rgba(255, 255, 255, 0.11) !important;
+  transform: translateY(-2px);
 }
 
 .weg-item:active {
-  transform: translateY(-1px) scale(0.95);
+  transform: translateY(0) scale(0.96);
 }
 
 .weg-item:hover .weg-item-icon {
-  filter:
-    brightness(1.1)
-    saturate(1.15)
-    drop-shadow(0 8px 14px rgba(0, 0, 0, 0.36));
+  filter: brightness(1.06) saturate(1.06) drop-shadow(0 5px 9px rgba(0, 0, 0, 0.34));
 }
 
 .weg-separator {
-  opacity: 0.5;
+  opacity: 0.34;
 }
 
 .weg-item-open-sign.weg-item-open-sign-active {
-  background-color: rgba(245, 249, 255, 0.96) !important;
+  background-color: rgba(245, 249, 255, 0.94) !important;
   border-radius: 999px;
-  height: 4px;
-  width: 4px;
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.35);
+  height: 3px;
+  width: 3px;
+  box-shadow: none;
 }

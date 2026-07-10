@@ -136,8 +136,13 @@ internal sealed class MenuContext : ApplicationContext
         try
         {
             Program.Log("ShowCommand " + command);
-            _current?.Close();
-            _current?.Dispose();
+            var previous = _current;
+            _current = null;
+            previous?.Close();
+            if (previous is { IsDisposed: false })
+            {
+                previous.Dispose();
+            }
 
             _current = command.Trim().ToLowerInvariant() switch
             {
@@ -150,17 +155,19 @@ internal sealed class MenuContext : ApplicationContext
 
             if (_current is null) return;
             Program.Log($"Created {_current.Text} at {_current.Left},{_current.Top} size {_current.Width}x{_current.Height}");
-            _current.FormClosed += (_, _) =>
-            {
-                _current = null;
-            };
             var shown = _current;
+            shown.FormClosed += (_, _) =>
+            {
+                if (ReferenceEquals(_current, shown))
+                {
+                    _current = null;
+                }
+            };
             shown.Show();
             BringShownMenuForward(shown);
             shown.Invalidate(invalidateChildren: true);
             shown.Update();
             shown.Refresh();
-            ReinforceTopMostAsync(shown);
             Program.Log($"Shown {shown.Text}, visible={shown.Visible}, handle={shown.Handle}");
         }
         catch (Exception ex)
@@ -171,27 +178,7 @@ internal sealed class MenuContext : ApplicationContext
 
     private static void BringShownMenuForward(Form form)
     {
-        NativeMethods.ShowAboveEverything(form);
-    }
-
-    private static void ReinforceTopMostAsync(Form form)
-    {
-        _ = Task.Run(async () =>
-        {
-            foreach (var delay in new[] { 120, 320 })
-            {
-                await Task.Delay(delay).ConfigureAwait(false);
-                try
-                {
-                    if (form.IsDisposed || form.Disposing) return;
-                    form.BeginInvoke(() => BringShownMenuForward(form));
-                }
-                catch
-                {
-                    return;
-                }
-            }
-        });
+        NativeMethods.ShowWithoutActivation(form);
     }
 
     protected override void Dispose(bool disposing)
@@ -229,6 +216,7 @@ internal sealed class MenuForm : Form
     private readonly Font _smallFont;
     private readonly Font _smallBoldFont;
     private readonly Font _iconFont;
+    private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly Screen _targetScreen;
     private readonly int _logicalWidth;
     private bool _anchorRight;
@@ -238,6 +226,7 @@ internal sealed class MenuForm : Form
     private IntPtr _foregroundAtShown;
     private bool _wasLeftMouseDown;
     private bool _hasShown;
+    private bool _managedResourcesDisposed;
     private int _hoverIndex = -1;
     private int _dragRow = -1;
 
@@ -262,7 +251,10 @@ internal sealed class MenuForm : Form
         // correct per-monitor DPI instead of creating on primary and moving afterward.
         _targetScreen = Screen.FromPoint(System.Windows.Forms.Cursor.Position);
         Location = _targetScreen.Bounds.Location;
-        TopMost = true;
+        // Menus must never sit above system surfaces such as Alt+Tab or the Snipping
+        // Tool capture overlay. HWND_TOP is enough to place this popup above the
+        // current app while keeping it in the normal (non-topmost) z-order band.
+        TopMost = false;
         _logicalWidth = width;
         KeyPreview = true;
         DoubleBuffered = true;
@@ -549,17 +541,19 @@ internal sealed class MenuForm : Form
     // panel opens instantly and enriches itself a beat later.
     private void LoadControlCenterStateAsync(MenuRow wifi, MenuRow bluetooth, SliderInfo brightness)
     {
+        var cancellationToken = _lifetimeCts.Token;
         _ = Task.Run(() =>
         {
-            var ssid = ReadWifiSsid();
-            var bluetoothOn = ReadBluetoothOn();
-            var brightnessPercent = ReadBrightnessPercent();
+            var ssid = ReadWifiSsid(cancellationToken);
+            var bluetoothOn = ReadBluetoothOn(cancellationToken);
+            var brightnessPercent = ReadBrightnessPercent(cancellationToken);
 
             try
             {
-                if (IsDisposed || Disposing) return;
+                if (cancellationToken.IsCancellationRequested || IsDisposed || Disposing) return;
                 BeginInvoke(() =>
                 {
+                    if (cancellationToken.IsCancellationRequested || IsDisposed || Disposing) return;
                     wifi.Detail = ssid ?? "Not connected";
                     wifi.Active = ssid is not null;
                     bluetooth.Detail = bluetoothOn ? "On" : "Off";
@@ -576,14 +570,14 @@ internal sealed class MenuForm : Form
             {
                 // Panel may already be closed; state enrichment is best-effort.
             }
-        });
+        }, cancellationToken);
     }
 
-    private static string? ReadWifiSsid()
+    private static string? ReadWifiSsid(CancellationToken cancellationToken = default)
     {
         try
         {
-            var output = RunHidden("netsh", "wlan show interfaces", 2500);
+            var output = RunHidden("netsh", "wlan show interfaces", 2500, cancellationToken);
             string? ssid = null;
             var connected = false;
             foreach (var rawLine in output.Split('\n'))
@@ -658,11 +652,11 @@ internal sealed class MenuForm : Form
         });
     }
 
-    private static bool ReadBluetoothOn()
+    private static bool ReadBluetoothOn(CancellationToken cancellationToken = default)
     {
         try
         {
-            var output = RunHidden("powershell.exe", "-NoProfile -NonInteractive -Command \"(Get-Service bthserv).Status\"", 4000);
+            var output = RunHidden("powershell.exe", "-NoProfile -NonInteractive -Command \"(Get-Service bthserv).Status\"", 4000, cancellationToken);
             return output.Contains("Running", StringComparison.OrdinalIgnoreCase);
         }
         catch
@@ -695,11 +689,11 @@ internal sealed class MenuForm : Form
         return devices;
     }
 
-    private static int? ReadBrightnessPercent()
+    private static int? ReadBrightnessPercent(CancellationToken cancellationToken = default)
     {
         try
         {
-            var output = RunHidden("powershell.exe", "-NoProfile -NonInteractive -Command \"(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness\"", 4000);
+            var output = RunHidden("powershell.exe", "-NoProfile -NonInteractive -Command \"(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightness).CurrentBrightness\"", 4000, cancellationToken);
             return int.TryParse(output.Trim(), out var value) ? value : null;
         }
         catch
@@ -726,7 +720,11 @@ internal sealed class MenuForm : Form
         });
     }
 
-    private static string RunHidden(string fileName, string arguments, int timeoutMs)
+    private static string RunHidden(
+        string fileName,
+        string arguments,
+        int timeoutMs,
+        CancellationToken cancellationToken = default)
     {
         var psi = new ProcessStartInfo(fileName, arguments)
         {
@@ -737,9 +735,35 @@ internal sealed class MenuForm : Form
         };
         using var process = Process.Start(psi);
         if (process is null) return string.Empty;
-        var output = process.StandardOutput.ReadToEnd();
-        process.WaitForExit(timeoutMs);
-        return output;
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(timeoutMs);
+
+        try
+        {
+            process.WaitForExitAsync(timeout.Token).GetAwaiter().GetResult();
+            var output = outputTask.GetAwaiter().GetResult();
+            _ = errorTask.GetAwaiter().GetResult();
+            return output;
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(1000);
+                }
+            }
+            catch
+            {
+                // The best-effort probe may already have exited.
+            }
+
+            return string.Empty;
+        }
     }
 
     private static string FriendlyUserName()
@@ -1016,6 +1040,7 @@ internal sealed class MenuForm : Form
     {
         if (NativeMethods.IsAltPressed())
         {
+            Program.Log($"Closing {Text}: Alt/system switcher detected");
             Close();
             return;
         }
@@ -1031,6 +1056,7 @@ internal sealed class MenuForm : Form
             && foreground != Handle
             && foreground != _foregroundAtShown)
         {
+            Program.Log($"Closing {Text}: foreground changed");
             Close();
         }
     }
@@ -1049,8 +1075,10 @@ internal sealed class MenuForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !_managedResourcesDisposed)
         {
+            _managedResourcesDisposed = true;
+            _lifetimeCts.Cancel();
             _outsideClickTimer.Dispose();
             _systemSwitchTimer.Dispose();
             _regularFont.Dispose();
@@ -1058,6 +1086,7 @@ internal sealed class MenuForm : Form
             _smallFont.Dispose();
             _smallBoldFont.Dispose();
             _iconFont.Dispose();
+            _lifetimeCts.Dispose();
         }
 
         base.Dispose(disposing);
@@ -1157,7 +1186,7 @@ internal sealed class MenuForm : Form
 
 internal static class NativeMethods
 {
-    private static readonly IntPtr HwndTopMost = new(-1);
+    private static readonly IntPtr HwndTop = IntPtr.Zero;
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoActivate = 0x0010;
@@ -1185,11 +1214,11 @@ internal static class NativeMethods
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    public static void ShowAboveEverything(Form form)
+    public static void ShowWithoutActivation(Form form)
     {
-        form.TopMost = true;
+        form.TopMost = false;
         ShowWindow(form.Handle, 8); // SW_SHOWNA: show without taking foreground focus.
-        SetWindowPos(form.Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
+        SetWindowPos(form.Handle, HwndTop, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
     }
 
     public static bool IsAltPressed()
