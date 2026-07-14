@@ -11,7 +11,7 @@ Keep this repo private unless you have reviewed the app paths and registry expor
 - A macOS-style top menu bar using Seelen UI.
 - A bottom dock owned by Seelen WEG. The experimental native MenuHost appbar dock was removed after it interfered with maximize/work-area behavior.
 - The custom `macos-glass` theme for the frosted menu bar and dock.
-- The current toolbar layout: Apple-style mark, focused app, and right-side Network, Bluetooth, battery, Control Center sliders, date/time, and notification controls.
+- The current toolbar layout: Apple-style mark and focused app on the left; informational CPU, RAM, and network-throughput readouts in the center; and Network, Bluetooth, battery, Control Center sliders, date/time, and notification controls on the right.
 - A Mac-style Apple menu on the top-left Apple mark, opened by an item-owned `macmakeover-apple-menu:` click through the fast resident MenuHost pipe so it appears quickly and no terminal window appears.
 - A custom Mac-style Control Center / power popover from the top-right sliders control, replacing Seelen's built-in quick-settings flyout and avoiding slow URI launches.
 - Seelen shortcuts disabled so native Windows Alt+Tab and lock-screen input remain normal.

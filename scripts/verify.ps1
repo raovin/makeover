@@ -291,10 +291,16 @@ if (Test-Path -LiteralPath $ToolbarPath) {
     $VerificationFailed = $true
   }
 
-  # User requirement (explicit, 2026-07-06): keep the Mac menu bar center quiet.
-  # CPU/RAM/NET/Battery in the center made the bar read like misplaced menu options.
-  if ($toolbarRaw -match '(?s)center:\s*\n\s*-' -or $toolbarRaw -match '(?s)center:.*(Cpu|Memory|NetworkStatistics|macmakeover-battery-status).*right:') {
-    Write-Warning "The center of the menu bar should stay quiet/empty. Do not put CPU/RAM/NET/Battery readouts in the middle."
+  # User requirement (explicit, 2026-07-14): CPU/RAM/NET are informational center
+  # readouts. They must remain non-clickable; battery stays in the right system cluster.
+  if ($toolbarRaw -notmatch '(?s)center:.*- Cpu.*- Memory.*- NetworkStatistics.*right:') {
+    Write-Warning "The center telemetry cluster must contain CPU, RAM, and NET readouts."
+    $VerificationFailed = $true
+  }
+
+  $centerBlock = [regex]::Match($toolbarRaw, '(?s)center:(.*?)right:').Groups[1].Value
+  if ($centerBlock -match '(?m)^\s*onClick:\s*(?!null\s*$)\S+') {
+    Write-Warning "CPU/RAM/NET are informational readouts and must not be clickable."
     $VerificationFailed = $true
   }
 

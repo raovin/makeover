@@ -1271,26 +1271,44 @@ internal static class VolumeService
     {
         try
         {
-            Endpoint().GetMasterVolumeLevelScalar(out var level);
+            // The default output can change while the resident host keeps running.
+            // Refresh when a new Control Center is created so the slider never keeps
+            // controlling an old HDMI/headset endpoint.
+            ReleaseEndpoint();
+            Marshal.ThrowExceptionForHR(Endpoint().GetMasterVolumeLevelScalar(out var level));
             return level;
         }
-        catch
+        catch (Exception ex)
         {
-            _endpoint = null;
+            Program.Log("Volume read failed: " + ex);
+            ReleaseEndpoint();
             return null;
         }
     }
 
     public static void SetMasterVolume(float level)
     {
+        level = Math.Clamp(level, 0f, 1f);
         try
         {
             var context = Guid.Empty;
-            Endpoint().SetMasterVolumeLevelScalar(Math.Clamp(level, 0f, 1f), ref context);
+            Marshal.ThrowExceptionForHR(Endpoint().SetMasterVolumeLevelScalar(level, ref context));
         }
-        catch
+        catch (Exception first)
         {
-            _endpoint = null;
+            // Endpoint changes and device sleep can invalidate the cached COM object.
+            // Refresh once and retry before surfacing the failure in the diagnostic log.
+            ReleaseEndpoint();
+            try
+            {
+                var context = Guid.Empty;
+                Marshal.ThrowExceptionForHR(Endpoint().SetMasterVolumeLevelScalar(level, ref context));
+            }
+            catch (Exception retry)
+            {
+                Program.Log($"Volume write failed at {level:P0}: {first}; retry: {retry}");
+                ReleaseEndpoint();
+            }
         }
     }
 
@@ -1298,11 +1316,42 @@ internal static class VolumeService
     {
         if (_endpoint is not null) return _endpoint;
         var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
-        enumerator.GetDefaultAudioEndpoint(0, 1, out var device); // eRender, eMultimedia
-        var iid = typeof(IAudioEndpointVolume).GUID;
-        device.Activate(ref iid, 23, IntPtr.Zero, out var obj); // CLSCTX_ALL
-        _endpoint = (IAudioEndpointVolume)obj;
-        return _endpoint;
+        try
+        {
+            Marshal.ThrowExceptionForHR(enumerator.GetDefaultAudioEndpoint(0, 1, out var device)); // eRender, eMultimedia
+            try
+            {
+                var iid = typeof(IAudioEndpointVolume).GUID;
+                Marshal.ThrowExceptionForHR(device.Activate(ref iid, 23, IntPtr.Zero, out var obj)); // CLSCTX_ALL
+                _endpoint = (IAudioEndpointVolume)obj;
+                return _endpoint;
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(device);
+            }
+        }
+        finally
+        {
+            Marshal.FinalReleaseComObject(enumerator);
+        }
+    }
+
+    private static void ReleaseEndpoint()
+    {
+        if (_endpoint is null) return;
+        try
+        {
+            Marshal.FinalReleaseComObject(_endpoint);
+        }
+        catch
+        {
+            // A disconnected endpoint can already have released its COM wrapper.
+        }
+        finally
+        {
+            _endpoint = null;
+        }
     }
 
     [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
@@ -1313,32 +1362,42 @@ internal static class VolumeService
     [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IMMDeviceEnumerator
     {
+        [PreserveSig]
         int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
 
+        [PreserveSig]
         int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint);
     }
 
     [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IMMDevice
     {
+        [PreserveSig]
         int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
     }
 
     [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IAudioEndpointVolume
     {
+        [PreserveSig]
         int RegisterControlChangeNotify(IntPtr notify);
 
+        [PreserveSig]
         int UnregisterControlChangeNotify(IntPtr notify);
 
+        [PreserveSig]
         int GetChannelCount(out uint count);
 
+        [PreserveSig]
         int SetMasterVolumeLevel(float levelDb, ref Guid eventContext);
 
+        [PreserveSig]
         int SetMasterVolumeLevelScalar(float level, ref Guid eventContext);
 
+        [PreserveSig]
         int GetMasterVolumeLevel(out float levelDb);
 
+        [PreserveSig]
         int GetMasterVolumeLevelScalar(out float level);
     }
 }
