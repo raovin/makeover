@@ -218,7 +218,7 @@ function Register-MacMakeoverNotificationCenter {
   }
 
   & $installer
-  Write-Host "Notification Center protocol registered (conhost --headless launcher): macmakeover-notification-center:"
+  Write-Host "Notification Center protocol registered (native ms-actioncenter launcher): macmakeover-notification-center:"
 }
 
 if (-not (Test-Path -LiteralPath $ConfigRoot)) {

@@ -55,7 +55,7 @@ switch ($Action) {
     Send-Hotkey ([byte[]](0x5B, 0x56)) # Win+V
   }
   "NotificationCenter" {
-    Send-Hotkey ([byte[]](0x5B, 0x4E)) # Win+N
+    Start-Process "ms-actioncenter:"
   }
   "OpenMakeoverFolder" {
     Start-Process -FilePath "$env:windir\explorer.exe" -ArgumentList "`"$PackageRoot`""

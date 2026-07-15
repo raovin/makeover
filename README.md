@@ -3,9 +3,10 @@
 A macOS-inspired Windows 11 desktop that keeps Windows responsible for the
 things Windows must do reliably.
 
-The current production profile uses a lightweight YASB menu bar, the native
-Windows taskbar, and an optional one-mod Windhawk skin. Seelen UI is retained in
-Git history and portable config snapshots, but is no longer installed or used.
+The current production profile uses Seelen UI for the full-width menu bar and
+WEG dock, with the repository's macOS glass theme and MenuHost panels. A YASB
+and native-taskbar migration was evaluated on July 14-15, 2026 and rolled back
+after failing laptop mixed-DPI, wallpaper, dock, and responsiveness acceptance.
 
 ## Design Contract
 
@@ -23,27 +24,22 @@ Git history and portable config snapshots, but is no longer installed or used.
 
 ### Top menu bar
 
-[YASB](https://github.com/amnweb/yasb) owns a 26 logical-pixel Windows appbar on
-each display. It reserves real work area and uses no keyboard hooks.
+Seelen Fancy Toolbar owns the menu bar on each display.
 
 - **Left:** Apple mark and active app
 - **Center:** CPU, RAM, and live network throughput
 - **Right:** network, Bluetooth, combined battery/charging state, real volume
   menu, Control Center, notifications, and `Tue 14 Jul 23:04` style date/time
 
-Mixed-DPI dimensions are explicit in `config/yasb/config.yaml`. Live config and
-stylesheet reload are disabled because appbar re-registration during reload can
-destabilize the Windows work area. Updates use a clean `yasbc stop/start`.
+The accepted state is stored under `config/seelen/`; Seelen shortcuts and its
+task switcher/window manager stay disabled so Windows retains Alt+Tab, snapping,
+and ordinary window management.
 
 ### Bottom dock
 
-The bottom surface is the native Windows taskbar with auto-hide disabled. This
-is deliberate: it reserves work area, owns real app buttons and previews, and
-cannot break Alt+Tab by replacing the shell.
-
-For a dock-like appearance, install only Windhawk's official **Windows 11
-Taskbar Styler** mod and choose its integrated **DockLike** theme. See
-`config/windhawk/README.md`.
+Seelen WEG owns the opaque bottom dock and reserves the bottom work area. The
+native taskbar remains auto-hidden. Maximized applications must stop above WEG;
+`scripts/verify.ps1` and visual QA both gate that behavior.
 
 ### Menus
 
@@ -68,27 +64,20 @@ Open PowerShell in this repository:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\scripts\Install-NativeShell.ps1
+.\scripts\restore.ps1 -ApplyWallpaper
 ```
 
-That installs YASB and Windhawk if needed, deploys the YASB profile, disables
-taskbar auto-hide, registers MenuHost protocols, enables YASB autostart, stops
-Seelen/hot-corner helpers, and starts the production profile.
-
-Windhawk's taskbar skin is intentionally a separate manual step:
-
-1. Open Windhawk.
-2. Install **Windows 11 Taskbar Styler** by m417z.
-3. In its Settings tab, select **DockLike** and save.
-
-The system remains fully usable if Windhawk or the mod is disabled.
+For recovery after the abandoned native-shell experiment, run
+`scripts\Restore-SeelenProfile.ps1`; it reinstalls Seelen when necessary, stops
+YASB, restores the accepted profile and wallpaper, starts the helper services,
+and restores taskbar auto-hide.
 
 ## Verify
 
 Run the production smoke test:
 
 ```powershell
-.\scripts\Test-NativeShellProfile.ps1
+.\scripts\verify.ps1
 ```
 
 Release signoff must also cover these manual interactions on both displays:
@@ -108,29 +97,31 @@ they are a deliberately selected acceptance artifact.
 
 ## Rollback
 
-The native-shell migration is reversible:
+The retired native-shell experiment remains reversible for investigation, but
+is not the accepted profile. To return to production:
 
 ```powershell
 .\scripts\Restore-SeelenProfile.ps1
 ```
 
 Rollback stops YASB, disables its autostart, reinstalls Seelen if necessary,
-restores its startup task when permissions allow, restores the previous taskbar
-auto-hide preference, and re-enables the old helper profile.
+restores the portable toolbar/dock/theme snapshot and wallpaper, restores the
+previous taskbar auto-hide preference, and starts the helper profile.
 
 ## Repository Layout
 
 ```text
 config/
-  yasb/                 Production top-bar config, stylesheet, and Apple asset
-  windhawk/             Optional native-taskbar skin instructions
-  seelen/               Historical portable Seelen snapshot for rollback
+  seelen/               Production toolbar, dock, theme, and plugin snapshot
+  yasb/                 Retired native-shell experiment
+  windhawk/             Retired native-taskbar experiment notes
   powertoys/             Spotlight-style launcher settings
 scripts/
-  Install-NativeShell.ps1
-  Switch-To-NativeShell.ps1
-  Test-NativeShellProfile.ps1
+  restore.ps1           Restore the production profile
   Restore-SeelenProfile.ps1
+  Install-NativeShell.ps1       Retired experiment
+  Switch-To-NativeShell.ps1     Retired experiment
+  Test-NativeShellProfile.ps1   Experiment-only verifier
   Install-*Handler.ps1  Custom protocol registration
 tools/
   MacMakeover.MenuHost/ Resident Apple/Control Center panel host
@@ -143,10 +134,10 @@ assets/                 Wallpapers, cursors, and source assets
 - No credentials, RustDesk passwords, Tailscale keys, browser sessions, or work
   tokens are intentionally stored.
 - Restart, shutdown, sleep, and log out require confirmation in MenuHost.
-- YASB and MenuHost are user processes. Windhawk is optional and limited to one
-  official taskbar styling mod in the baseline.
-- The old Seelen hot-corner helper is disabled because global polling and click
-  routing previously interfered with navigation and system switching.
+- Seelen and MenuHost are user-facing shell enhancements; Seelen's task switcher
+  and window manager are deliberately disabled.
+- The hot-corner helper is limited to guarded exact-corner and mixed-DPI fallback
+  behavior, with its click zones checked by `scripts\verify.ps1`.
 - Review paths and registry exports before making the repository public.
 
 The repository remote is `git@github.com:raovin/makeover.git`.

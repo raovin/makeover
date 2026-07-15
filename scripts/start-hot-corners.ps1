@@ -262,7 +262,7 @@ function Invoke-HotCornerAction {
     "Lock" { Start-Process -FilePath "$env:windir\System32\rundll32.exe" -ArgumentList "user32.dll,LockWorkStation" }
     "Sleep" { Start-Process -FilePath "$env:windir\System32\rundll32.exe" -ArgumentList "powrprof.dll,SetSuspendState 0,1,0" }
     "ClipboardHistory" { Send-Hotkey ([byte[]](0x5B, 0x56)) }
-    "NotificationCenter" { Send-Hotkey ([byte[]](0x5B, 0x4E)) }
+    "NotificationCenter" { Start-Process "ms-actioncenter:" }
     "NetworkFlyout" {
       Close-MacMakeoverMenuHostPanels -Config $Config
       if (-not (Open-WindowsShellUri -Uri "ms-availablenetworks:" -Config $Config)) {

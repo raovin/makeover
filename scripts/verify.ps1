@@ -214,12 +214,18 @@ if (Test-Path -Path $NotificationCenterCommandPath) {
   if ($notificationCenterCommand -match "wscript\.exe") {
     Write-Warning "Notification Center is registered via wscript.exe, which is blocked by this PC's security policy. Re-run scripts\Install-MacNotificationCenterHandler.ps1."
     $VerificationFailed = $true
-  } elseif (-not ($notificationCenterCommand -match "conhost\.exe" -and $notificationCenterCommand -match "Invoke-MacAction\.ps1" -and $notificationCenterCommand -match "NotificationCenter")) {
-    Write-Warning "Notification Center is not registered to the conhost launcher. Re-run scripts\Install-MacNotificationCenterHandler.ps1."
+  } elseif (-not ($notificationCenterCommand -match "explorer\.exe" -and $notificationCenterCommand -match "ms-actioncenter:")) {
+    Write-Warning "Notification Center is not registered to the native ms-actioncenter launcher. Re-run scripts\Install-MacNotificationCenterHandler.ps1."
     $VerificationFailed = $true
   }
 } else {
   Write-Warning "Notification Center protocol handler is missing: macmakeover-notification-center:"
+  $VerificationFailed = $true
+}
+
+$notificationActionRaw = Get-Content -LiteralPath (Join-Path $PackageRoot "scripts\Invoke-MacAction.ps1") -Raw
+if ($notificationActionRaw -notmatch '"NotificationCenter"\s*\{\s*Start-Process\s+"ms-actioncenter:"') {
+  Write-Warning "Notification Center is not using the native ms-actioncenter URI. Simulated Win+N is unreliable on this Windows build."
   $VerificationFailed = $true
 }
 

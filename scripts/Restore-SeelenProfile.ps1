@@ -7,7 +7,6 @@ $ErrorActionPreference = 'Stop'
 $yasbc = Join-Path $env:ProgramFiles 'YASB\yasbc.exe'
 $seelenTaskPath = '\Seelen\'
 $seelenTaskName = 'Seelen UI Service'
-$startupShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk'
 $statePath = Join-Path $env:LOCALAPPDATA 'MacMakeover\migration\native-shell-state.json'
 
 if (-not (Get-Command slu-service.exe -ErrorAction SilentlyContinue)) {
@@ -23,19 +22,33 @@ if (Test-Path -LiteralPath $yasbc) {
   & $yasbc disable-autostart 2>$null
 }
 
+# Restore the accepted profile itself, not just the Seelen executable. This also
+# reinstates the toolbar, WEG dock, theme, protocol handlers, and Mac wallpaper.
+& (Join-Path $PSScriptRoot 'restore.ps1') `
+  -ApplyWallpaper `
+  -SkipSearchTweaks `
+  -SkipPowerToysRestore `
+  -SkipHotCorners `
+  -SkipSpotlightShortcuts `
+  -SkipSeelenRestart
+
 $seelenTask = Get-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction SilentlyContinue
 if ($seelenTask) {
-  try {
-    Enable-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName | Out-Null
+  if ($seelenTask.State -eq 'Disabled') {
+    try {
+      Enable-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction Stop | Out-Null
+    } catch {
+      Write-Warning 'Seelen scheduled task needs elevation to re-enable.'
+    }
+  }
+
+  $seelenTask = Get-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction SilentlyContinue
+  if ($seelenTask -and $seelenTask.State -ne 'Running' -and $seelenTask.State -ne 'Disabled') {
     Start-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName
-  } catch {
-    Write-Warning 'Seelen scheduled task needs elevation to re-enable.'
   }
 }
 
-if (Test-Path -LiteralPath $startupShortcut) {
-  & (Join-Path $PSScriptRoot 'install-hot-corners.ps1')
-}
+& (Join-Path $PSScriptRoot 'install-hot-corners.ps1') -StartNow
 
 if (Test-Path -LiteralPath $statePath) {
   $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
@@ -49,4 +62,4 @@ if (Test-Path -LiteralPath $statePath) {
   }
 }
 
-Write-Host 'Seelen profile restored. Sign out and back in if its service does not immediately repaint both bars.'
+Write-Host 'Seelen profile, wallpaper, toolbar, dock, and helpers restored.'
