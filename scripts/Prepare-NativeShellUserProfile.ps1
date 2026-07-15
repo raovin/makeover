@@ -20,6 +20,7 @@ $preparedPath = Join-Path $stateRoot 'user-profile-prepared.json'
 $stagingRoot = Join-Path $stateRoot 'native-shell-staged'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $advancedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+$searchKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search'
 $stuckRectsPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'
 
 function Get-RegistryValueSnapshot([string]$Path, [string]$Name) {
@@ -70,6 +71,7 @@ if (-not (Test-Path -LiteralPath $statePath)) {
     taskbarAutoHide = [bool]($stuckRects -and $stuckRects.Length -gt 8 -and (($stuckRects[8] -band 1) -eq 1))
     wallpaper = (Get-ItemProperty 'HKCU:\Control Panel\Desktop' -Name Wallpaper -ErrorAction SilentlyContinue).Wallpaper
     advanced = [ordered]@{}
+    search = [ordered]@{}
     run = [ordered]@{}
   }
   foreach ($name in 'TaskbarAl', 'TaskbarDa', 'ShowTaskViewButton', 'SearchboxTaskbarMode', 'MMTaskbarEnabled') {
@@ -78,9 +80,26 @@ if (-not (Test-Path -LiteralPath $statePath)) {
   foreach ($name in 'MacMakeoverMenuBar', 'MacMakeoverMenuHost') {
     $state.run[$name] = Get-RegistryValueSnapshot $runKey $name
   }
+  foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
+    $state.search[$name] = Get-RegistryValueSnapshot $searchKey $name
+  }
   [System.IO.File]::WriteAllText(
     $statePath,
     ($state | ConvertTo-Json -Depth 8),
+    (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# Older native-profile snapshots predate the second Search registry location.
+# Backfill it before changing live state so rollback remains lossless.
+$savedState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json -AsHashtable
+if (-not $savedState.ContainsKey('search')) {
+  $savedState.search = [ordered]@{}
+  foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
+    $savedState.search[$name] = Get-RegistryValueSnapshot $searchKey $name
+  }
+  [System.IO.File]::WriteAllText(
+    $statePath,
+    ($savedState | ConvertTo-Json -Depth 8),
     (New-Object System.Text.UTF8Encoding($false)))
 }
 
@@ -129,6 +148,11 @@ foreach ($entry in @{
 }
 Set-NativeTaskbarVisible
 Set-MacWallpaper
+
+if (-not (Test-Path -LiteralPath $searchKey)) { New-Item -Path $searchKey -Force | Out-Null }
+foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
+  New-ItemProperty -LiteralPath $searchKey -Name $name -Value 0 -PropertyType DWord -Force | Out-Null
+}
 
 if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
 $menuBar = Join-Path $deploymentRoot 'MacMakeover.MenuBar.exe'

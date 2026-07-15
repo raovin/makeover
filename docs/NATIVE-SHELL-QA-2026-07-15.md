@@ -24,6 +24,10 @@
   without closing or hanging.
 - Maximized content stops above the opaque native dock.
 - Notification bell route opens the independent Windows notification/calendar panel.
+- Follow-up on 2026-07-16: Windows Search and Weather/Widgets are absent from the
+  live dock; both Windows Search visibility registry locations are now asserted.
+- Follow-up on 2026-07-16: Show Desktop changes the app label to Finder, and the
+  second invocation restores the prior window set.
 - 30 second idle sample: MenuBar 56.1 MB stable, 0.286% total-machine CPU;
   MenuHost 52.8 MB stable, 0% sampled CPU.
 
@@ -41,9 +45,7 @@
 
 ## Pending Physical Gates
 
-- Apply the latest elevated dock polish that hides Windows Weather and Search. UAC
-  uses the Windows secure desktop and cannot be targeted by Computer Use.
-- Reboot/sign-in persistence check after that dock update.
+- Reboot/sign-in persistence check after the final dock update.
 - Mixed-DPI visual and behavioral signoff with the external LG display connected.
 - Confirm the physical top-bar hit targets (Apple, network, Bluetooth, volume,
   settings, bell, and both Show Desktop corners). The menu bar intentionally uses

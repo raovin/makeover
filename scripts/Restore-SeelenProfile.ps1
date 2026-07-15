@@ -16,6 +16,7 @@ $stateRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\migration'
 $statePath = Join-Path $stateRoot 'native-shell-state.json'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $advancedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+$searchKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search'
 $stuckRectsPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'
 
 if (-not $SkipElevation) {
@@ -46,6 +47,11 @@ if (Test-Path -LiteralPath $statePath) {
   if ($state.PSObject.Properties.Name -contains 'advanced') {
     foreach ($name in 'TaskbarAl', 'TaskbarDa', 'ShowTaskViewButton', 'SearchboxTaskbarMode', 'MMTaskbarEnabled') {
       Restore-RegistrySnapshot $advancedKey $name $state.advanced.$name
+    }
+  }
+  if ($state.PSObject.Properties.Name -contains 'search') {
+    foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
+      Restore-RegistrySnapshot $searchKey $name $state.search.$name
     }
   }
   if ($state.taskbarAutoHide) {

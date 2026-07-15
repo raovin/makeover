@@ -83,7 +83,14 @@ $widgetsVisibility = if ($dockSettingNames -contains 'controlStyles[8].styles[0]
   $dockSettings.PSObject.Properties['controlStyles[8].styles[0]'].Value
 } else { $null }
 if ($searchVisibility -ne 'Visibility=Collapsed' -or $widgetsVisibility -ne 'Visibility=Collapsed') {
-  $warnings.Add('Windows Search or Widgets is still visible; re-run the elevated dock phase to apply the latest polish.')
+  $failures.Add('The dock profile does not collapse Windows Search and Widgets.')
+}
+$advancedSearch = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name SearchboxTaskbarMode -ErrorAction SilentlyContinue).SearchboxTaskbarMode
+$searchSettings = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -ErrorAction SilentlyContinue
+if ($advancedSearch -ne 0 -or
+    $searchSettings.SearchboxTaskbarMode -ne 0 -or
+    $searchSettings.SearchboxTaskbarModeCache -ne 0) {
+  $failures.Add('Windows Search is still configured to appear in the native dock.')
 }
 
 $stuckRects = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3' -ErrorAction SilentlyContinue).Settings

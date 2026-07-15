@@ -28,7 +28,7 @@ internal sealed record SystemSnapshot(
     string ActiveApp)
 {
     public static SystemSnapshot Empty { get; } = new(
-        0, 0, 0, 0, 0, 100, false, ConnectionKind.Offline, "Offline", "Desktop");
+        0, 0, 0, 0, 0, 100, false, ConnectionKind.Offline, "Offline", "Finder");
 }
 
 internal sealed class SystemStateProvider : IDisposable
@@ -41,7 +41,7 @@ internal sealed class SystemStateProvider : IDisposable
     private ulong _previousIdle;
     private ulong _previousKernel;
     private ulong _previousUser;
-    private string _lastActiveApp = "Desktop";
+    private string _lastActiveApp = "Finder";
     private int _polling;
     private bool _disposed;
 
@@ -202,7 +202,11 @@ internal sealed class SystemStateProvider : IDisposable
     private string ReadActiveApp()
     {
         var window = NativeMethods.GetForegroundWindow();
-        if (window == IntPtr.Zero) return _lastActiveApp;
+        if (window == IntPtr.Zero || NativeMethods.IsIconic(window))
+        {
+            _lastActiveApp = "Finder";
+            return _lastActiveApp;
+        }
         NativeMethods.GetWindowThreadProcessId(window, out var processId);
         if (processId == 0) return _lastActiveApp;
 
@@ -211,7 +215,10 @@ internal sealed class SystemStateProvider : IDisposable
             using var process = Process.GetProcessById((int)processId);
             var processName = process.ProcessName;
             if (processName.StartsWith("MacMakeover.", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("seelen-ui", StringComparison.OrdinalIgnoreCase))
+                processName.Equals("seelen-ui", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("ShellExperienceHost", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("StartMenuExperienceHost", StringComparison.OrdinalIgnoreCase) ||
+                processName.Equals("SearchHost", StringComparison.OrdinalIgnoreCase))
             {
                 return _lastActiveApp;
             }

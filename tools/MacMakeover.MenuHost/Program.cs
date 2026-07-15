@@ -1438,7 +1438,8 @@ internal static class NativeMethods
 
             var classBuffer = new StringBuilder(256);
             GetClassName(window, classBuffer, classBuffer.Capacity);
-            if (classBuffer.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
+            var windowClass = classBuffer.ToString();
+            if (windowClass is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
             {
                 return true;
             }
@@ -1448,6 +1449,22 @@ internal static class NativeMethods
                 return true;
             }
 
+            var processName = string.Empty;
+            try
+            {
+                using var process = Process.GetProcessById((int)processId);
+                processName = process.ProcessName;
+            }
+            catch
+            {
+                // The window can disappear while Show Desktop is enumerating it.
+            }
+            if (processName is "ShellExperienceHost" or "StartMenuExperienceHost" or "SearchHost" or "TextInputHost")
+            {
+                return true;
+            }
+
+            Program.Log($"Show Desktop found visible window: {processName} [{windowClass}]");
             found = true;
             return false;
         }, IntPtr.Zero);
