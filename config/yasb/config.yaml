@@ -1,0 +1,359 @@
+# Hot reload can tear down and re-register the Windows appbar while Qt and the
+# audio widgets are still active. Production updates use a clean stop/start.
+watch_config: false
+watch_stylesheet: false
+debug: false
+update_check: true
+show_systray: false
+system_colors: false
+
+tooltip:
+  offset: 5
+  blur_effect:
+    enabled: true
+    dark_mode: true
+    round_corners: true
+    round_corners_type: small
+    border_color: None
+
+bars:
+  mac-menu-bar-laptop:
+    enabled: true
+    screens: ['\\.\DISPLAY1']
+    class_name: mac-menu-bar laptop-bar
+    context_menu: false
+    alignment:
+      position: top
+      # Left anchoring avoids Qt centering the logical-width bar in a physical-width
+      # monitor rectangle on this mixed-DPI panel.
+      align: left
+    blur_effect:
+      enabled: true
+      dark_mode: true
+      round_corners: false
+      border_color: None
+    window_flags:
+      always_on_top: true
+      windows_app_bar: true
+      hide_on_fullscreen: true
+      hide_on_maximized: false
+      auto_hide: false
+    dimensions:
+      # YASB 2.0.5 treats 100% as physical pixels and then applies the 150% Qt
+      # scale again on this panel. 853 logical px is the laptop's real 1280 px width.
+      width: 853
+      height: 26
+    padding:
+      top: 0
+      left: 0
+      bottom: 0
+      right: 0
+    animation:
+      enabled: false
+      duration: 0
+    layouts:
+      left:
+        alignment: left
+        stretch: true
+      center:
+        alignment: center
+        stretch: true
+      right:
+        alignment: right
+        stretch: true
+    widgets:
+      left: [apple_menu, active_window]
+      center: [cpu, memory, traffic]
+      right: [wifi, bluetooth, battery, volume, control_center, notifications, clock]
+
+  mac-menu-bar-external:
+    enabled: true
+    screens: ['LG FULL HD']
+    class_name: mac-menu-bar external-bar
+    context_menu: false
+    alignment:
+      position: top
+      align: center
+    blur_effect:
+      enabled: true
+      dark_mode: true
+      round_corners: false
+      border_color: None
+    window_flags:
+      always_on_top: true
+      windows_app_bar: true
+      hide_on_fullscreen: true
+      hide_on_maximized: false
+      auto_hide: false
+    dimensions:
+      width: '100%'
+      height: 26
+    padding:
+      top: 0
+      left: 0
+      bottom: 0
+      right: 0
+    animation:
+      enabled: false
+      duration: 0
+    layouts:
+      left:
+        alignment: left
+        stretch: true
+      center:
+        alignment: center
+        stretch: true
+      right:
+        alignment: right
+        stretch: true
+    widgets:
+      left: [apple_menu, active_window]
+      center: [cpu, memory, traffic]
+      right: [wifi, bluetooth, battery, volume, control_center, notifications, clock]
+
+widgets:
+  apple_menu:
+    type: yasb.custom.CustomWidget
+    options:
+      class_name: apple-menu-widget
+      label: "<span class='apple-mark'>apple</span>"
+      label_placeholder: ''
+      tooltip: false
+      exec_options:
+        run_cmd: 'cmd.exe /d /c echo ready'
+        run_once: true
+        return_format: string
+      callbacks:
+        on_left: 'exec explorer.exe macmakeover-apple-menu:'
+        on_middle: do_nothing
+        on_right: do_nothing
+
+  active_window:
+    type: yasb.active_window.ActiveWindowWidget
+    options:
+      label: '{win[app_name]}'
+      label_alt: '{win[title]}'
+      label_no_window: Finder
+      label_icon: true
+      label_icon_size: 14
+      max_length: 24
+      max_length_ellipsis: '...'
+      monitor_exclusive: true
+      ignore_window:
+        classes: []
+        processes: [yasb.exe, MacMakeover.MenuHost.exe]
+        titles: [Apple Menu, Control Center, Network, Bluetooth]
+      rewrite:
+        - pattern: '^(Windows Explorer|File Explorer|Explorer|Program Manager)$'
+          replacement: Finder
+      callbacks:
+        on_left: do_nothing
+        on_middle: do_nothing
+        on_right: do_nothing
+
+  cpu:
+    type: yasb.cpu.CpuWidget
+    options:
+      label: "<span>\ueea1</span> CPU {info[percent][total]}%"
+      label_alt: 'CPU {info[freq][current]} MHz'
+      update_interval: 2000
+      hide_decimal: true
+      menu:
+        enabled: true
+        show_graph: true
+        show_graph_grid: true
+        graph_history_size: 60
+        alignment: center
+      callbacks:
+        on_left: toggle_menu
+        on_middle: do_nothing
+        on_right: toggle_label
+
+  memory:
+    type: yasb.memory.MemoryWidget
+    options:
+      label: "<span>\ue9d9</span> RAM {virtual_mem_percent}%"
+      label_alt: 'RAM {virtual_mem_used}/{virtual_mem_total}'
+      update_interval: 3000
+      hide_decimal: true
+      menu:
+        enabled: true
+        show_graph: true
+        show_graph_grid: true
+        graph_history_size: 60
+        alignment: center
+      callbacks:
+        on_left: toggle_menu
+        on_middle: do_nothing
+        on_right: toggle_label
+
+  traffic:
+    type: yasb.traffic.TrafficWidget
+    options:
+      label: "NET \u2193{download_speed} \u2191{upload_speed}"
+      label_alt: "Network \u2193{download_speed} \u2191{upload_speed}"
+      interface: auto
+      update_interval: 1500
+      hide_if_offline: false
+      speed_unit: bytes
+      hide_decimal: true
+      speed_threshold:
+        min_upload: 1024
+        min_download: 1024
+      menu:
+        blur: true
+        round_corners: true
+        round_corners_type: small
+        border_color: None
+        alignment: center
+        direction: down
+        show_interface_name: true
+        show_internet_info: true
+      callbacks:
+        on_left: toggle_menu
+        on_middle: do_nothing
+        on_right: toggle_label
+
+  wifi:
+    type: yasb.wifi.WifiWidget
+    options:
+      label: "<span>\ue701</span>"
+      label_alt: "<span>\ue701</span> {wifi_name}"
+      update_interval: 2000
+      wifi_icons: ["\ue701", "\ue701", "\ue701", "\ue701", "\ue701"]
+      ethernet_label: "<span>\ueba9</span>"
+      ethernet_label_alt: "<span>\ueba9</span> {ip_addr}"
+      ethernet_icon: "\ueba9"
+      get_exact_wifi_strength: false
+      hide_if_ethernet: false
+      menu_config:
+        blur: true
+        round_corners: true
+        round_corners_type: small
+        border_color: None
+        alignment: right
+        direction: down
+      callbacks:
+        on_left: toggle_menu
+        on_middle: do_nothing
+        on_right: 'exec explorer.exe ms-settings:network-wifi'
+
+  bluetooth:
+    type: yasb.bluetooth.BluetoothWidget
+    options:
+      label: "<span>\ue702</span>"
+      label_alt: "<span>\ue702</span>"
+      label_no_device: Bluetooth
+      tooltip: true
+      icons:
+        bluetooth_on: "\ue702"
+        bluetooth_off: "\ue702"
+        bluetooth_connected: "\ue702"
+      callbacks:
+        on_left: 'exec explorer.exe macmakeover-bluetooth:'
+        on_middle: do_nothing
+        on_right: 'exec explorer.exe ms-settings:bluetooth'
+
+  battery:
+    type: yasb.battery.BatteryWidget
+    options:
+      label: "<span>{icon}</span> {percent}%"
+      label_alt: "<span>{icon}</span> {percent}% {time_remaining}"
+      update_interval: 5000
+      hide_unsupported: true
+      charging_options:
+        icon_format: '{charging_icon}'
+        blink_charging_icon: false
+        blink_interval: 1000
+      status_icons:
+        icon_charging: "\ue83e"
+        icon_critical: "\ue850"
+        icon_low: "\ue850"
+        icon_medium: "\ue850"
+        icon_high: "\ue850"
+        icon_full: "\ue850"
+      callbacks:
+        on_left: 'exec explorer.exe ms-settings:batterysaver'
+        on_middle: do_nothing
+        on_right: toggle_label
+
+  volume:
+    type: yasb.volume.VolumeWidget
+    options:
+      label: "<span>{icon}</span>"
+      label_alt: "<span>{icon}</span> {level}%"
+      tooltip: true
+      scroll_step: 2
+      slider_beep: false
+      icons:
+        muted: "\ue74f"
+        '10': "\ue992"
+        '30': "\ue993"
+        '60': "\ue994"
+        '100': "\ue995"
+      audio_menu:
+        blur: true
+        round_corners: true
+        round_corners_type: small
+        border_color: None
+        alignment: right
+        direction: down
+        show_apps: true
+        show_app_labels: false
+        show_app_icons: true
+        show_apps_expanded: false
+      callbacks:
+        on_left: toggle_volume_menu
+        on_middle: do_nothing
+        on_right: toggle_mute
+
+  control_center:
+    type: yasb.custom.CustomWidget
+    options:
+      class_name: control-center-widget
+      label: "<span>\ue713</span>"
+      label_placeholder: ''
+      tooltip: false
+      exec_options:
+        run_cmd: 'cmd.exe /d /c echo ready'
+        run_once: true
+        return_format: string
+      callbacks:
+        on_left: 'exec explorer.exe macmakeover-control-center:'
+        on_middle: do_nothing
+        on_right: do_nothing
+
+  notifications:
+    type: yasb.notifications.NotificationsWidget
+    options:
+      label: "<span>\ue7ed</span>"
+      label_alt: '{count} notifications'
+      hide_empty: false
+      tooltip: false
+      callbacks:
+        on_left: toggle_notification
+        on_middle: do_nothing
+        on_right: do_nothing
+
+  clock:
+    type: yasb.clock.ClockWidget
+    options:
+      label: '{%a %#d %b %H:%M}'
+      label_alt: '{%A %#d %B %Y %H:%M}'
+      update_interval: 1000
+      tooltip: false
+      calendar:
+        blur: true
+        round_corners: true
+        round_corners_type: small
+        border_color: None
+        alignment: right
+        direction: down
+        show_holidays: false
+        show_week_numbers: false
+        show_years: true
+        extended: false
+      callbacks:
+        on_left: toggle_calendar
+        on_middle: do_nothing
+        on_right: toggle_label

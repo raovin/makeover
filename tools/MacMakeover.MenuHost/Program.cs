@@ -136,6 +136,7 @@ internal sealed class MenuContext : ApplicationContext
         try
         {
             Program.Log("ShowCommand " + command);
+            var normalizedCommand = command.Trim().ToLowerInvariant();
             var previous = _current;
             _current = null;
             previous?.Close();
@@ -144,7 +145,13 @@ internal sealed class MenuContext : ApplicationContext
                 previous.Dispose();
             }
 
-            _current = command.Trim().ToLowerInvariant() switch
+            if (normalizedCommand == "desktop")
+            {
+                MenuForm.ToggleDesktop();
+                return;
+            }
+
+            _current = normalizedCommand switch
             {
                 "apple" => MenuForm.CreateApple(),
                 "control" => MenuForm.CreateControlCenter(),
@@ -197,6 +204,7 @@ internal sealed class MenuContext : ApplicationContext
 
 internal sealed class MenuForm : Form
 {
+    private static bool _desktopShown;
     private readonly Color _panel = Color.FromArgb(30, 35, 46);
     private readonly Color _panelTop = Color.FromArgb(40, 47, 61);
     private readonly Color _panelBottom = Color.FromArgb(23, 27, 36);
@@ -1105,12 +1113,32 @@ internal sealed class MenuForm : Form
         }
     }
 
-    private static void ToggleDesktop()
+    internal static void ToggleDesktop()
     {
         var shellType = Type.GetTypeFromProgID("Shell.Application");
         if (shellType is null) return;
         dynamic? shell = Activator.CreateInstance(shellType);
-        shell?.ToggleDesktop();
+        if (shell is null) return;
+
+        try
+        {
+            // IShellDispatch.ToggleDesktop is a no-op on some Windows 11 builds.
+            // MinimizeAll/UndoMinimizeAll provides the same reversible behavior.
+            if (_desktopShown)
+            {
+                shell.UndoMinimizeAll();
+            }
+            else
+            {
+                shell.MinimizeAll();
+            }
+
+            _desktopShown = !_desktopShown;
+        }
+        finally
+        {
+            Marshal.FinalReleaseComObject(shell);
+        }
     }
 
     private static string GetBatterySummary()

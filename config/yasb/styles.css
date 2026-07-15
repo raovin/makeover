@@ -1,0 +1,240 @@
+:root {
+  --bar-bg: rgba(20, 27, 37, 0.94);
+  --bar-border: rgba(255, 255, 255, 0.12);
+  --text: rgba(250, 252, 255, 0.96);
+  --muted: rgba(225, 231, 240, 0.82);
+  --hover: rgba(255, 255, 255, 0.12);
+  --pressed: rgba(255, 255, 255, 0.18);
+  --popup: rgba(27, 33, 43, 0.97);
+  --popup-hover: rgba(255, 255, 255, 0.10);
+  --accent: #55d6be;
+  --danger: #ff6b72;
+}
+
+* {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 0;
+  margin: 0;
+}
+
+.mac-menu-bar {
+  background-color: var(--bar-bg);
+  border-bottom: 1px solid var(--bar-border);
+}
+
+.mac-menu-bar .container-left,
+.mac-menu-bar .container-center,
+.mac-menu-bar .container-right {
+  margin: 0 7px;
+}
+
+.widget {
+  height: 24px;
+  background: transparent;
+  border: none;
+}
+
+.widget .widget-container {
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 5px;
+}
+
+.widget .label,
+.widget .icon {
+  line-height: 24px;
+  color: var(--text);
+}
+
+.widget .icon,
+.apple-mark {
+  font-family: 'Segoe Fluent Icons';
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.wifi-widget:hover .widget-container,
+.bluetooth-widget:hover .widget-container,
+.battery-widget:hover .widget-container,
+.volume-widget:hover .widget-container,
+.notifications-widget:hover .widget-container,
+.clock-widget:hover .widget-container,
+.control-center-widget:hover .widget-container,
+.apple-menu-widget:hover .widget-container {
+  background-color: var(--hover);
+}
+
+.wifi-widget:pressed .widget-container,
+.bluetooth-widget:pressed .widget-container,
+.battery-widget:pressed .widget-container,
+.volume-widget:pressed .widget-container,
+.notifications-widget:pressed .widget-container,
+.clock-widget:pressed .widget-container,
+.control-center-widget:pressed .widget-container,
+.apple-menu-widget:pressed .widget-container {
+  background-color: var(--pressed);
+}
+
+.apple-menu-widget .widget-container {
+  min-width: 24px;
+  max-width: 24px;
+  padding: 0 3px;
+}
+
+.apple-menu-widget .apple-mark {
+  min-width: 17px;
+  max-width: 17px;
+  min-height: 18px;
+  max-height: 18px;
+  color: transparent;
+  image: url('__YASB_APPLE_MARK__');
+}
+
+.active-window-widget .widget-container {
+  padding-left: 5px;
+  max-width: 150px;
+}
+
+.active-window-widget .label {
+  font-weight: 700;
+}
+
+.active-window-widget .icon {
+  padding-right: 5px;
+}
+
+.cpu-widget .widget-container {
+  min-width: 66px;
+  max-width: 66px;
+}
+
+.memory-widget .widget-container {
+  min-width: 76px;
+  max-width: 76px;
+}
+
+.traffic-widget .widget-container {
+  min-width: 112px;
+  max-width: 112px;
+}
+
+.laptop-bar .widget .widget-container {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.laptop-bar .active-window-widget .widget-container {
+  max-width: 118px;
+}
+
+.laptop-bar .cpu-widget .widget-container {
+  min-width: 62px;
+  max-width: 62px;
+}
+
+.laptop-bar .memory-widget .widget-container {
+  min-width: 70px;
+  max-width: 70px;
+}
+
+.laptop-bar .traffic-widget .widget-container {
+  min-width: 98px;
+  max-width: 98px;
+}
+
+.cpu-widget .widget-container,
+.memory-widget .widget-container,
+.traffic-widget .widget-container {
+  padding: 0 4px;
+}
+
+.cpu-widget:hover .widget-container,
+.memory-widget:hover .widget-container,
+.traffic-widget:hover .widget-container {
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+.battery-widget .icon.status-charging,
+.battery-widget .label.status-charging,
+.battery-widget .icon.status-high,
+.battery-widget .icon.status-full {
+  color: #55db78;
+}
+
+.battery-widget .icon.status-critical,
+.battery-widget .label.status-critical {
+  color: var(--danger);
+}
+
+.wifi-widget .icon,
+.bluetooth-widget .icon,
+.volume-widget .icon,
+.notifications-widget .icon,
+.control-center-widget .icon {
+  min-width: 15px;
+}
+
+.home-menu,
+.audio-menu,
+.wifi-menu,
+.calendar,
+.cpu-popup,
+.memory-popup,
+.traffic-popup {
+  background-color: var(--popup);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.home-menu .menu-item {
+  padding: 7px 42px 7px 14px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.home-menu .menu-item:hover,
+.audio-menu .device:hover {
+  background-color: var(--popup-hover);
+}
+
+.home-menu .separator {
+  max-height: 1px;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.audio-menu {
+  min-width: 310px;
+}
+
+.audio-menu .system-volume-container .volume-slider {
+  border: none;
+}
+
+.clock-popup.calendar {
+  min-width: 420px;
+  background-color: var(--popup);
+}
+
+.clock-popup.calendar .calendar-table,
+.clock-popup.calendar .calendar-table::item {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  outline: none;
+}
+
+.clock-popup.calendar .calendar-table::item:selected {
+  color: #07120f;
+  background-color: var(--accent);
+  border-radius: 11px;
+}
+
+QToolTip {
+  color: var(--text);
+  background-color: var(--popup);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 5px 8px;
+  border-radius: 4px;
+}
