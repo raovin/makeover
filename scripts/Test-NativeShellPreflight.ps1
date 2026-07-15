@@ -1,0 +1,140 @@
+[CmdletBinding()]
+param(
+  [string]$DeploymentRoot = (Join-Path $env:LOCALAPPDATA 'MacMakeover\bin'),
+  [switch]$SkipDownloadCheck
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$failures = [System.Collections.Generic.List[string]]::new()
+$warnings = [System.Collections.Generic.List[string]]::new()
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$configPath = Join-Path $repoRoot 'config\windhawk\native-dock.json'
+$config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json -AsHashtable
+
+foreach ($required in @(
+    (Join-Path $DeploymentRoot 'MacMakeover.MenuBar.exe'),
+    (Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'),
+    (Join-Path $DeploymentRoot 'Assets\apple-mark.png'),
+    (Join-Path $repoRoot 'assets\wallpapers\mac-wallpaper.jpg'),
+    (Join-Path $env:ProgramFiles 'Windhawk\windhawk.exe')
+  )) {
+  if (-not (Test-Path -LiteralPath $required)) {
+    $failures.Add("Missing preflight dependency: $required")
+  }
+}
+
+$scriptNames = @(
+  'Build-NativeShell.ps1',
+  'Capture-Desktop.ps1',
+  'Install-NativeDock.ps1',
+  'Prepare-NativeShellUserProfile.ps1',
+  'Promote-NativeShell.ps1',
+  'Request-NativeShellPromotion.ps1',
+  'Switch-To-NativeShell.ps1',
+  'Invoke-NativeShellPromotion.ps1',
+  'Complete-NativeShellPromotion.ps1',
+  'Test-NativeShellProfile.ps1',
+  'Restore-SeelenProfile.ps1',
+  'Restore-SeelenSystemProfile.ps1'
+)
+foreach ($scriptName in $scriptNames) {
+  $scriptPath = Join-Path $PSScriptRoot $scriptName
+  $tokens = $null
+  $parseErrors = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile(
+    $scriptPath,
+    [ref]$tokens,
+    [ref]$parseErrors)
+  foreach ($parseError in $parseErrors) {
+    $failures.Add("PowerShell parse error in ${scriptName}: $($parseError.Message)")
+  }
+}
+
+foreach ($elevatedScript in @('Switch-To-NativeShell.ps1', 'Invoke-NativeShellPromotion.ps1', 'Restore-SeelenSystemProfile.ps1')) {
+  $firstLine = Get-Content -LiteralPath (Join-Path $PSScriptRoot $elevatedScript) -TotalCount 1
+  if ($firstLine -ne '#Requires -RunAsAdministrator') {
+    $failures.Add("$elevatedScript is missing its elevation guard.")
+  }
+}
+
+foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-NativeShellPromotion.ps1', 'Restore-SeelenProfile.ps1')) {
+  $firstLine = Get-Content -LiteralPath (Join-Path $PSScriptRoot $userScript) -TotalCount 1
+  if ($firstLine -eq '#Requires -RunAsAdministrator') {
+    $failures.Add("$userScript must run in the unelevated user token.")
+  }
+}
+
+if ($config.settings['controlStyles[1].styles[0]'] -notmatch '#FF[0-9A-Fa-f]{6}') {
+  $failures.Add('The dock background is not configured as fully opaque.')
+}
+if ($config.settings['controlStyles[2].styles[0]'] -ne 'Visibility=Collapsed') {
+  $failures.Add('The duplicate native system tray is not hidden from the dock profile.')
+}
+if ($config.settings['controlStyles[6].styles[0]'] -ne 'Visibility=Collapsed') {
+  $failures.Add('The duplicate Start button is not hidden from the dock profile.')
+}
+if ($config.settings['controlStyles[7].styles[0]'] -ne 'Visibility=Collapsed' -or
+    $config.settings['controlStyles[8].styles[0]'] -ne 'Visibility=Collapsed') {
+  $failures.Add('Windows Search or Widgets is still exposed inside the dock profile.')
+}
+
+$windhawkProfile = Join-Path $env:ProgramData 'Windhawk\userprofile.json'
+if (Test-Path -LiteralPath $windhawkProfile) {
+  $profile = Get-Content -LiteralPath $windhawkProfile -Raw | ConvertFrom-Json -AsHashtable
+  if (-not $profile.ContainsKey('app') -or -not $profile.app.ContainsKey('version')) {
+    $warnings.Add('Windhawk is installed, but its version metadata was not found.')
+  }
+} else {
+  $failures.Add('Windhawk user profile was not found.')
+}
+
+if (-not $SkipDownloadCheck) {
+  $tempRoot = Join-Path $env:TEMP 'MacMakeover\preflight'
+  New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+  $tempDll = Join-Path $tempRoot 'taskbar-styler.dll'
+  Invoke-WebRequest -Uri $config.binaryUrl -OutFile $tempDll -UseBasicParsing -TimeoutSec 60
+  $actualHash = (Get-FileHash -LiteralPath $tempDll -Algorithm SHA256).Hash
+  if ($actualHash -ne $config.binarySha256) {
+    $failures.Add("Pinned Windhawk binary hash mismatch: $actualHash")
+  }
+}
+
+$hostPath = Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'
+if (Test-Path -LiteralPath $hostPath) {
+  $hostSelfTest = Start-Process -FilePath $hostPath -ArgumentList '--self-test' `
+    -Wait -PassThru -WindowStyle Hidden
+  if ($hostSelfTest.ExitCode -ne 0) {
+    $failures.Add("MenuHost Core Audio self-test failed with exit code $($hostSelfTest.ExitCode).")
+  }
+}
+
+$nativePins = @(Get-ChildItem -LiteralPath "$env:APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar" `
+  -Filter '*.lnk' -ErrorAction SilentlyContinue)
+if ($nativePins.Count -lt 10) {
+  $warnings.Add("Only $($nativePins.Count) native taskbar shortcuts were found.")
+}
+
+Add-Type -AssemblyName System.Windows.Forms
+$screens = [Windows.Forms.Screen]::AllScreens
+foreach ($screen in $screens) {
+  Write-Host ("Display {0}: {1}x{2} at {3},{4}; work area {5}x{6}" -f `
+      $screen.DeviceName,
+      $screen.Bounds.Width,
+      $screen.Bounds.Height,
+      $screen.Bounds.Left,
+      $screen.Bounds.Top,
+      $screen.WorkingArea.Width,
+      $screen.WorkingArea.Height)
+}
+
+foreach ($warning in $warnings) { Write-Warning $warning }
+if ($failures.Count) {
+  foreach ($failure in $failures) { Write-Error $failure -ErrorAction Continue }
+  exit 1
+}
+
+Write-Host ("PASS: native-shell preflight is ready. {0} display(s); {1} native pinned shortcuts." -f `
+    $screens.Count,
+    $nativePins.Count)

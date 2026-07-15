@@ -5,62 +5,174 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $failures = [System.Collections.Generic.List[string]]::new()
-$yasb = Get-Process yasb -ErrorAction SilentlyContinue
-$seelen = Get-Process seelen-ui, slu-service -ErrorAction SilentlyContinue
-$menuHost = Get-Process MacMakeover.MenuHost -ErrorAction SilentlyContinue
-$seelenTask = Get-ScheduledTask -TaskPath '\Seelen\' -TaskName 'Seelen UI Service' -ErrorAction SilentlyContinue
-$seelenTaskTarget = if ($seelenTask) { $seelenTask.Actions.Execute | Select-Object -First 1 } else { $null }
+$warnings = [System.Collections.Generic.List[string]]::new()
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$deploymentRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\bin'
+$modConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'config\windhawk\native-dock.json') -Raw |
+  ConvertFrom-Json -AsHashtable
+$modRegistry = "HKLM:\Software\Windhawk\Engine\Mods\$($modConfig.modId)"
+$modSettingsRegistry = Join-Path $modRegistry 'Settings'
 
-if (-not $yasb) { $failures.Add('YASB is not running.') }
-if ($seelen) { $failures.Add('Seelen is still running alongside YASB.') }
-if ($seelenTask -and $seelenTask.State -ne 'Disabled' -and $seelenTaskTarget -and (Test-Path -LiteralPath $seelenTaskTarget)) {
-  $failures.Add('Seelen is still enabled at logon.')
-} elseif ($seelenTask -and $seelenTask.State -ne 'Disabled') {
-  Write-Warning 'An inert Seelen scheduled-task entry remains, but its executable is no longer installed.'
-}
-if (-not $menuHost) { $failures.Add('MenuHost is not running.') }
+$menuBar = @(Get-Process MacMakeover.MenuBar -ErrorAction SilentlyContinue)
+$menuHost = @(Get-Process MacMakeover.MenuHost -ErrorAction SilentlyContinue)
+$seelen = @(Get-Process seelen-ui, slu-service -ErrorAction SilentlyContinue)
+$yasb = @(Get-Process yasb -ErrorAction SilentlyContinue)
 
-$stuckRects = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3' -ErrorAction SilentlyContinue).Settings
-if ($stuckRects -and $stuckRects.Length -gt 8 -and (($stuckRects[8] -band 1) -eq 1)) {
-  $failures.Add('Windows taskbar auto-hide is enabled; maximized apps can appear behind the dock.')
-}
+if ($menuBar.Count -ne 1) { $failures.Add("Expected one MenuBar process; found $($menuBar.Count).") }
+if ($menuHost.Count -ne 1) { $failures.Add("Expected one MenuHost process; found $($menuHost.Count).") }
+if ($seelen.Count) { $failures.Add('Seelen is still running alongside the native shell.') }
+if ($yasb.Count) { $failures.Add('YASB is still running alongside the native shell.') }
+if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { $failures.Add('Windows Explorer is not running.') }
 
-$configRoot = Join-Path $env:USERPROFILE '.config\yasb'
-foreach ($required in @('config.yaml', 'styles.css', '.env', 'assets\apple-mark.svg')) {
-  if (-not (Test-Path -LiteralPath (Join-Path $configRoot $required))) {
-    $failures.Add("Missing live YASB file: $required")
+foreach ($required in @(
+    'MacMakeover.MenuBar.exe',
+    'MacMakeover.MenuHost.exe',
+    'Assets\apple-mark.png'
+  )) {
+  if (-not (Test-Path -LiteralPath (Join-Path $deploymentRoot $required))) {
+    $failures.Add("Missing deployed file: $required")
   }
 }
 
-$liveConfig = Get-Content -LiteralPath (Join-Path $configRoot 'config.yaml') -Raw -ErrorAction SilentlyContinue
-if ($liveConfig -notmatch '(?m)^watch_config:\s*false\s*$' -or
-    $liveConfig -notmatch '(?m)^watch_stylesheet:\s*false\s*$') {
-  $failures.Add('YASB production hot reload is enabled.')
+$hostSelfTest = Start-Process -FilePath (Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe') `
+  -ArgumentList '--self-test' -Wait -PassThru -WindowStyle Hidden
+if ($hostSelfTest.ExitCode -ne 0) {
+  $failures.Add("MenuHost Core Audio self-test failed with exit code $($hostSelfTest.ExitCode).")
+}
+
+$seelenTask = Get-ScheduledTask -TaskPath '\Seelen\' -TaskName 'Seelen UI Service' -ErrorAction SilentlyContinue
+if ($seelenTask -and $seelenTask.State -ne 'Disabled') {
+  $failures.Add('Seelen is still enabled at logon.')
+}
+
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$runValues = Get-ItemProperty -LiteralPath $runKey -ErrorAction SilentlyContinue
+if (-not $runValues -or $runValues.MacMakeoverMenuBar -notmatch 'MacMakeover\.MenuBar\.exe') {
+  $failures.Add('MenuBar is not registered at logon.')
+}
+if (-not $runValues -or $runValues.MacMakeoverMenuHost -notmatch 'MacMakeover\.MenuHost\.exe') {
+  $failures.Add('MenuHost is not registered at logon.')
+}
+
+$mod = Get-ItemProperty -LiteralPath $modRegistry -ErrorAction SilentlyContinue
+if (-not $mod) {
+  $failures.Add('Windows 11 Taskbar Styler is not installed.')
+} else {
+  if ($mod.Disabled) { $failures.Add('Windows 11 Taskbar Styler is disabled.') }
+  if ($mod.Version -ne $modConfig.version) { $failures.Add("Unexpected taskbar styler version: $($mod.Version)") }
+  $binary = Join-Path $env:ProgramData "Windhawk\Engine\Mods\64\$($mod.LibraryFileName)"
+  if (-not (Test-Path -LiteralPath $binary)) {
+    $failures.Add('The configured taskbar styler DLL is missing.')
+  } elseif ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash -ne $modConfig.binarySha256) {
+    $failures.Add('The installed taskbar styler DLL hash does not match the pinned build.')
+  }
+}
+
+$dockSettings = Get-ItemProperty -LiteralPath $modSettingsRegistry -ErrorAction SilentlyContinue
+if (-not $dockSettings -or $dockSettings.theme -ne 'DockLike') {
+  $failures.Add('DockLike is not the active taskbar theme.')
+}
+if (-not $dockSettings -or $dockSettings.'controlStyles[2].styles[0]' -ne 'Visibility=Collapsed') {
+  $failures.Add('The native system tray is not hidden from the bottom dock.')
+}
+$dockSettingNames = if ($dockSettings) { @($dockSettings.PSObject.Properties.Name) } else { @() }
+$searchVisibility = if ($dockSettingNames -contains 'controlStyles[7].styles[0]') {
+  $dockSettings.PSObject.Properties['controlStyles[7].styles[0]'].Value
+} else { $null }
+$widgetsVisibility = if ($dockSettingNames -contains 'controlStyles[8].styles[0]') {
+  $dockSettings.PSObject.Properties['controlStyles[8].styles[0]'].Value
+} else { $null }
+if ($searchVisibility -ne 'Visibility=Collapsed' -or $widgetsVisibility -ne 'Visibility=Collapsed') {
+  $warnings.Add('Windows Search or Widgets is still visible; re-run the elevated dock phase to apply the latest polish.')
+}
+
+$stuckRects = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3' -ErrorAction SilentlyContinue).Settings
+if ($stuckRects -and $stuckRects.Length -gt 8 -and (($stuckRects[8] -band 1) -eq 1)) {
+  $failures.Add('Native taskbar auto-hide is enabled; maximized apps can overlap the dock.')
+}
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class NativeShellProbe {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern IntPtr FindWindow(string className, string windowName);
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr window);
+}
+'@
+$taskbarWindow = [NativeShellProbe]::FindWindow('Shell_TrayWnd', $null)
+if ($taskbarWindow -eq [IntPtr]::Zero -or -not [NativeShellProbe]::IsWindowVisible($taskbarWindow)) {
+  $failures.Add('The native taskbar window is not visible.')
+}
+
+foreach ($screen in [Windows.Forms.Screen]::AllScreens) {
+  if ($screen.WorkingArea.Top -le $screen.Bounds.Top) {
+    $failures.Add("$($screen.DeviceName) has no reserved top menu-bar work area.")
+  }
+  if ($screen.WorkingArea.Bottom -ge $screen.Bounds.Bottom) {
+    $failures.Add("$($screen.DeviceName) has no reserved bottom dock work area.")
+  }
 }
 
 $protocols = @(
   'macmakeover-apple-menu',
   'macmakeover-control-center',
   'macmakeover-network',
-  'macmakeover-bluetooth'
+  'macmakeover-bluetooth',
+  'macmakeover-notification-center'
 )
 foreach ($protocol in $protocols) {
   $command = (Get-ItemProperty -LiteralPath "Registry::HKEY_CURRENT_USER\Software\Classes\$protocol\shell\open\command" -ErrorAction SilentlyContinue).'(default)'
   if ([string]::IsNullOrWhiteSpace($command)) {
     $failures.Add("Protocol is not registered: $protocol")
   } elseif ($command -match 'wscript|powershell') {
-    $failures.Add("Protocol uses a visible/slow launcher: $protocol")
+    $failures.Add("Protocol uses a visible or slow launcher: $protocol")
+  } elseif ($protocol -ne 'macmakeover-notification-center' -and
+            $command -notmatch [regex]::Escape((Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe'))) {
+    $failures.Add("Protocol does not use the deployed resident MenuHost: $protocol")
   }
 }
 
-$taskbar = Get-Process explorer -ErrorAction SilentlyContinue
-if (-not $taskbar) { $failures.Add('Windows Explorer shell is not running.') }
+$wallpaper = (Get-ItemProperty 'HKCU:\Control Panel\Desktop' -Name Wallpaper -ErrorAction SilentlyContinue).Wallpaper
+if ($wallpaper -notmatch 'MacMakeover\\wallpapers\\mac-wallpaper\.jpg$' -or -not (Test-Path -LiteralPath $wallpaper)) {
+  $failures.Add('The Mac wallpaper is not applied from the managed local copy.')
+}
 
+$hotCornerProcesses = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
+  Where-Object { $_.CommandLine -match 'hot-corners\.ps1' }
+if ($hotCornerProcesses) {
+  $failures.Add('The polling hot-corner helper is still running.')
+}
+
+$nativePins = @(Get-ChildItem -LiteralPath "$env:APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar" -Filter '*.lnk' -ErrorAction SilentlyContinue)
+if ($nativePins.Count -lt 10) {
+  $warnings.Add("Only $($nativePins.Count) native taskbar shortcuts were found.")
+}
+
+if ($menuBar.Count -eq 1 -and $menuBar[0].WorkingSet64 -gt 100MB) {
+  $failures.Add("MenuBar memory exceeds 100 MB: $([math]::Round($menuBar[0].WorkingSet64 / 1MB, 1)) MB")
+}
+if ($menuHost.Count -eq 1 -and $menuHost[0].WorkingSet64 -gt 100MB) {
+  $failures.Add("MenuHost memory exceeds 100 MB: $([math]::Round($menuHost[0].WorkingSet64 / 1MB, 1)) MB")
+}
+
+$menuBarLog = Join-Path $env:LOCALAPPDATA 'MacMakeover\menu-bar.log'
+if (Test-Path -LiteralPath $menuBarLog) {
+  $recentErrors = Get-Content -LiteralPath $menuBarLog -Tail 100 |
+    Where-Object { $_ -match 'exception|failed' }
+  if ($recentErrors) {
+    $warnings.Add('Recent MenuBar diagnostics contain an error; inspect menu-bar.log.')
+  }
+}
+
+foreach ($warning in $warnings) { Write-Warning $warning }
 if ($failures.Count) {
-  $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
+  foreach ($failure in $failures) { Write-Error $failure -ErrorAction Continue }
   exit 1
 }
 
-$yasbMb = [math]::Round((($yasb | Measure-Object WorkingSet64 -Sum).Sum / 1MB), 1)
-$menuHostMb = [math]::Round((($menuHost | Measure-Object WorkingSet64 -Sum).Sum / 1MB), 1)
-Write-Host "PASS: native-shell profile is coherent. YASB ${yasbMb} MB; MenuHost ${menuHostMb} MB."
+$barMb = [math]::Round($menuBar[0].WorkingSet64 / 1MB, 1)
+$hostMb = [math]::Round($menuHost[0].WorkingSet64 / 1MB, 1)
+Write-Host ('PASS: native shell is coherent. MenuBar {0} MB; MenuHost {1} MB.' -f $barMb, $hostMb)

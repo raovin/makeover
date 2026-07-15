@@ -14,6 +14,12 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Any(arg => arg.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
+        {
+            Environment.ExitCode = RunSelfTest();
+            return;
+        }
+
         using var mutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
         var command = args.Length >= 2 && args[0].Equals("--show", StringComparison.OrdinalIgnoreCase)
             ? args[1]
@@ -40,6 +46,31 @@ internal static class Program
         }
 
         Application.Run(context);
+    }
+
+    private static int RunSelfTest()
+    {
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            var before = VolumeService.GetMasterVolume();
+            if (before is null) return 2;
+            var probe = before.Value <= 0.94F ? before.Value + 0.04F : before.Value - 0.04F;
+            VolumeService.SetMasterVolume(probe);
+            Thread.Sleep(120);
+            var changed = VolumeService.GetMasterVolume();
+            VolumeService.SetMasterVolume(before.Value);
+            Thread.Sleep(120);
+            var restored = VolumeService.GetMasterVolume();
+            var changedOk = changed is not null && Math.Abs(changed.Value - probe) <= 0.03F;
+            var restoredOk = restored is not null && Math.Abs(restored.Value - before.Value) <= 0.03F;
+            return changedOk && restoredOk ? 0 : 3;
+        }
+        catch (Exception ex)
+        {
+            Log("Self-test failed: " + ex);
+            return 1;
+        }
     }
 
     internal static void Log(string message)
@@ -204,7 +235,6 @@ internal sealed class MenuContext : ApplicationContext
 
 internal sealed class MenuForm : Form
 {
-    private static bool _desktopShown;
     private readonly Color _panel = Color.FromArgb(30, 35, 46);
     private readonly Color _panelTop = Color.FromArgb(40, 47, 61);
     private readonly Color _panelBottom = Color.FromArgb(23, 27, 36);
@@ -228,7 +258,7 @@ internal sealed class MenuForm : Form
     private readonly Screen _targetScreen;
     private readonly int _logicalWidth;
     private bool _anchorRight;
-    private int _logicalTop = 38;
+    private int _logicalTop = 24;
     private int _logicalMargin = 8;
     private DateTime _shownAt;
     private IntPtr _foregroundAtShown;
@@ -351,6 +381,7 @@ internal sealed class MenuForm : Form
         for (var i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i];
+            if (!row.Visible) continue;
             var height = LogicalToDeviceUnits(row.Height);
             var rect = new Rectangle(Padding.Left, y, ClientSize.Width - Padding.Horizontal, height);
 
@@ -489,7 +520,7 @@ internal sealed class MenuForm : Form
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
 
-        form.LoadControlCenterStateAsync(wifi, bluetooth, brightnessSlider);
+        form.Shown += (_, _) => form.LoadControlCenterStateAsync(wifi, bluetooth, brightnessSlider);
         return form;
     }
 
@@ -499,34 +530,22 @@ internal sealed class MenuForm : Form
         form.Text = "Network";
         form._anchorRight = true;
 
-        var currentSsid = ReadWifiSsid();
-        form.AddHeader("Wi-Fi", currentSsid is null ? "Not connected" : $"Connected to {currentSsid}");
+        var header = form.AddHeader("Wi-Fi", "Scanning...");
         form.AddItem("Wi-Fi Settings...", () => Start("ms-settings:network-wifi"));
         form.AddItem("Network Settings...", () => Start("ms-settings:network"));
         form.AddSeparator();
 
-        var networks = ReadWifiNetworks()
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(7)
-            .ToList();
-
-        if (networks.Count == 0)
+        var networkRows = new List<MenuRow>();
+        for (var index = 0; index < 7; index++)
         {
-            form.AddItem("No nearby networks found", null);
-        }
-        else
-        {
-            foreach (var network in networks)
-            {
-                var label = network;
-                var detail = network.Equals(currentSsid, StringComparison.OrdinalIgnoreCase) ? "Connected" : string.Empty;
-                form.AddItem(label, () => ConnectWifiProfileAsync(label), detail);
-            }
+            var row = form.AddItem(index == 0 ? "Scanning..." : string.Empty, null);
+            row.Visible = index == 0;
+            networkRows.Add(row);
         }
 
         form.AddSeparator();
         form.AddItem("Refresh", () => Program.SendCommand("network", 350));
+        form.Shown += (_, _) => form.LoadNetworkStateAsync(header, networkRows);
         return form;
     }
 
@@ -536,12 +555,13 @@ internal sealed class MenuForm : Form
         form.Text = "Bluetooth";
         form._anchorRight = true;
 
-        form.AddHeader("Bluetooth", ReadBluetoothOn() ? "On" : "Off");
+        var header = form.AddHeader("Bluetooth", "Checking...");
         form.AddItem("Bluetooth Settings...", () => Start("ms-settings:bluetooth"));
         form.AddItem("Paired Devices...", () => Start("ms-settings:connecteddevices"));
         form.AddItem("Add Device...", () => Start("ms-settings:bluetooth"));
         form.AddSeparator();
         form.AddItem("Refresh", () => Program.SendCommand("bluetooth", 350));
+        form.Shown += (_, _) => form.LoadBluetoothStateAsync(header);
         return form;
     }
 
@@ -550,27 +570,119 @@ internal sealed class MenuForm : Form
     private void LoadControlCenterStateAsync(MenuRow wifi, MenuRow bluetooth, SliderInfo brightness)
     {
         var cancellationToken = _lifetimeCts.Token;
+        _ = UpdateControlCardAsync(
+            () => ReadWifiSsid(cancellationToken),
+            ssid =>
+            {
+                wifi.Detail = ssid ?? "Not connected";
+                wifi.Active = ssid is not null;
+            },
+            cancellationToken);
+        _ = UpdateControlCardAsync(
+            () => ReadBluetoothOn(cancellationToken),
+            enabled =>
+            {
+                bluetooth.Detail = enabled ? "On" : "Off";
+                bluetooth.Active = enabled;
+            },
+            cancellationToken);
+        _ = UpdateControlCardAsync(
+            () => ReadBrightnessPercent(cancellationToken),
+            percent =>
+            {
+                if (percent is { } value) brightness.Value = Math.Clamp(value / 100f, 0f, 1f);
+            },
+            cancellationToken);
+    }
+
+    private async Task UpdateControlCardAsync<T>(Func<T> read, Action<T> apply, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var value = await Task.Run(read, cancellationToken).ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested || IsDisposed || Disposing) return;
+            BeginInvoke(() =>
+            {
+                if (cancellationToken.IsCancellationRequested || IsDisposed || Disposing) return;
+                apply(value);
+                Invalidate();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Closing the panel cancels its state probes.
+        }
+        catch (Exception ex)
+        {
+            Program.Log("Control Center state probe failed: " + ex.Message);
+        }
+    }
+
+    private void LoadNetworkStateAsync(MenuRow header, IReadOnlyList<MenuRow> rows)
+    {
+        var cancellationToken = _lifetimeCts.Token;
         _ = Task.Run(() =>
         {
-            var ssid = ReadWifiSsid(cancellationToken);
-            var bluetoothOn = ReadBluetoothOn(cancellationToken);
-            var brightnessPercent = ReadBrightnessPercent(cancellationToken);
-
             try
             {
+                var ssidTask = Task.Run(() => ReadWifiSsid(cancellationToken), cancellationToken);
+                var networksTask = Task.Run(() => ReadWifiNetworks(cancellationToken)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(rows.Count)
+                    .ToList(), cancellationToken);
+                Task.WaitAll(new Task[] { ssidTask, networksTask }, cancellationToken);
+                var currentSsid = ssidTask.Result;
+                var networks = networksTask.Result;
+
                 if (cancellationToken.IsCancellationRequested || IsDisposed || Disposing) return;
                 BeginInvoke(() =>
                 {
                     if (cancellationToken.IsCancellationRequested || IsDisposed || Disposing) return;
-                    wifi.Detail = ssid ?? "Not connected";
-                    wifi.Active = ssid is not null;
-                    bluetooth.Detail = bluetoothOn ? "On" : "Off";
-                    bluetooth.Active = bluetoothOn;
-                    if (brightnessPercent is { } pct)
+                    header.Detail = currentSsid is null ? "Not connected" : $"Connected to {currentSsid}";
+                    for (var index = 0; index < rows.Count; index++)
                     {
-                        brightness.Value = Math.Clamp(pct / 100f, 0f, 1f);
-                    }
+                        var row = rows[index];
+                        row.Visible = index < Math.Max(networks.Count, 1);
+                        if (!row.Visible) continue;
 
+                        if (networks.Count == 0)
+                        {
+                            row.Label = "No nearby networks found";
+                            row.Shortcut = string.Empty;
+                            row.Action = null;
+                            continue;
+                        }
+
+                        var network = networks[index];
+                        row.Label = network;
+                        row.Shortcut = network.Equals(currentSsid, StringComparison.OrdinalIgnoreCase) ? "Connected" : string.Empty;
+                        row.Action = () => ConnectWifiProfileAsync(network);
+                    }
+                    FitHeight();
+                    Invalidate();
+                });
+            }
+            catch
+            {
+                // Panel may already be closed; state enrichment is best-effort.
+            }
+        }, cancellationToken);
+    }
+
+    private void LoadBluetoothStateAsync(MenuRow header)
+    {
+        var cancellationToken = _lifetimeCts.Token;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var enabled = ReadBluetoothOn(cancellationToken);
+                if (cancellationToken.IsCancellationRequested || IsDisposed || Disposing) return;
+                BeginInvoke(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested || IsDisposed || Disposing) return;
+                    header.Detail = enabled ? "On" : "Off";
                     Invalidate();
                 });
             }
@@ -611,12 +723,12 @@ internal sealed class MenuForm : Form
         }
     }
 
-    private static IEnumerable<string> ReadWifiNetworks()
+    private static IEnumerable<string> ReadWifiNetworks(CancellationToken cancellationToken = default)
     {
         var networks = new List<string>();
         try
         {
-            var output = RunHidden("netsh", "wlan show networks mode=bssid", 4000);
+            var output = RunHidden("netsh", "wlan show networks mode=bssid", 4000, cancellationToken);
             foreach (var rawLine in output.Split('\n'))
             {
                 var line = rawLine.Trim();
@@ -664,8 +776,8 @@ internal sealed class MenuForm : Form
     {
         try
         {
-            var output = RunHidden("powershell.exe", "-NoProfile -NonInteractive -Command \"(Get-Service bthserv).Status\"", 4000, cancellationToken);
-            return output.Contains("Running", StringComparison.OrdinalIgnoreCase);
+            var output = RunHidden("sc.exe", "query bthserv", 1200, cancellationToken);
+            return output.Contains("RUNNING", StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -777,12 +889,28 @@ internal sealed class MenuForm : Form
     private static string FriendlyUserName()
     {
         var name = Environment.UserName;
-        return name.Equals("VineethRao", StringComparison.OrdinalIgnoreCase) ? "Vineeth Rao" : name;
+        if (string.IsNullOrWhiteSpace(name)) return "User";
+
+        var displayName = new StringBuilder(name.Length + 4);
+        for (var index = 0; index < name.Length; index++)
+        {
+            var current = name[index];
+            var startsWord = index > 0
+                && char.IsUpper(current)
+                && (char.IsLower(name[index - 1])
+                    || (index + 1 < name.Length && char.IsLower(name[index + 1])));
+            if (startsWord) displayName.Append(' ');
+            displayName.Append(current);
+        }
+
+        return displayName.ToString();
     }
 
-    private void AddHeader(string title, string detail)
+    private MenuRow AddHeader(string title, string detail)
     {
-        _rows.Add(new MenuRow(MenuRowKind.Header, title, detail, string.Empty, null, 54));
+        var row = new MenuRow(MenuRowKind.Header, title, detail, string.Empty, null, 54);
+        _rows.Add(row);
+        return row;
     }
 
     private void AddCard(string label, string detail, Action action)
@@ -790,9 +918,11 @@ internal sealed class MenuForm : Form
         _rows.Add(new MenuRow(MenuRowKind.Card, label, detail, string.Empty, action, 52));
     }
 
-    private void AddItem(string label, Action? action, string shortcut = "")
+    private MenuRow AddItem(string label, Action? action, string shortcut = "")
     {
-        _rows.Add(new MenuRow(MenuRowKind.Item, label, string.Empty, shortcut, action, 30));
+        var row = new MenuRow(MenuRowKind.Item, label, string.Empty, shortcut, action, 30);
+        _rows.Add(row);
+        return row;
     }
 
     private MenuRow AddIconCard(string glyph, string label, string detail, bool active, Action action)
@@ -823,7 +953,7 @@ internal sealed class MenuForm : Form
 
     private void FitHeight()
     {
-        ClientSize = new Size(Width, _rows.Sum(row => LogicalToDeviceUnits(row.Height)) + Padding.Vertical);
+        ClientSize = new Size(Width, _rows.Where(row => row.Visible).Sum(row => LogicalToDeviceUnits(row.Height)) + Padding.Vertical);
     }
 
     private int HitTest(Point point)
@@ -832,6 +962,7 @@ internal sealed class MenuForm : Form
         for (var i = 0; i < _rows.Count; i++)
         {
             var row = _rows[i];
+            if (!row.Visible) continue;
             var height = LogicalToDeviceUnits(row.Height);
             var rect = new Rectangle(Padding.Left, y, ClientSize.Width - Padding.Horizontal, height);
             if (rect.Contains(point)) return i;
@@ -1122,18 +1253,10 @@ internal sealed class MenuForm : Form
 
         try
         {
-            // IShellDispatch.ToggleDesktop is a no-op on some Windows 11 builds.
-            // MinimizeAll/UndoMinimizeAll provides the same reversible behavior.
-            if (_desktopShown)
-            {
-                shell.UndoMinimizeAll();
-            }
-            else
-            {
-                shell.MinimizeAll();
-            }
-
-            _desktopShown = !_desktopShown;
+            // Derive the direction from the real desktop rather than a local flag.
+            // A flag drifts as soon as the user also invokes Win+D or the taskbar.
+            if (NativeMethods.HasVisibleApplicationWindow()) shell.MinimizeAll();
+            else shell.UndoMinimizeAll();
         }
         finally
         {
@@ -1185,11 +1308,13 @@ internal sealed class MenuForm : Form
 
         public string Detail { get; set; }
 
-        public string Shortcut { get; }
+        public string Shortcut { get; set; }
 
-        public Action? Action { get; }
+        public Action? Action { get; set; }
 
         public int Height { get; }
+
+        public bool Visible { get; set; } = true;
 
         // IconCard extras: Segoe Fluent icon glyph + accent state (blue chip when active).
         public string Glyph { get; set; } = string.Empty;
@@ -1220,6 +1345,12 @@ internal static class NativeMethods
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpShowWindow = 0x0040;
+    private const int GwlExStyle = -20;
+    private const int WsExToolWindow = 0x00000080;
+    private const uint GwOwner = 4;
+    private const int DwmwaCloaked = 14;
+
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
@@ -1238,10 +1369,34 @@ internal static class NativeMethods
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowLong(IntPtr window, int index);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr window, StringBuilder className, int maxCount);
+
+    [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
 
     public static void ShowWithoutActivation(Form form)
     {
@@ -1267,6 +1422,36 @@ internal static class NativeMethods
     public static IntPtr GetForegroundWindowHandle()
     {
         return GetForegroundWindow();
+    }
+
+    public static bool HasVisibleApplicationWindow()
+    {
+        var found = false;
+        var ownProcessId = (uint)Environment.ProcessId;
+        EnumWindows((window, _) =>
+        {
+            if (!IsWindowVisible(window) || IsIconic(window)) return true;
+            if (GetWindow(window, GwOwner) != IntPtr.Zero) return true;
+            if ((GetWindowLong(window, GwlExStyle) & WsExToolWindow) != 0) return true;
+            GetWindowThreadProcessId(window, out var processId);
+            if (processId == ownProcessId) return true;
+
+            var classBuffer = new StringBuilder(256);
+            GetClassName(window, classBuffer, classBuffer.Capacity);
+            if (classBuffer.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
+            {
+                return true;
+            }
+
+            if (DwmGetWindowAttribute(window, DwmwaCloaked, out var cloaked, sizeof(int)) == 0 && cloaked != 0)
+            {
+                return true;
+            }
+
+            found = true;
+            return false;
+        }, IntPtr.Zero);
+        return found;
     }
 
     // Windows 11 native rounded corners + dark frame for a borderless popup, so the
