@@ -3,8 +3,8 @@
 A macOS-inspired Windows 11 shell that keeps Windows in charge of productivity.
 
 The production profile uses an owned native menu bar, small native menu panels,
-and the real Windows taskbar styled as an opaque dock. Seelen UI is retained only
-as a rollback profile.
+and the real Windows taskbar styled as an opaque dock. The retired Seelen UI
+generation is preserved under `archive/seelen-ui/` only for reference or rollback.
 
 ## What You Get
 
@@ -71,19 +71,19 @@ disable the dock mod and re-enable the Seelen scheduled task; user-profile state
 is restored after returning to the normal token.
 
 ```powershell
-.\scripts\Restore-SeelenProfile.ps1
+.\archive\seelen-ui\scripts\Restore-SeelenProfile.ps1
 ```
 
 ## Repository Layout
 
 ```text
 assets/                         Wallpapers and visual assets
-config/seelen/                  Rollback-only Seelen profile
+archive/seelen-ui/              Retired Seelen profile, scripts, and history
 config/windhawk/native-dock.json Pinned native dock definition
 config/powertoys/               Spotlight-style launcher settings
 scripts/Promote-NativeShell.ps1 Production installer/orchestrator
 scripts/Test-NativeShell*.ps1   Preflight and live acceptance checks
-scripts/Restore-Seelen*.ps1     Split-token rollback
+archive/seelen-ui/scripts/      Optional legacy rollback utilities
 tools/MacMakeover.MenuBar/      Owned per-monitor top AppBar
 tools/MacMakeover.MenuHost/     Apple and system panels
 docs/                           Architecture, QA, and historical notes

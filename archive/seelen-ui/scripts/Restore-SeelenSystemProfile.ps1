@@ -4,8 +4,9 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 
-& (Join-Path $PSScriptRoot 'Install-NativeDock.ps1') -Disable
+& (Join-Path $repoRoot 'scripts\Install-NativeDock.ps1') -Disable
 $task = Get-ScheduledTask -TaskPath '\Seelen\' -TaskName 'Seelen UI Service' -ErrorAction SilentlyContinue
 if ($task) {
   Enable-ScheduledTask -TaskPath '\Seelen\' -TaskName 'Seelen UI Service' -ErrorAction SilentlyContinue | Out-Null

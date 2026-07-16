@@ -13,8 +13,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$PackageRoot = Split-Path -Parent $PSScriptRoot
-$ConfigRoot = Join-Path $PackageRoot "config\seelen"
+$PackageRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
+$ConfigRoot = Join-Path $PackageRoot "archive\seelen-ui\config"
 $PowerToysConfigRoot = Join-Path $PackageRoot "config\powertoys"
 $CommandPaletteConfigRoot = Join-Path $PackageRoot "config\command-palette"
 $AssetsRoot = Join-Path $PackageRoot "assets"
@@ -167,7 +167,7 @@ function Register-MacMakeoverAppleMenu {
   # Register via conhost --headless. Do NOT use wscript.exe: this PC's security policy
   # blocks wscript from launching PowerShell ("Windows Script Host failed"), which silently
   # broke the old VBS launcher. The installer below registers the conhost handler.
-  $installer = Join-Path $PSScriptRoot "Install-AppleMenuHandler.ps1"
+  $installer = Join-Path $PackageRoot "scripts\Install-AppleMenuHandler.ps1"
   if (-not (Test-Path -LiteralPath $installer)) {
     Write-Warning "Apple menu handler installer was not found, so the protocol handler was not registered: $installer"
     return
@@ -178,7 +178,7 @@ function Register-MacMakeoverAppleMenu {
 }
 
 function Register-MacMakeoverControlCenter {
-  $installer = Join-Path $PSScriptRoot "Install-MacControlCenterHandler.ps1"
+  $installer = Join-Path $PackageRoot "scripts\Install-MacControlCenterHandler.ps1"
   if (-not (Test-Path -LiteralPath $installer)) {
     Write-Warning "Control Center handler installer was not found, so the protocol handler was not registered: $installer"
     return
@@ -189,7 +189,7 @@ function Register-MacMakeoverControlCenter {
 }
 
 function Register-MacMakeoverNetwork {
-  $installer = Join-Path $PSScriptRoot "Install-MacNetworkHandler.ps1"
+  $installer = Join-Path $PackageRoot "scripts\Install-MacNetworkHandler.ps1"
   if (-not (Test-Path -LiteralPath $installer)) {
     Write-Warning "Network handler installer was not found, so the protocol handler was not registered: $installer"
     return
@@ -200,7 +200,7 @@ function Register-MacMakeoverNetwork {
 }
 
 function Register-MacMakeoverBluetooth {
-  $installer = Join-Path $PSScriptRoot "Install-MacBluetoothHandler.ps1"
+  $installer = Join-Path $PackageRoot "scripts\Install-MacBluetoothHandler.ps1"
   if (-not (Test-Path -LiteralPath $installer)) {
     Write-Warning "Bluetooth handler installer was not found, so the protocol handler was not registered: $installer"
     return
@@ -211,7 +211,7 @@ function Register-MacMakeoverBluetooth {
 }
 
 function Register-MacMakeoverNotificationCenter {
-  $installer = Join-Path $PSScriptRoot "Install-MacNotificationCenterHandler.ps1"
+  $installer = Join-Path $PackageRoot "scripts\Install-MacNotificationCenterHandler.ps1"
   if (-not (Test-Path -LiteralPath $installer)) {
     Write-Warning "Notification Center handler installer was not found, so the protocol handler was not registered: $installer"
     return
@@ -222,7 +222,7 @@ function Register-MacMakeoverNotificationCenter {
 }
 
 if (-not (Test-Path -LiteralPath $ConfigRoot)) {
-  throw "Backup config was not found. Run scripts\backup-current.ps1 first. Missing: $ConfigRoot"
+  throw "Backup config was not found. Run archive\seelen-ui\scripts\backup-current.ps1 first. Missing: $ConfigRoot"
 }
 
 if (-not $SkipSeelenRestart) {
@@ -328,11 +328,11 @@ if (-not $SkipPowerToysRestore) {
 }
 
 if (-not $SkipSpotlightShortcuts) {
-  & (Join-Path $PSScriptRoot "install-spotlight-shortcuts.ps1")
+  & (Join-Path $PackageRoot "scripts\install-spotlight-shortcuts.ps1")
 }
 
 if (-not $SkipHotCorners) {
-  & (Join-Path $PSScriptRoot "install-hot-corners.ps1") -StartNow
+  & (Join-Path $PackageRoot "scripts\install-hot-corners.ps1") -StartNow
 }
 
 if ($ApplyWallpaper) {

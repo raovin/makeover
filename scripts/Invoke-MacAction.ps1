@@ -64,6 +64,6 @@ switch ($Action) {
     & (Join-Path $PSScriptRoot "verify.ps1") -CaptureScreenshot
   }
   "Backup" {
-    & (Join-Path $PSScriptRoot "backup-current.ps1")
+    & (Join-Path $PackageRoot "archive\seelen-ui\scripts\backup-current.ps1")
   }
 }

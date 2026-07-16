@@ -33,6 +33,7 @@ foreach ($required in @(
 $scriptNames = @(
   'Build-NativeShell.ps1',
   'Capture-Desktop.ps1',
+  'install-apps.ps1',
   'Install-NativeDock.ps1',
   'Prepare-NativeShellUserProfile.ps1',
   'Promote-NativeShell.ps1',
@@ -41,8 +42,7 @@ $scriptNames = @(
   'Invoke-NativeShellPromotion.ps1',
   'Complete-NativeShellPromotion.ps1',
   'Test-NativeShellProfile.ps1',
-  'Restore-SeelenProfile.ps1',
-  'Restore-SeelenSystemProfile.ps1'
+  'verify.ps1'
 )
 foreach ($scriptName in $scriptNames) {
   $scriptPath = Join-Path $PSScriptRoot $scriptName
@@ -57,14 +57,14 @@ foreach ($scriptName in $scriptNames) {
   }
 }
 
-foreach ($elevatedScript in @('Switch-To-NativeShell.ps1', 'Invoke-NativeShellPromotion.ps1', 'Restore-SeelenSystemProfile.ps1')) {
+foreach ($elevatedScript in @('Switch-To-NativeShell.ps1', 'Invoke-NativeShellPromotion.ps1')) {
   $firstLine = Get-Content -LiteralPath (Join-Path $PSScriptRoot $elevatedScript) -TotalCount 1
   if ($firstLine -ne '#Requires -RunAsAdministrator') {
     $failures.Add("$elevatedScript is missing its elevation guard.")
   }
 }
 
-foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-NativeShellPromotion.ps1', 'Restore-SeelenProfile.ps1')) {
+foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-NativeShellPromotion.ps1')) {
   $firstLine = Get-Content -LiteralPath (Join-Path $PSScriptRoot $userScript) -TotalCount 1
   if ($firstLine -eq '#Requires -RunAsAdministrator') {
     $failures.Add("$userScript must run in the unelevated user token.")

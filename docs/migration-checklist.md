@@ -1,55 +1,48 @@
-# Migration checklist
+# Migration Checklist
 
-## Before restoring
+## Prepare
 
-- Clone this repo on the new Windows machine.
-- Confirm PowerShell can run local scripts:
+- Clone this repository on the new Windows machine.
+- Open a normal, non-administrator PowerShell session in the repository.
+- Allow local scripts for the session:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-- Install the core desktop apps (Seelen UI). Add `-IncludeRemoteTools` to also install RustDesk and Tailscale:
+- Install the current prerequisites. Remote tools remain optional:
 
 ```powershell
 .\scripts\install-apps.ps1
 .\scripts\install-apps.ps1 -IncludeRemoteTools
 ```
 
-## Restore
+Seelen is intentionally not installed by default. Its retired profile is under
+`archive/seelen-ui/` and can be installed only with `-IncludeArchivedSeelen`.
 
-- Run the normal restore:
-
-```powershell
-.\scripts\restore.ps1
-```
-
-- Optional appearance extras:
+## Restore Production
 
 ```powershell
-.\scripts\restore.ps1 -ApplyWallpaper -ApplyCursors
+.\scripts\Promote-NativeShell.ps1
 ```
 
-## Manual setup
+Approve the single UAC prompt. The promoter builds and deploys MenuBar/MenuHost,
+installs the pinned Windhawk style, applies the wallpaper and startup entries,
+restarts Explorer, and runs live acceptance.
 
-- Sign into Tailscale.
-- Sign into RustDesk or configure the new device in RustDesk.
-- Grant remote-control permissions where required.
-- Confirm Seelen autostarts at login.
+## Manual Accounts
+
+- Sign into Tailscale or RustDesk only when those tools are required.
+- Do not store remote-control credentials or work-account tokens in this repo.
 
 ## Verify
 
 ```powershell
-.\scripts\verify.ps1 -CaptureScreenshot
+.\scripts\Test-NativeShellPreflight.ps1 -SkipDownloadCheck
+.\scripts\Test-NativeShellProfile.ps1
 ```
 
-Check:
-
-- Top menu bar is visible.
-- Apple-style mark appears on the left.
-- Focused app name does not overlap.
-- CPU/memory/network/battery telemetry is centered.
-- The right-side Network/Bluetooth/Control Center, notification bell, and date/time controls are legible and distinct.
-- Dock is visible at the bottom.
-- Native Windows Alt+Tab works normally.
-- Lock screen PIN entry works normally.
+Confirm restored and maximized windows stop between the top bar and dock, native
+Alt+Tab works, every top-bar control opens its own surface, and the dock remains
+visible with complete icons. Repeat mixed-DPI QA when the external display is
+physically connected.

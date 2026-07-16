@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-06-29T16:31:05.7832350+01:00",
-  "seelenRoot": "%APPDATA%\\com.seelen.seelen-ui",
+  "generatedAt": "2026-07-16T17:14:41+01:00",
+  "seelenArchive": "archive\\seelen-ui",
   "powerToysRoot": "%LOCALAPPDATA%\\Microsoft\\PowerToys",
   "commandPaletteRoot": "%LOCALAPPDATA%\\Packages\\Microsoft.CommandPalette_*\\LocalState",
   "hotCornersConfig": "config\\hot-corners.json",

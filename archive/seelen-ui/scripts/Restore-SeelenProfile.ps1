@@ -5,6 +5,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -73,7 +74,7 @@ public static class RestoredUserWallpaper {
   }
 }
 
-& (Join-Path $PSScriptRoot 'install-hot-corners.ps1') -StartNow
+& (Join-Path $repoRoot 'scripts\install-hot-corners.ps1') -StartNow
 Get-Process explorer -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }

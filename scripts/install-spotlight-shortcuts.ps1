@@ -57,7 +57,7 @@ New-PwshShortcut "Mac Mission Control" "-File `"$invoke`" -Action TaskView" "Ope
 New-PwshShortcut "Mac Show Desktop" "-File `"$invoke`" -Action ShowDesktop" "Toggle the desktop."
 New-PwshShortcut "Mac Lock Screen" "-File `"$invoke`" -Action Lock" "Lock Windows."
 New-PwshShortcut "Mac Visual QA" "-File `"$invoke`" -Action VisualQa" "Run mac makeover verification and capture QA screenshots."
-New-PwshShortcut "Mac Backup Makeover" "-File `"$invoke`" -Action Backup" "Refresh the portable mac makeover package from this machine."
+New-PwshShortcut "Archive Seelen Profile" "-File `"$invoke`" -Action Backup" "Refresh the retired Seelen rollback snapshot from this machine."
 New-PwshShortcut "Mac Hot Corners Start" "-File `"$PSScriptRoot\install-hot-corners.ps1`" -StartNow" "Register and start macOS-style hot corners."
 New-PwshShortcut "Mac Hot Corners Stop" "-File `"$PSScriptRoot\stop-hot-corners.ps1`"" "Stop macOS-style hot corners."
 New-ExplorerShortcut "Mac Makeover Folder" $PackageRoot "Open the portable mac makeover package."

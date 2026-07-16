@@ -6,10 +6,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$PackageRoot = Split-Path -Parent $PSScriptRoot
+$PackageRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $SeelenRoot = Join-Path $env:APPDATA "com.seelen.seelen-ui"
 $PowerToysRoot = Join-Path $env:LOCALAPPDATA "Microsoft\PowerToys"
-$ConfigRoot = Join-Path $PackageRoot "config\seelen"
+$ConfigRoot = Join-Path $PackageRoot "archive\seelen-ui\config"
 $PowerToysConfigRoot = Join-Path $PackageRoot "config\powertoys"
 $CommandPaletteConfigRoot = Join-Path $PackageRoot "config\command-palette"
 $AssetsRoot = Join-Path $PackageRoot "assets"

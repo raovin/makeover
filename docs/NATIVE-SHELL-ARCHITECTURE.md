@@ -97,8 +97,9 @@ Promotion is intentionally split:
 4. `Complete-NativeShellPromotion.ps1` returns to the normal token, restarts Explorer,
    starts the owned processes, and runs live acceptance.
 
-`Promote-NativeShell.ps1` orchestrates those phases. Rollback uses the same split
-through `Restore-SeelenSystemProfile.ps1` and `Restore-SeelenProfile.ps1`.
+`Promote-NativeShell.ps1` orchestrates those phases. The optional archived rollback
+uses the same split through `archive/seelen-ui/scripts/Restore-SeelenSystemProfile.ps1`
+and `archive/seelen-ui/scripts/Restore-SeelenProfile.ps1`.
 
 ## Release Gates
 

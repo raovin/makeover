@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-  [switch]$IncludeRemoteTools
+  [switch]$IncludeRemoteTools,
+  [switch]$IncludeArchivedSeelen
 )
 
 Set-StrictMode -Version Latest
@@ -21,8 +22,11 @@ function Install-WingetPackage {
 }
 
 Install-WingetPackage -Id "Microsoft.PowerToys" -Name "Microsoft PowerToys"
-Install-WingetPackage -Id "Seelen.SeelenUI" -Name "Seelen UI"
 Install-WingetPackage -Id "Microsoft.DotNet.SDK.10" -Name ".NET SDK 10"
+
+if ($IncludeArchivedSeelen) {
+  Install-WingetPackage -Id "Seelen.SeelenUI" -Name "Seelen UI (archived rollback only)"
+}
 
 if ($IncludeRemoteTools) {
   Install-WingetPackage -Id "Tailscale.Tailscale" -Name "Tailscale"

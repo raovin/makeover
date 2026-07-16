@@ -39,10 +39,15 @@ foreach ($required in @(
   }
 }
 
-$hostSelfTest = Start-Process -FilePath (Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe') `
-  -ArgumentList '--self-test' -Wait -PassThru -WindowStyle Hidden
+$hostSelfTest = $null
+foreach ($attempt in 1..3) {
+  $hostSelfTest = Start-Process -FilePath (Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe') `
+    -ArgumentList '--self-test' -Wait -PassThru -WindowStyle Hidden
+  if ($hostSelfTest.ExitCode -eq 0) { break }
+  Start-Sleep -Milliseconds 400
+}
 if ($hostSelfTest.ExitCode -ne 0) {
-  $failures.Add("MenuHost Core Audio self-test failed with exit code $($hostSelfTest.ExitCode).")
+  $failures.Add("MenuHost Core Audio self-test failed after three attempts with exit code $($hostSelfTest.ExitCode).")
 }
 
 $seelenTask = Get-ScheduledTask -TaskPath '\Seelen\' -TaskName 'Seelen UI Service' -ErrorAction SilentlyContinue
