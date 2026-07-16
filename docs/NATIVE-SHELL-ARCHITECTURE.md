@@ -69,8 +69,9 @@ The dock is the native Windows 11 taskbar with the official Windhawk
 
 The profile keeps native pins, jump lists, hover previews, badges, and task
 lifecycle; uses a centered fully opaque graphite surface with a restrained silver
-border; hides the duplicate Start button and tray; and disables taskbar auto-hide.
-No pin database is rewritten.
+border; uses a compact native running indicator; and offsets only icon artwork to
+correct Windows' indicator-biased optical alignment. It hides the duplicate Start
+button and tray and disables taskbar auto-hide. No pin database is rewritten.
 
 ## Privilege Boundary
 

@@ -32,6 +32,16 @@ Windows reported both UAC requests as cancelled. The currently visible dock is
 therefore the previous opaque profile. Run the privileged promotion once, then
 repeat the dock crop and mixed-DPI checks before calling that part signed off.
 
+The follow-up dock geometry profile uses a 15-unit outer radius, moves the frame
+down within its reserved strip, shifts only app/overlay/badge artwork by one unit,
+and renders a two-unit native running indicator. These values require a fresh live
+crop after privileged promotion; source-level validation alone is insufficient.
+The source profile passed JSON parsing, selector assertions, dependency checks,
+the pinned Windhawk binary hash check, and the MenuHost audio self-test. After the
+cancelled promotion, the live registry still reported the previous 12-unit radius
+and no custom running-indicator target; the live shell coherence test continued to
+pass, confirming that the failed elevation attempts did not partially apply it.
+
 Synthetic Alt+Tab was also rejected by the interactive desktop in this session:
 the foreground handle did not change. Panel dismissal under a real Alt+Tab and
 the disconnected external display therefore remain physical acceptance gates,

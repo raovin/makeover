@@ -84,6 +84,18 @@ if ($config.settings['controlStyles[7].styles[0]'] -ne 'Visibility=Collapsed' -o
     $config.settings['controlStyles[8].styles[0]'] -ne 'Visibility=Collapsed') {
   $failures.Add('Windows Search or Widgets is still exposed inside the dock profile.')
 }
+if ($config.settings['controlStyles[1].styles[2]'] -ne 'CornerRadius=15' -or
+    $config.settings['controlStyles[1].styles[5]'] -ne 'BackgroundSizing=InnerBorderEdge') {
+  $failures.Add('The dock shell does not use the approved graphite squircle geometry.')
+}
+if ($config.settings['controlStyles[9].target'] -notmatch 'RunningIndicator' -or
+    $config.settings['controlStyles[9].styles[3]'] -ne 'Height=2') {
+  $failures.Add('The dock running indicator is not using the compact optical-alignment profile.')
+}
+if ($config.settings['controlStyles[10].target'] -notmatch 'Image#Icon' -or
+    $config.settings['controlStyles[10].styles[0]'] -notmatch 'Y=\"1\"') {
+  $failures.Add('The dock icon artwork offset is missing.')
+}
 
 $windhawkProfile = Join-Path $env:ProgramData 'Windhawk\userprofile.json'
 if (Test-Path -LiteralPath $windhawkProfile) {
