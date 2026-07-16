@@ -28,6 +28,7 @@ internal sealed class MenuBarForm : Form
     private readonly Font _semiboldFont;
     private readonly Font _smallFont;
     private readonly Font _iconFont;
+    private readonly System.Windows.Forms.Timer _dockZOrderTimer;
     private Image? _appleMark;
     private uint _appBarCallback;
     private readonly uint _taskbarCreatedMessage;
@@ -54,6 +55,8 @@ internal sealed class MenuBarForm : Form
         BackColor = Color.FromArgb(24, 27, 32);
         Text = $"MacMakeover Menu Bar ({screen.DeviceName})";
         _taskbarCreatedMessage = NativeMethods.RegisterWindowMessage("TaskbarCreated");
+        _dockZOrderTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        _dockZOrderTimer.Tick += (_, _) => EnsureNativeDockZOrder();
         Location = preview
             ? new Point(screen.Bounds.Left, screen.Bounds.Top + 80)
             : screen.Bounds.Location;
@@ -87,6 +90,11 @@ internal sealed class MenuBarForm : Form
                 PositionAppBar();
             }
             EnsureTopmost();
+            if (!_preview)
+            {
+                EnsureNativeDockZOrder();
+                _dockZOrderTimer.Start();
+            }
             AppLog.Write($"Shown {_screen.DeviceName} preview={_preview} bounds={Bounds} dpi={DeviceDpi}");
         };
     }
@@ -122,6 +130,7 @@ internal sealed class MenuBarForm : Form
 
     protected override void OnHandleDestroyed(EventArgs e)
     {
+        _dockZOrderTimer.Stop();
         RemoveAppBar();
         base.OnHandleDestroyed(e);
     }
@@ -490,6 +499,37 @@ internal sealed class MenuBarForm : Form
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
     }
 
+    private void EnsureNativeDockZOrder()
+    {
+        const int vkMenu = 0x12;
+        if (_preview || (NativeMethods.GetAsyncKeyState(vkMenu) & 0x8000) != 0) return;
+
+        var taskbar = NativeMethods.FindTaskbarFor(_screen.Bounds);
+        if (taskbar == IntPtr.Zero) return;
+
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (foreground != IntPtr.Zero && NativeMethods.IsBorderlessFullscreen(foreground, _screen.Bounds))
+        {
+            return;
+        }
+
+        var extendedStyle = NativeMethods.GetWindowLongPtr(taskbar, NativeMethods.GwlExStyle).ToInt64();
+        if ((extendedStyle & NativeMethods.WsExTopMost) != 0) return;
+
+        if (NativeMethods.SetWindowPos(
+                taskbar,
+                NativeMethods.HwndTopMost,
+                0,
+                0,
+                0,
+                0,
+                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize |
+                NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow))
+        {
+            AppLog.Write($"Restored native dock topmost {_screen.DeviceName}");
+        }
+    }
+
     private int Scale(int logical) => Math.Max(1, (int)Math.Round(logical * DeviceDpi / 96d));
     private float ScaleValue(float logical) => Math.Max(1F, logical * DeviceDpi / 96F);
 
@@ -498,6 +538,7 @@ internal sealed class MenuBarForm : Form
         if (disposing)
         {
             _state.Changed -= OnStateChanged;
+            _dockZOrderTimer.Dispose();
             _appleMark?.Dispose();
             _typography.Dispose();
         }

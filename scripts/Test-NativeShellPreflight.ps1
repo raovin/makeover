@@ -71,6 +71,14 @@ foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-Native
   }
 }
 
+$menuBarSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MenuBarForm.cs') -Raw
+$nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
+if ($menuBarSource -notmatch 'EnsureNativeDockZOrder' -or
+    $nativeSource -notmatch 'IsBorderlessFullscreen' -or
+    $nativeSource -notmatch 'WsCaption\s*\|\s*WsThickFrame') {
+  $failures.Add('The native dock z-order guard or its borderless-fullscreen exemption is missing.')
+}
+
 if ($config.settings['controlStyles[1].styles[0]'] -notmatch '#FF[0-9A-Fa-f]{6}') {
   $failures.Add('The dock background is not configured as fully opaque.')
 }

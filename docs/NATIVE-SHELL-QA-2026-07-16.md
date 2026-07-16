@@ -52,6 +52,17 @@ four corners and complete icon artwork. Show Desktop must settle for six seconds
 before capture: its transition temporarily collapses the DirectComposition icon
 surfaces into thin fragments even though the stable state renders correctly.
 
+A later real Alt+Tab into maximized Codex reproduced a separate z-order failure:
+Codex was `IsZoomed=true` with normal caption/thick-frame styles, but its outer
+rectangle covered the monitor, so Explorer removed `WS_EX_TOPMOST` from
+`Shell_TrayWnd`. The resident MenuBar now restores that flag for normal/maximized
+windows and stands down for genuine borderless fullscreen.
+
+Live adversarial acceptance explicitly demoted `Shell_TrayWnd` with
+`HWND_NOTOPMOST`; the resident guard restored `WS_EX_TOPMOST` within 1.2 seconds
+and logged the recovery. The profile test now repeats this probe and restores the
+taskbar itself before failing, so a broken guard cannot leave the dock hidden.
+
 Synthetic Alt+Tab was also rejected by the interactive desktop in this session:
 the foreground handle did not change. Panel dismissal under a real Alt+Tab and
 the disconnected external display therefore remain physical acceptance gates,

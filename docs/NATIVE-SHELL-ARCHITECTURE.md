@@ -76,6 +76,14 @@ The shell is inset farther from the top of the reserved taskbar strip and uses a
 opaque graphite-gray outline so all four corners remain legible against both dark
 maximized windows and bright desktop wallpaper.
 
+Chromium can report a maximized window with a monitor-sized outer rectangle. That
+causes Explorer's fullscreen heuristic to demote the native taskbar even though the
+window still has normal caption/thick-frame styles. The resident MenuBar therefore
+repairs the taskbar's topmost z-order only when it is lost and the foreground window
+is not borderless fullscreen. It never resizes or moves application windows.
+The guard checks at 100 ms intervals but calls `SetWindowPos` only after Explorer
+has actually removed the taskbar's topmost flag.
+
 ## Privilege Boundary
 
 This Azure AD profile rejects Explorer HKCU changes from an elevated process.

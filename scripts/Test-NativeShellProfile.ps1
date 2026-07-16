@@ -129,6 +129,15 @@ public static class NativeShellProbe {
   public static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll")]
   public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+  [DllImport("user32.dll")]
+  public static extern bool SetWindowPos(
+    IntPtr window,
+    IntPtr insertAfter,
+    int x,
+    int y,
+    int width,
+    int height,
+    int flags);
 }
 '@
 $taskbarWindow = [NativeShellProbe]::FindWindow('Shell_TrayWnd', $null)
@@ -136,6 +145,29 @@ if ($taskbarWindow -eq [IntPtr]::Zero -or -not [NativeShellProbe]::IsWindowVisib
   $failures.Add('The native taskbar window is not visible.')
 } elseif (([NativeShellProbe]::GetWindowLongPtr($taskbarWindow, -20).ToInt64() -band 8) -eq 0) {
   $failures.Add('The native taskbar is not topmost; oversized windows can obscure the dock.')
+} elseif ($menuBar.Count -eq 1) {
+  $noMoveSizeActivate = 0x0001 -bor 0x0002 -bor 0x0010
+  [void][NativeShellProbe]::SetWindowPos(
+    $taskbarWindow,
+    [IntPtr](-2),
+    0,
+    0,
+    0,
+    0,
+    $noMoveSizeActivate)
+  Start-Sleep -Milliseconds 1200
+  $recoveredStyle = [NativeShellProbe]::GetWindowLongPtr($taskbarWindow, -20).ToInt64()
+  if (($recoveredStyle -band 8) -eq 0) {
+    [void][NativeShellProbe]::SetWindowPos(
+      $taskbarWindow,
+      [IntPtr](-1),
+      0,
+      0,
+      0,
+      0,
+      $noMoveSizeActivate)
+    $failures.Add('The resident dock z-order guard did not recover from a forced demotion.')
+  }
 }
 
 foreach ($screen in [Windows.Forms.Screen]::AllScreens) {
