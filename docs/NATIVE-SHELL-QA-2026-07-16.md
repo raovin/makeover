@@ -42,6 +42,16 @@ cancelled promotion, the live registry still reported the previous 12-unit radiu
 and no custom running-indicator target; the live shell coherence test continued to
 pass, confirming that the failed elevation attempts did not partially apply it.
 
+The geometry profile was subsequently promoted successfully. A first live capture
+confirmed that normal maximized windows still stop at the 48-logical-pixel reserved
+taskbar strip and that icon, overlay, badge, and running-indicator content is no
+longer clipped. The follow-up contrast pass increases the top inset by one unit and
+uses an opaque outline because the translucent border blended into dark windows.
+Both the maximized dark-window capture and the desktop-wallpaper capture show all
+four corners and complete icon artwork. Show Desktop must settle for six seconds
+before capture: its transition temporarily collapses the DirectComposition icon
+surfaces into thin fragments even though the stable state renders correctly.
+
 Synthetic Alt+Tab was also rejected by the interactive desktop in this session:
 the foreground handle did not change. Panel dismissal under a real Alt+Tab and
 the disconnected external display therefore remain physical acceptance gates,

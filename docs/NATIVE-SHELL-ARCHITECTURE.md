@@ -72,6 +72,9 @@ lifecycle; uses a centered fully opaque graphite surface with a restrained silve
 border; uses a compact native running indicator; and offsets only icon artwork to
 correct Windows' indicator-biased optical alignment. It hides the duplicate Start
 button and tray and disables taskbar auto-hide. No pin database is rewritten.
+The shell is inset farther from the top of the reserved taskbar strip and uses an
+opaque graphite-gray outline so all four corners remain legible against both dark
+maximized windows and bright desktop wallpaper.
 
 ## Privilege Boundary
 

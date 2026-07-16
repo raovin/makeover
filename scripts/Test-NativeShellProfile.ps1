@@ -90,6 +90,21 @@ $widgetsVisibility = if ($dockSettingNames -contains 'controlStyles[8].styles[0]
 if ($searchVisibility -ne 'Visibility=Collapsed' -or $widgetsVisibility -ne 'Visibility=Collapsed') {
   $failures.Add('The dock profile does not collapse Windows Search and Widgets.')
 }
+foreach ($settingName in @(
+    'controlStyles[0].styles[3]',
+    'controlStyles[1].styles[2]',
+    'controlStyles[1].styles[3]',
+    'controlStyles[9].target',
+    'controlStyles[9].styles[3]',
+    'controlStyles[10].styles[0]'
+  )) {
+  $liveValue = if ($dockSettingNames -contains $settingName) {
+    $dockSettings.PSObject.Properties[$settingName].Value
+  } else { $null }
+  if ($liveValue -ne $modConfig.settings[$settingName]) {
+    $failures.Add("Live dock setting is stale: $settingName")
+  }
+}
 $advancedSearch = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name SearchboxTaskbarMode -ErrorAction SilentlyContinue).SearchboxTaskbarMode
 $searchSettings = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -ErrorAction SilentlyContinue
 if ($advancedSearch -ne 0 -or
@@ -112,11 +127,15 @@ public static class NativeShellProbe {
   public static extern IntPtr FindWindow(string className, string windowName);
   [DllImport("user32.dll")]
   public static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
 }
 '@
 $taskbarWindow = [NativeShellProbe]::FindWindow('Shell_TrayWnd', $null)
 if ($taskbarWindow -eq [IntPtr]::Zero -or -not [NativeShellProbe]::IsWindowVisible($taskbarWindow)) {
   $failures.Add('The native taskbar window is not visible.')
+} elseif (([NativeShellProbe]::GetWindowLongPtr($taskbarWindow, -20).ToInt64() -band 8) -eq 0) {
+  $failures.Add('The native taskbar is not topmost; oversized windows can obscure the dock.')
 }
 
 foreach ($screen in [Windows.Forms.Screen]::AllScreens) {

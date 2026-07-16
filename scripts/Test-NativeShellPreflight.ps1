@@ -88,6 +88,10 @@ if ($config.settings['controlStyles[1].styles[2]'] -ne 'CornerRadius=15' -or
     $config.settings['controlStyles[1].styles[5]'] -ne 'BackgroundSizing=InnerBorderEdge') {
   $failures.Add('The dock shell does not use the approved graphite squircle geometry.')
 }
+if ($config.settings['controlStyles[0].styles[3]'] -ne 'Margin=120,7,120,3' -or
+    $config.settings['controlStyles[1].styles[3]'] -notmatch '#FF4F5B67') {
+  $failures.Add('The dock shell does not preserve the approved top-edge clearance and contrast.')
+}
 if ($config.settings['controlStyles[9].target'] -notmatch 'RunningIndicator' -or
     $config.settings['controlStyles[9].styles[3]'] -ne 'Height=2') {
   $failures.Add('The dock running indicator is not using the compact optical-alignment profile.')
