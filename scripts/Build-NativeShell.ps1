@@ -44,7 +44,12 @@ foreach ($project in $projects) {
 $required = @(
   'MacMakeover.MenuBar.exe',
   'MacMakeover.MenuHost.exe',
-  'Assets\apple-mark.png'
+  'Assets\apple-mark.png',
+  'Assets\Fonts\Manrope-Regular.ttf',
+  'Assets\Fonts\Manrope-SemiBold.ttf',
+  'Assets\Fonts\JetBrainsMono-Medium.ttf',
+  'Assets\Fonts\OFL-Manrope.txt',
+  'Assets\Fonts\OFL-JetBrainsMono.txt'
 )
 foreach ($item in $required) {
   if (-not (Test-Path -LiteralPath (Join-Path $Destination $item))) {

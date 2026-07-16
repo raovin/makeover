@@ -17,6 +17,11 @@ foreach ($required in @(
     (Join-Path $DeploymentRoot 'MacMakeover.MenuBar.exe'),
     (Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'),
     (Join-Path $DeploymentRoot 'Assets\apple-mark.png'),
+    (Join-Path $DeploymentRoot 'Assets\Fonts\Manrope-Regular.ttf'),
+    (Join-Path $DeploymentRoot 'Assets\Fonts\Manrope-SemiBold.ttf'),
+    (Join-Path $DeploymentRoot 'Assets\Fonts\JetBrainsMono-Medium.ttf'),
+    (Join-Path $DeploymentRoot 'Assets\Fonts\OFL-Manrope.txt'),
+    (Join-Path $DeploymentRoot 'Assets\Fonts\OFL-JetBrainsMono.txt'),
     (Join-Path $repoRoot 'assets\wallpapers\mac-wallpaper.jpg'),
     (Join-Path $env:ProgramFiles 'Windhawk\windhawk.exe')
   )) {

@@ -23,10 +23,11 @@ internal sealed class MenuBarForm : Form
     private readonly SystemStateProvider _state;
     private readonly bool _preview;
     private readonly List<(Rectangle Bounds, BarAction Action)> _hits = [];
-    private readonly Font _textFont = new("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Font _semiboldFont = new("Segoe UI Semibold", 9F, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Font _smallFont = new("Segoe UI Semibold", 8.25F, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Font _iconFont = new("Segoe Fluent Icons", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+    private readonly Typography _typography;
+    private readonly Font _textFont;
+    private readonly Font _semiboldFont;
+    private readonly Font _smallFont;
+    private readonly Font _iconFont;
     private Image? _appleMark;
     private uint _appBarCallback;
     private readonly uint _taskbarCreatedMessage;
@@ -38,13 +39,19 @@ internal sealed class MenuBarForm : Form
         _screen = screen;
         _state = state;
         _preview = preview;
+        _typography = new Typography();
+        _textFont = _typography.Text;
+        _semiboldFont = _typography.Emphasis;
+        _smallFont = _typography.Telemetry;
+        _iconFont = _typography.Icon;
+        AppLog.Write($"Typography text={_textFont.Name}; emphasis={_semiboldFont.Name}; telemetry={_smallFont.Name}");
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
         DoubleBuffered = true;
-        BackColor = Color.FromArgb(24, 33, 45);
+        BackColor = Color.FromArgb(24, 27, 32);
         Text = $"MacMakeover Menu Bar ({screen.DeviceName})";
         _taskbarCreatedMessage = NativeMethods.RegisterWindowMessage("TaskbarCreated");
         Location = preview
@@ -205,17 +212,17 @@ internal sealed class MenuBarForm : Form
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
         var client = ClientRectangle;
-        using (var background = new LinearGradientBrush(
-                   client,
-                   Color.FromArgb(234, 43, 60, 78),
-                   Color.FromArgb(242, 20, 29, 40),
-                   LinearGradientMode.Vertical))
+        using (var background = new SolidBrush(Color.FromArgb(255, 24, 27, 32)))
         {
             e.Graphics.FillRectangle(background, client);
         }
-        using (var line = new Pen(Color.FromArgb(85, 120, 154, 184), Math.Max(1, ScaleValue(0.6F))))
+        using (var topLine = new Pen(Color.FromArgb(24, 255, 255, 255), 1F))
         {
-            e.Graphics.DrawLine(line, 0, Height - 1, Width, Height - 1);
+            e.Graphics.DrawLine(topLine, 0, 0, Width, 0);
+        }
+        using (var bottomLine = new Pen(Color.FromArgb(92, 125, 135, 149), Math.Max(1, ScaleValue(0.55F))))
+        {
+            e.Graphics.DrawLine(bottomLine, 0, Height - 1, Width, Height - 1);
         }
 
         _hits.Clear();
@@ -245,7 +252,7 @@ internal sealed class MenuBarForm : Form
         var maxWidth = Math.Min(Scale(240), Math.Max(Scale(80), Width / 5));
         var appSize = TextRenderer.MeasureText(snapshot.ActiveApp, _semiboldFont, new Size(maxWidth, Height),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        var appRect = new Rectangle(x, 0, Math.Min(maxWidth, appSize.Width + Scale(4)), Height);
+        var appRect = new Rectangle(x, 0, Math.Min(maxWidth, appSize.Width + Scale(6)), Height);
         TextRenderer.DrawText(
             graphics,
             snapshot.ActiveApp,
@@ -262,8 +269,8 @@ internal sealed class MenuBarForm : Form
         var x = Width - Scale(8);
         x = DrawRightItem(graphics, x, "\uEA8F", _iconFont, BarAction.Notifications, Scale(28));
         var dateText = DateTime.Now.ToString("ddd d MMM HH:mm");
-        var dateWidth = TextRenderer.MeasureText(dateText, _semiboldFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(12);
-        x = DrawRightItem(graphics, x, dateText, _semiboldFont, BarAction.Calendar, dateWidth);
+        var dateWidth = TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(12);
+        x = DrawRightItem(graphics, x, dateText, _textFont, BarAction.Calendar, dateWidth);
         x = DrawRightItem(graphics, x, "\uE713", _iconFont, BarAction.ControlCenter, Scale(28));
         x = DrawRightItem(graphics, x, "\uE767", _iconFont, BarAction.Volume, Scale(28));
         x = DrawRightItem(graphics, x, "\uE702", _iconFont, BarAction.Bluetooth, Scale(27));
@@ -285,26 +292,63 @@ internal sealed class MenuBarForm : Form
         var available = rightStart - leftEnd - Scale(16);
         if (available < Scale(220)) return;
 
-        var full = $"CPU {snapshot.CpuPercent}%    RAM {snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0}G    " +
-                   $"NET \u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}";
-        var compact = $"{snapshot.CpuPercent}%   {snapshot.UsedMemoryGb:0}G   " +
-                      $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}";
+        var candidates = new[]
+        {
+            new[]
+            {
+                $"CPU {snapshot.CpuPercent}%",
+                $"RAM {snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0} GB",
+                $"NET \u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"
+            },
+            new[]
+            {
+                $"{snapshot.CpuPercent}% CPU",
+                $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0}G",
+                $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"
+            },
+            new[] { $"CPU {snapshot.CpuPercent}%", $"RAM {snapshot.UsedMemoryGb:0}G" }
+        };
         var battery = $"{snapshot.BatteryPercent}%";
-        var text = available >= Scale(420) ? full : compact;
-        var textWidth = TextRenderer.MeasureText(text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
-        var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
-        var desiredWidth = Math.Min(available, textWidth + batteryWidth + Scale(54));
-        var x = (Width - desiredWidth) / 2;
-        x = Math.Max(x, leftEnd + Scale(8));
-        x = Math.Min(x, rightStart - desiredWidth - Scale(8));
-        var rect = new Rectangle(x, 0, desiredWidth, Height);
+        var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(25);
+        string[]? segments = null;
+        var groupWidth = 0;
+        foreach (var candidate in candidates)
+        {
+            var candidateWidth = candidate.Sum(MeasureTelemetry) +
+                                 Math.Max(0, candidate.Length) * Scale(17) + batteryWidth;
+            if (candidateWidth > available) continue;
+            segments = candidate;
+            groupWidth = candidateWidth;
+            break;
+        }
+        if (segments is null) return;
 
-        var batteryArea = new Rectangle(rect.Right - batteryWidth - Scale(29), rect.Top, batteryWidth + Scale(23), rect.Height);
-        var textArea = new Rectangle(rect.Left + Scale(12), rect.Top, batteryArea.Left - rect.Left - Scale(16), rect.Height);
-        TextRenderer.DrawText(graphics, text, _smallFont, textArea, Color.FromArgb(235, 242, 249),
-            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
-            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-        DrawBattery(graphics, batteryArea, snapshot.BatteryPercent, snapshot.Charging, battery);
+        var minimumX = leftEnd + Scale(8);
+        var maximumX = rightStart - groupWidth - Scale(8);
+        if (maximumX < minimumX) return;
+        var x = Math.Clamp((Width - groupWidth) / 2, minimumX, maximumX);
+        foreach (var segment in segments)
+        {
+            var width = MeasureTelemetry(segment);
+            var textRect = new Rectangle(x, 0, width, Height);
+            TextRenderer.DrawText(graphics, segment, _smallFont, textRect, Color.FromArgb(228, 233, 239),
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+                TextFormatFlags.NoPadding);
+            x += width + Scale(8);
+            DrawTelemetrySeparator(graphics, x);
+            x += Scale(9);
+        }
+
+        DrawBattery(graphics, new Rectangle(x, 0, batteryWidth, Height), snapshot.BatteryPercent, snapshot.Charging, battery);
+    }
+
+    private int MeasureTelemetry(string text) =>
+        TextRenderer.MeasureText(text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+
+    private void DrawTelemetrySeparator(Graphics graphics, int x)
+    {
+        using var pen = new Pen(Color.FromArgb(68, 186, 195, 205), Math.Max(1F, ScaleValue(0.5F)));
+        graphics.DrawLine(pen, x, Scale(5), x, Height - Scale(5));
     }
 
     private void DrawBattery(Graphics graphics, Rectangle area, int percent, bool charging, string label)
@@ -336,8 +380,8 @@ internal sealed class MenuBarForm : Form
     {
         if (_hovered != action) return;
         var inset = Rectangle.Inflate(rect, -Scale(2), -Scale(3));
-        using var brush = new SolidBrush(Color.FromArgb(45, 255, 255, 255));
-        using var path = RoundedRectangle(inset, Scale(5));
+        using var brush = new SolidBrush(Color.FromArgb(34, 255, 255, 255));
+        using var path = RoundedRectangle(inset, Scale(4));
         graphics.FillPath(brush, path);
     }
 
@@ -455,10 +499,7 @@ internal sealed class MenuBarForm : Form
         {
             _state.Changed -= OnStateChanged;
             _appleMark?.Dispose();
-            _textFont.Dispose();
-            _semiboldFont.Dispose();
-            _smallFont.Dispose();
-            _iconFont.Dispose();
+            _typography.Dispose();
         }
         base.Dispose(disposing);
     }

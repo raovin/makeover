@@ -10,5 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="Assets\apple-mark.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Fonts\**\*.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

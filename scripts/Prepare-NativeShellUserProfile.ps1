@@ -108,7 +108,14 @@ if (-not $SkipBuild) {
   & (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Destination $stagingRoot
   $artifactRoot = $stagingRoot
 }
-foreach ($required in 'MacMakeover.MenuBar.exe', 'MacMakeover.MenuHost.exe', 'Assets\apple-mark.png') {
+foreach ($required in @(
+    'MacMakeover.MenuBar.exe',
+    'MacMakeover.MenuHost.exe',
+    'Assets\apple-mark.png',
+    'Assets\Fonts\Manrope-Regular.ttf',
+    'Assets\Fonts\Manrope-SemiBold.ttf',
+    'Assets\Fonts\JetBrainsMono-Medium.ttf'
+  )) {
   if (-not (Test-Path -LiteralPath (Join-Path $artifactRoot $required))) {
     throw "Native shell artifact is missing: $required"
   }

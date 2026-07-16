@@ -9,6 +9,7 @@ as a rollback profile.
 ## What You Get
 
 - Apple mark and focused app at the left of a 20 px logical menu bar.
+- Privately loaded Manrope labels and JetBrains Mono telemetry, bundled under OFL.
 - CPU, RAM, network throughput, and combined battery/charging state in the center.
 - Separate Wi-Fi, Bluetooth, volume, Control Center, date, and notification controls.
 - Apple-style power and session commands without the old full-screen launcher.
@@ -95,6 +96,8 @@ qa/                             Local visual evidence (normally uncommitted)
   intentionally stored.
 - Restart, shutdown, sleep, and log out require confirmation.
 - Windhawk downloads are pinned to an official version and SHA-256.
+- Bundled Manrope and JetBrains Mono files include their OFL license texts and do
+  not require a machine-wide font installation.
 - The external display must be physically connected before mixed-DPI signoff.
 - Review registry exports and local paths before publishing a fork.
 

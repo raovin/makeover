@@ -25,9 +25,14 @@ are not part of the production profile.
 `tools/MacMakeover.MenuBar` is an owner-drawn, per-monitor-aware WinForms app.
 It registers as a top AppBar, so Windows reserves its work area.
 
+The current visual target is captured in
+[`concepts/native-shell-graphite.png`](concepts/native-shell-graphite.png).
+
 - Left: Apple mark and focused application.
 - Center: CPU, RAM, best-route network throughput, and combined battery state.
 - Right: actual connection type, Bluetooth, volume, Control Center, date, and bell.
+- Manrope is loaded privately for labels and JetBrains Mono for telemetry; both
+  ship with their OFL texts and fall back to Segoe/Cascadia if an asset is damaged.
 - Exact top-left and top-right corners toggle Show Desktop.
 - The bar remains visible for ordinary and fullscreen windows; hiding it proved too
   easy to misclassify and was removed as a reliability risk.
@@ -63,8 +68,9 @@ The dock is the native Windows 11 taskbar with the official Windhawk
 `config/windhawk/native-dock.json`.
 
 The profile keeps native pins, jump lists, hover previews, badges, and task
-lifecycle; uses a centered fully opaque surface; hides the duplicate Start button
-and tray; and disables taskbar auto-hide. No pin database is rewritten.
+lifecycle; uses a centered fully opaque graphite surface with a restrained silver
+border; hides the duplicate Start button and tray; and disables taskbar auto-hide.
+No pin database is rewritten.
 
 ## Privilege Boundary
 
