@@ -13,11 +13,6 @@ internal static class NativeMethods
     public const int SwpNoSize = 0x0001;
     public const int SwpNoActivate = 0x0010;
     public const int SwpShowWindow = 0x0040;
-    public const int GwlStyle = -16;
-    public const int GwlExStyle = -20;
-    public const long WsExTopMost = 0x00000008;
-    public const long WsCaption = 0x00C00000;
-    public const long WsThickFrame = 0x00040000;
     public static readonly IntPtr HwndTopMost = new(-1);
     public const int AbmNew = 0;
     public const int AbmRemove = 1;
@@ -79,27 +74,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr FindWindow(string className, string? windowName);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string? windowName);
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
-
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsIconic(IntPtr window);
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
-
-    [DllImport("user32.dll")]
-    public static extern bool GetWindowRect(IntPtr window, out Rect bounds);
-
-    [DllImport("user32.dll")]
-    public static extern int GetClassName(IntPtr window, char[] className, int maxCount);
 
     [DllImport("user32.dll")]
     public static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
@@ -128,48 +108,4 @@ internal static class NativeMethods
     [DllImport("iphlpapi.dll", SetLastError = true)]
     public static extern int GetBestInterface(uint destinationAddress, out uint bestInterfaceIndex);
 
-    public static string GetWindowClass(IntPtr window)
-    {
-        var buffer = new char[256];
-        var length = GetClassName(window, buffer, buffer.Length);
-        return length > 0 ? new string(buffer, 0, length) : string.Empty;
-    }
-
-    public static IntPtr FindTaskbarFor(Rectangle screenBounds)
-    {
-        var primary = FindWindow("Shell_TrayWnd", null);
-        if (WindowBelongsToScreen(primary, screenBounds)) return primary;
-
-        var current = IntPtr.Zero;
-        while (true)
-        {
-            current = FindWindowEx(IntPtr.Zero, current, "Shell_SecondaryTrayWnd", null);
-            if (current == IntPtr.Zero) return IntPtr.Zero;
-            if (WindowBelongsToScreen(current, screenBounds)) return current;
-        }
-    }
-
-    public static bool IsBorderlessFullscreen(IntPtr window, Rectangle screenBounds)
-    {
-        var windowClass = GetWindowClass(window);
-        if (windowClass is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
-        {
-            return false;
-        }
-        if (!GetWindowRect(window, out var bounds)) return false;
-
-        var coversScreen = bounds.Left <= screenBounds.Left && bounds.Top <= screenBounds.Top
-            && bounds.Right >= screenBounds.Right && bounds.Bottom >= screenBounds.Bottom;
-        if (!coversScreen) return false;
-
-        var style = GetWindowLongPtr(window, GwlStyle).ToInt64();
-        return (style & (WsCaption | WsThickFrame)) == 0;
-    }
-
-    private static bool WindowBelongsToScreen(IntPtr window, Rectangle screenBounds)
-    {
-        if (window == IntPtr.Zero || !GetWindowRect(window, out var bounds)) return false;
-        var center = new Point((bounds.Left + bounds.Right) / 2, (bounds.Top + bounds.Bottom) / 2);
-        return screenBounds.Contains(center);
-    }
 }

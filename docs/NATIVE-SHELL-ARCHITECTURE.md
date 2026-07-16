@@ -73,16 +73,17 @@ border; uses a compact native running indicator; and offsets only icon artwork t
 correct Windows' indicator-biased optical alignment. It hides the duplicate Start
 button and tray and disables taskbar auto-hide. No pin database is rewritten.
 The shell is inset farther from the top of the reserved taskbar strip and uses an
-opaque graphite-gray outline so all four corners remain legible against both dark
+graphite-gray outline so all four corners remain legible against both dark
 maximized windows and bright desktop wallpaper.
+Both native full-width background rectangles are collapsed. App activity uses the
+compact running indicator instead of a persistent rectangular selection well.
 
-Chromium can report a maximized window with a monitor-sized outer rectangle. That
-causes Explorer's fullscreen heuristic to demote the native taskbar even though the
-window still has normal caption/thick-frame styles. The resident MenuBar therefore
-repairs the taskbar's topmost z-order only when it is lost and the foreground window
-is not borderless fullscreen. It never resizes or moves application windows.
-The guard checks at 100 ms intervals but calls `SetWindowPos` only after Explorer
-has actually removed the taskbar's topmost flag.
+Explorer owns the taskbar's z-order. The profile does not poll, force topmost, or
+fight normal shell transitions. Dock visibility comes from the native reserved
+bottom work area: maximized windows end at its top edge, while genuine fullscreen
+apps retain normal Windows behavior. The live profile test checks taskbar visibility
+and reserved work-area geometry rather than requiring an implementation-specific
+`WS_EX_TOPMOST` flag.
 
 ## Privilege Boundary
 

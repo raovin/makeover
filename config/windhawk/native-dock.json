@@ -17,8 +17,8 @@
     "controlStyles[1].target": "Taskbar.TaskbarFrame > Grid#RootGrid",
     "controlStyles[1].styles[0]": "Background:=<SolidColorBrush Color=\"#FF171A1F\" />",
     "controlStyles[1].styles[1]": "Padding=12,2,12,0",
-    "controlStyles[1].styles[2]": "CornerRadius=15",
-    "controlStyles[1].styles[3]": "BorderBrush:=<SolidColorBrush Color=\"#FF4F5B67\" />",
+    "controlStyles[1].styles[2]": "CornerRadius=12",
+    "controlStyles[1].styles[3]": "BorderBrush:=<SolidColorBrush Color=\"#C05A6672\" />",
     "controlStyles[1].styles[4]": "BorderThickness=1",
     "controlStyles[1].styles[5]": "BackgroundSizing=InnerBorderEdge",
     "controlStyles[2].target": "Grid#SystemTrayFrameGrid",
@@ -31,7 +31,7 @@
     "controlStyles[5].styles[0]": "CornerRadius=10",
     "controlStyles[5].styles[1]": "Margin=2,3,2,3",
     "controlStyles[5].styles[2]": "Background@InactiveNormal=Transparent",
-    "controlStyles[5].styles[3]": "Background@ActiveNormal:=<SolidColorBrush Color=\"#2638424D\" />",
+    "controlStyles[5].styles[3]": "Background@ActiveNormal=Transparent",
     "controlStyles[5].styles[4]": "Background@InactivePointerOver:=<SolidColorBrush Color=\"#20FFFFFF\" />",
     "controlStyles[5].styles[5]": "Background@ActivePointerOver:=<SolidColorBrush Color=\"#304D5966\" />",
     "controlStyles[5].styles[6]": "Background@InactivePressed:=<SolidColorBrush Color=\"#2AFFFFFF\" />",
@@ -57,6 +57,8 @@
     "controlStyles[11].target": "Taskbar.TaskListLabeledButtonPanel#IconPanel > Image#OverlayIcon",
     "controlStyles[11].styles[0]": "RenderTransform:=<TranslateTransform Y=\"1\" />",
     "controlStyles[12].target": "Taskbar.TaskListLabeledButtonPanel#IconPanel > Taskbar.Badge",
-    "controlStyles[12].styles[0]": "RenderTransform:=<TranslateTransform Y=\"1\" />"
+    "controlStyles[12].styles[0]": "RenderTransform:=<TranslateTransform Y=\"1\" />",
+    "controlStyles[13].target": "Rectangle#BackgroundStroke",
+    "controlStyles[13].styles[0]": "Visibility=Collapsed"
   }
 }

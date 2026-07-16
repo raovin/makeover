@@ -52,18 +52,24 @@ four corners and complete icon artwork. Show Desktop must settle for six seconds
 before capture: its transition temporarily collapses the DirectComposition icon
 surfaces into thin fragments even though the stable state renders correctly.
 
-A later real Alt+Tab into maximized Codex reproduced a separate z-order failure:
-Codex was `IsZoomed=true` with normal caption/thick-frame styles, but its outer
-rectangle covered the monitor, so Explorer removed `WS_EX_TOPMOST` from
-`Shell_TrayWnd`. The resident MenuBar now restores that flag for normal/maximized
-windows and stands down for genuine borderless fullscreen.
+A later real Alt+Tab into maximized Codex initially suggested a z-order failure.
+Adversarial follow-up showed that requiring `WS_EX_TOPMOST` was the wrong invariant:
+Explorer legitimately removes that implementation flag while the visible taskbar
+remains outside the correctly reserved work area. A polling guard briefly added for
+that flag was removed because it fought Explorer without improving the rendered
+layout.
 
-Live adversarial acceptance explicitly demoted `Shell_TrayWnd` with
-`HWND_NOTOPMOST`; the resident guard restored `WS_EX_TOPMOST` within 1.2 seconds
-and logged the recovery. The profile test now repeats this probe and restores the
-taskbar itself before failing, so a broken guard cannot leave the dock hidden.
+After an Explorer restart, real Computer Use transitions switched Codex to File
+Explorer and back. Full-desktop captures in both maximized and restored states show
+the dock visible below the application at the reserved work-area boundary. The live
+profile now checks visibility and top/bottom work-area reservation instead of
+artificially demoting the shell window.
 
-Synthetic Alt+Tab was also rejected by the interactive desktop in this session:
-the foreground handle did not change. Panel dismissal under a real Alt+Tab and
-the disconnected external display therefore remain physical acceptance gates,
-not inferred passes.
+The post-guard screenshot exposed a remaining full-width horizontal rule. The
+official DockLike definition collapses both `BackgroundFill` and
+`BackgroundStroke`; this profile had only collapsed the fill. The stroke is now
+collapsed, the outer radius reduced from 15 to 12 units, and the redundant active
+selection well removed so the dock reads as one quiet floating surface.
+
+The disconnected external display remains a physical mixed-DPI acceptance gate;
+only the active 1920x1200 laptop panel at 150% DPI was available for this pass.

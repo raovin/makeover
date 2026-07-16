@@ -73,10 +73,9 @@ foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-Native
 
 $menuBarSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MenuBarForm.cs') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
-if ($menuBarSource -notmatch 'EnsureNativeDockZOrder' -or
-    $nativeSource -notmatch 'IsBorderlessFullscreen' -or
-    $nativeSource -notmatch 'WsCaption\s*\|\s*WsThickFrame') {
-  $failures.Add('The native dock z-order guard or its borderless-fullscreen exemption is missing.')
+if ($menuBarSource -match 'EnsureNativeDockZOrder|MonitorNativeDockAsync' -or
+    $nativeSource -match 'IsBorderlessFullscreen|FindTaskbarFor') {
+  $failures.Add('A taskbar z-order monitor is present; Explorer must own dock z-order.')
 }
 
 if ($config.settings['controlStyles[1].styles[0]'] -notmatch '#FF[0-9A-Fa-f]{6}') {
@@ -92,13 +91,17 @@ if ($config.settings['controlStyles[7].styles[0]'] -ne 'Visibility=Collapsed' -o
     $config.settings['controlStyles[8].styles[0]'] -ne 'Visibility=Collapsed') {
   $failures.Add('Windows Search or Widgets is still exposed inside the dock profile.')
 }
-if ($config.settings['controlStyles[1].styles[2]'] -ne 'CornerRadius=15' -or
+if ($config.settings['controlStyles[1].styles[2]'] -ne 'CornerRadius=12' -or
     $config.settings['controlStyles[1].styles[5]'] -ne 'BackgroundSizing=InnerBorderEdge') {
   $failures.Add('The dock shell does not use the approved graphite squircle geometry.')
 }
 if ($config.settings['controlStyles[0].styles[3]'] -ne 'Margin=120,7,120,3' -or
-    $config.settings['controlStyles[1].styles[3]'] -notmatch '#FF4F5B67') {
+    $config.settings['controlStyles[1].styles[3]'] -notmatch '#C05A6672') {
   $failures.Add('The dock shell does not preserve the approved top-edge clearance and contrast.')
+}
+if ($config.settings['controlStyles[13].target'] -ne 'Rectangle#BackgroundStroke' -or
+    $config.settings['controlStyles[13].styles[0]'] -ne 'Visibility=Collapsed') {
+  $failures.Add('The full-width native taskbar stroke is still visible behind the floating dock.')
 }
 if ($config.settings['controlStyles[9].target'] -notmatch 'RunningIndicator' -or
     $config.settings['controlStyles[9].styles[3]'] -ne 'Height=2') {
