@@ -40,7 +40,8 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 | Spotlight-style launcher | Microsoft Command Palette / PowerToys Run |
 
 See [Native Shell Architecture](docs/NATIVE-SHELL-ARCHITECTURE.md) for ownership,
-security boundaries, and release gates.
+security boundaries, and release gates. The measured native-versus-Seelen resource
+comparison is in [Performance Comparison](docs/PERFORMANCE-COMPARISON-2026-07-17.md).
 
 ## Install Or Upgrade
 
@@ -62,6 +63,7 @@ To verify an existing installation without changing it:
 ```powershell
 .\scripts\Test-NativeShellPreflight.ps1 -SkipDownloadCheck
 .\scripts\Test-NativeShellProfile.ps1
+.\scripts\Test-NativeTaskbarPins.ps1
 ```
 
 ## Rollback
@@ -80,9 +82,11 @@ is restored after returning to the normal token.
 assets/                         Wallpapers and visual assets
 archive/seelen-ui/              Retired Seelen profile, scripts, and history
 config/windhawk/native-dock.json Pinned native dock definition
+config/native-taskbar-pins.json  Required dock pins inherited from Seelen
 config/powertoys/               Spotlight-style launcher settings
 scripts/Promote-NativeShell.ps1 Production installer/orchestrator
 scripts/Test-NativeShell*.ps1   Preflight and live acceptance checks
+scripts/Measure-ShellPerformance.ps1 Reproducible process sampler
 archive/seelen-ui/scripts/      Optional legacy rollback utilities
 tools/MacMakeover.MenuBar/      Owned per-monitor top AppBar
 tools/MacMakeover.MenuHost/     Apple and system panels

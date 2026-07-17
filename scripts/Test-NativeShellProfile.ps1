@@ -180,9 +180,25 @@ if ($hotCornerProcesses) {
   $failures.Add('The polling hot-corner helper is still running.')
 }
 
-$nativePins = @(Get-ChildItem -LiteralPath "$env:APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar" -Filter '*.lnk' -ErrorAction SilentlyContinue)
-if ($nativePins.Count -lt 10) {
-  $warnings.Add("Only $($nativePins.Count) native taskbar shortcuts were found.")
+$pinManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'config\native-taskbar-pins.json') -Raw |
+  ConvertFrom-Json
+$taskband = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband' -ErrorAction SilentlyContinue
+$taskbandText = if ($taskband) {
+  [Text.Encoding]::Unicode.GetString(@($taskband.Favorites) + @($taskband.FavoritesResolve))
+} else { '' }
+$shell = New-Object -ComObject Shell.Application
+$appsFolder = $shell.Namespace('shell:AppsFolder')
+foreach ($pin in $pinManifest.pins) {
+  $verbs = if ($pin.appId) {
+    $item = $appsFolder.ParseName([string]$pin.appId)
+    if ($item) { @($item.Verbs() | ForEach-Object { $_.Name.Replace('&', '') }) } else { @() }
+  } else { @() }
+  $foundInTaskband = @($pin.taskbandPatterns | Where-Object {
+      $taskbandText.IndexOf([string]$_, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    }).Count -gt 0
+  if (($verbs -notcontains 'Unpin from taskbar') -and -not $foundInTaskband) {
+    $failures.Add("Required native taskbar pin is missing: $($pin.name)")
+  }
 }
 
 if ($menuBar.Count -eq 1 -and $menuBar[0].WorkingSet64 -gt 100MB) {
