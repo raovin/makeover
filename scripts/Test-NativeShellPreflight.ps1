@@ -89,6 +89,11 @@ if ($dockSource -notmatch 'WsExNoActivate' -or $dockSource -notmatch 'WsExToolWi
 if ($dockSource -notmatch 'SlotWidth = 44' -or $dockSource -notmatch 'IconSize = 28') {
   $failures.Add('Dock no longer uses the approved icon and slot geometry.')
 }
+if ($dockSource -notmatch 'LogicalGap = 8' -or
+    $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmNew' -or
+    $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmRemove') {
+  $failures.Add('Dock no longer owns the approved reversible 8 px work-area gap reservation.')
+}
 if ($dockSource -match 'RegisterHotKey|SetWindowsHookEx') {
   $failures.Add('Dock must not own global keyboard hooks.')
 }

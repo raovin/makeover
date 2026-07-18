@@ -6,6 +6,7 @@ namespace MacMakeover.Dock;
 internal static class NativeMethods
 {
     public const int WsExToolWindow = 0x80;
+    public const int WsExTransparent = 0x20;
     public const int WsExNoActivate = 0x08000000;
     public const int AbmNew = 0;
     public const int AbmRemove = 1;
@@ -41,6 +42,7 @@ internal static class NativeMethods
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)] public static extern void SHCreateItemFromParsingName(string path, IntPtr bindContext, ref Guid interfaceId, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory item);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr window, StringBuilder className, int maxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string message);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);

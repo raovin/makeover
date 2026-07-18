@@ -97,17 +97,33 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class NativeShellProbe {
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-  public static extern IntPtr FindWindow(string className, string windowName);
   [DllImport("user32.dll")]
   public static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")]
+  public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetClassName(IntPtr window, System.Text.StringBuilder className, int maxCount);
+  public delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
 }
 '@
-$taskbarWindow = [NativeShellProbe]::FindWindow('Shell_TrayWnd', $null)
-if ($taskbarWindow -eq [IntPtr]::Zero) {
+$taskbarWindows = [System.Collections.Generic.List[System.IntPtr]]::new()
+$enumTaskbars = [NativeShellProbe+EnumWindowsProc]{
+  param([IntPtr]$window, [IntPtr]$parameter)
+  $className = [Text.StringBuilder]::new(64)
+  [void][NativeShellProbe]::GetClassName($window, $className, $className.Capacity)
+  if ($className.ToString() -in @('Shell_TrayWnd', 'Shell_SecondaryTrayWnd')) {
+    $taskbarWindows.Add($window)
+  }
+  return $true
+}
+[void][NativeShellProbe]::EnumWindows($enumTaskbars, [IntPtr]::Zero)
+if ($taskbarWindows.Count -lt [Windows.Forms.Screen]::AllScreens.Count) {
   $failures.Add('The native taskbar work-area owner is missing.')
-} elseif ([NativeShellProbe]::IsWindowVisible($taskbarWindow)) {
-  $failures.Add('The duplicate native taskbar is visible behind MacMakeover.Dock.')
+}
+foreach ($taskbarWindow in $taskbarWindows) {
+  if ([NativeShellProbe]::IsWindowVisible($taskbarWindow)) {
+    $failures.Add('A duplicate primary or secondary native taskbar is visible behind MacMakeover.Dock.')
+  }
 }
 
 foreach ($screen in [Windows.Forms.Screen]::AllScreens) {
@@ -116,6 +132,10 @@ foreach ($screen in [Windows.Forms.Screen]::AllScreens) {
   }
   if ($screen.WorkingArea.Bottom -ge $screen.Bounds.Bottom) {
     $failures.Add("$($screen.DeviceName) has no reserved bottom dock work area.")
+  }
+  $bottomReservation = $screen.Bounds.Bottom - $screen.WorkingArea.Bottom
+  if ($bottomReservation -lt 56) {
+    $failures.Add("$($screen.DeviceName) reserves only $bottomReservation px at the bottom; 56 px is required to keep maximized windows clear of the dock.")
   }
 }
 

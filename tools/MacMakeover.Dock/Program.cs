@@ -45,13 +45,22 @@ internal sealed class DockContext : ApplicationContext
 {
     private readonly bool _preview;
     private readonly List<DockForm> _forms = [];
+    private readonly List<WorkAreaGapForm> _gapForms = [];
     private readonly List<IntPtr> _taskbars = [];
+    private readonly System.Windows.Forms.Timer _taskbarGuard = new() { Interval = 1500 };
     private readonly RegisteredWaitHandle _exitRegistration;
+    private bool _rebuilding;
+    private bool _exiting;
 
     public DockContext(bool preview, EventWaitHandle exit)
     {
         _preview = preview;
-        if (!preview) HideWindowsTaskbars();
+        if (!preview)
+        {
+            HideWindowsTaskbars();
+            _taskbarGuard.Tick += (_, _) => HideWindowsTaskbars();
+            _taskbarGuard.Start();
+        }
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         BuildForms();
         _exitRegistration = ThreadPool.RegisterWaitForSingleObject(exit, (_, _) =>
@@ -66,18 +75,32 @@ internal sealed class DockContext : ApplicationContext
         var apps = PinnedApp.Load();
         foreach (var screen in _preview ? Screen.AllScreens.Where(s => s.Primary) : Screen.AllScreens)
         {
+            if (!_preview)
+            {
+                var gapForm = new WorkAreaGapForm(screen);
+                _gapForms.Add(gapForm);
+                gapForm.Show();
+            }
             var form = new DockForm(screen, apps, _preview);
-            form.FormClosed += (_, _) => { _forms.Remove(form); if (_forms.Count == 0) ExitThread(); };
+            form.FormClosed += (_, _) => { _forms.Remove(form); if (!_rebuilding && !_exiting && _forms.Count == 0) ExitThread(); };
             _forms.Add(form);
             form.Show();
         }
+        if (!_preview) HideWindowsTaskbars();
     }
 
     private void OnDisplayChanged(object? sender, EventArgs e)
     {
-        foreach (var form in _forms.ToArray()) form.Close();
-        _forms.Clear();
-        BuildForms();
+        _rebuilding = true;
+        try
+        {
+            foreach (var form in _forms.ToArray()) form.Close();
+            _forms.Clear();
+            foreach (var gapForm in _gapForms.ToArray()) gapForm.Close();
+            _gapForms.Clear();
+            BuildForms();
+        }
+        finally { _rebuilding = false; }
     }
 
     private void HideWindowsTaskbars()
@@ -88,8 +111,8 @@ internal sealed class DockContext : ApplicationContext
             NativeMethods.GetClassName(window, name, name.Capacity);
             if (name.ToString() is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
             {
-                _taskbars.Add(window);
-                NativeMethods.ShowWindow(window, NativeMethods.SwHide);
+                if (!_taskbars.Contains(window)) _taskbars.Add(window);
+                if (NativeMethods.IsWindowVisible(window)) NativeMethods.ShowWindow(window, NativeMethods.SwHide);
             }
             return true;
         }, IntPtr.Zero);
@@ -97,11 +120,100 @@ internal sealed class DockContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        if (_exiting) return;
+        _exiting = true;
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _exitRegistration.Unregister(null);
+        _taskbarGuard.Stop();
+        _taskbarGuard.Dispose();
         foreach (var form in _forms.ToArray()) form.Dispose();
+        foreach (var gapForm in _gapForms.ToArray()) gapForm.Dispose();
         foreach (var taskbar in _taskbars) NativeMethods.ShowWindow(taskbar, NativeMethods.SwShow);
         base.ExitThreadCore();
+    }
+}
+
+internal sealed class WorkAreaGapForm : Form
+{
+    private const int LogicalGap = 8;
+    private const int WmNcHitTest = 0x0084;
+    private static readonly IntPtr HtTransparent = new(-1);
+    private readonly Screen _screen;
+    private readonly uint _callbackMessage;
+    private bool _registered;
+
+    public WorkAreaGapForm(Screen screen)
+    {
+        _screen = screen;
+        _callbackMessage = NativeMethods.RegisterWindowMessage($"MacMakeover.Dock.WorkAreaGap.{Environment.ProcessId}.{screen.DeviceName}");
+        AutoScaleMode = AutoScaleMode.Dpi;
+        StartPosition = FormStartPosition.Manual;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        Opacity = 0;
+        Location = new Point(screen.Bounds.Left, screen.Bounds.Bottom - 1);
+        Size = new Size(1, 1);
+        Shown += (_, _) => RegisterAndPosition();
+    }
+
+    protected override bool ShowWithoutActivation => true;
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate | NativeMethods.WsExTransparent;
+            return cp;
+        }
+    }
+
+    private NativeMethods.AppBarData CreateAppBarData() => new()
+    {
+        Size = Marshal.SizeOf<NativeMethods.AppBarData>(),
+        Window = Handle,
+        CallbackMessage = _callbackMessage,
+        Edge = NativeMethods.AbeBottom
+    };
+
+    private void RegisterAndPosition()
+    {
+        var data = CreateAppBarData();
+        _registered = NativeMethods.SHAppBarMessage(NativeMethods.AbmNew, ref data) != UIntPtr.Zero;
+        if (!_registered) return;
+
+        var gap = (int)Math.Round(LogicalGap * DeviceDpi / 96f);
+        data.Bounds = new NativeMethods.Rect
+        {
+            Left = _screen.Bounds.Left,
+            Top = _screen.Bounds.Top,
+            Right = _screen.Bounds.Right,
+            Bottom = _screen.Bounds.Bottom
+        };
+        NativeMethods.SHAppBarMessage(NativeMethods.AbmQueryPos, ref data);
+        data.Bounds.Top = data.Bounds.Bottom - gap;
+        NativeMethods.SHAppBarMessage(NativeMethods.AbmSetPos, ref data);
+        Bounds = Rectangle.FromLTRB(data.Bounds.Left, data.Bounds.Top, data.Bounds.Right, data.Bounds.Bottom);
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        if (message.Msg == WmNcHitTest)
+        {
+            message.Result = HtTransparent;
+            return;
+        }
+        base.WndProc(ref message);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (_registered && IsHandleCreated)
+        {
+            var data = CreateAppBarData();
+            NativeMethods.SHAppBarMessage(NativeMethods.AbmRemove, ref data);
+            _registered = false;
+        }
+        base.Dispose(disposing);
     }
 }
 
