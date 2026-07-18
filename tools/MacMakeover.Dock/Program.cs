@@ -170,7 +170,7 @@ internal sealed class DockForm : Form
         Size = new Size(_screen.Bounds.Width, height);
         var contentWidth = _items.Controls.Count * (int)Math.Round(SlotWidth * scale);
         var frameWidth = contentWidth + (int)Math.Round(HorizontalPadding * 2 * scale);
-        var frameHeight = (int)Math.Round(46 * scale);
+        var frameHeight = (int)Math.Round(42 * scale);
         var frame = new Rectangle((Width - frameWidth) / 2, (Height - frameHeight) / 2, frameWidth, frameHeight);
         foreach (DockButton button in _items.Controls)
         {

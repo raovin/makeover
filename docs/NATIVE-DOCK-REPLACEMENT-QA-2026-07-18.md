@@ -11,7 +11,8 @@ fixed width or running-panel margins crashed `Explorer.EXE` in
 
 - 21 icons in manifest order.
 - 28 px logical icons in 44 px logical slots.
-- 46 px logical graphite frame with 22 px logical end padding.
+- 42 px logical graphite frame with 22 px logical end padding and a 3 px
+  top/bottom inset inside the reserved taskbar strip.
 - Laptop at 150%: 1,452 px frame and 66 px physical icon centers.
 - External display at 100%: 968 px frame and 44 px physical icon centers.
 - Frame stays entirely below the maximized work area on both displays.
