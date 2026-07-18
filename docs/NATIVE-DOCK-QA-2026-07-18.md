@@ -27,3 +27,6 @@ unchanged.
 
 Local evidence is stored under `qa/dock-expanded-*-20260718.png` and remains
 uncommitted by repository policy.
+
+The subsequent visual-polish and adversarial pass is recorded in
+`docs/NATIVE-DOCK-POLISH-QA-2026-07-18.md`.

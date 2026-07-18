@@ -102,8 +102,11 @@ foreach ($settingName in @(
     'controlStyles[9].target',
     'controlStyles[9].styles[3]',
     'controlStyles[10].styles[0]',
+    'controlStyles[10].styles[2]',
+    'controlStyles[10].styles[3]',
     'controlStyles[13].target',
-    'controlStyles[13].styles[0]'
+    'controlStyles[13].styles[0]',
+    'controlStyles[14].styles[0]'
   )) {
   $liveValue = if ($dockSettingNames -contains $settingName) {
     $dockSettings.PSObject.Properties[$settingName].Value

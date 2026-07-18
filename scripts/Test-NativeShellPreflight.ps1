@@ -97,12 +97,12 @@ if ($config.settings['controlStyles[7].styles[0]'] -ne 'Visibility=Collapsed' -o
     $config.settings['controlStyles[8].styles[0]'] -ne 'Visibility=Collapsed') {
   $failures.Add('Windows Search or Widgets is still exposed inside the dock profile.')
 }
-if ($config.settings['controlStyles[1].styles[2]'] -ne 'CornerRadius=12' -or
+if ($config.settings['controlStyles[1].styles[2]'] -ne 'CornerRadius=14' -or
     $config.settings['controlStyles[1].styles[5]'] -ne 'BackgroundSizing=InnerBorderEdge') {
   $failures.Add('The dock shell does not use the approved graphite squircle geometry.')
 }
-if ($config.settings['controlStyles[0].styles[3]'] -ne 'Margin=24,7,24,3' -or
-    $config.settings['controlStyles[1].styles[3]'] -notmatch '#C05A6672') {
+if ($config.settings['controlStyles[0].styles[3]'] -ne 'Margin=24,5,24,3' -or
+    $config.settings['controlStyles[1].styles[3]'] -notmatch '#A08B98A7') {
   $failures.Add('The dock shell does not preserve the approved top-edge clearance and contrast.')
 }
 if ($config.settings['controlStyles[13].target'] -ne 'Rectangle#BackgroundStroke' -or
@@ -114,8 +114,17 @@ if ($config.settings['controlStyles[9].target'] -notmatch 'RunningIndicator' -or
   $failures.Add('The dock running indicator is not using the compact optical-alignment profile.')
 }
 if ($config.settings['controlStyles[10].target'] -notmatch 'Image#Icon' -or
-    $config.settings['controlStyles[10].styles[0]'] -notmatch 'Y=\"1\"') {
+    $config.settings['controlStyles[10].styles[0]'] -notmatch 'Y=\"0\"') {
   $failures.Add('The dock icon artwork offset is missing.')
+}
+if ($config.settings['controlStyles[11].styles[1]'] -notmatch 'ScaleX=\"0\.72\"' -or
+    $config.settings['controlStyles[12].styles[1]'] -notmatch 'ScaleX=\"0\.76\"') {
+  $failures.Add('Dock overlay and badge artwork is not optically normalized.')
+}
+if ($config.settings['controlStyles[10].styles[2]'] -ne 'Width=26' -or
+    $config.settings['controlStyles[10].styles[3]'] -ne 'Height=26' -or
+    $config.settings['controlStyles[14].styles[0]'] -ne 'MinWidth=42') {
+  $failures.Add('Dock icons or app slots can compact below the approved visual scale.')
 }
 
 $windhawkProfile = Join-Path $env:ProgramData 'Windhawk\userprofile.json'
