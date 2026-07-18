@@ -32,9 +32,9 @@ internal sealed class MenuBarContext : ApplicationContext
     public MenuBarContext(bool preview)
     {
         _preview = preview;
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         RebuildBars();
         _state.Start();
-        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)

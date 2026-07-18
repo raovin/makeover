@@ -13,7 +13,7 @@
     "controlStyles[0].styles[0]": "Width=Auto",
     "controlStyles[0].styles[1]": "HorizontalAlignment=Center",
     "controlStyles[0].styles[2]": "VerticalAlignment=Bottom",
-    "controlStyles[0].styles[3]": "Margin=120,7,120,3",
+    "controlStyles[0].styles[3]": "Margin=24,7,24,3",
     "controlStyles[1].target": "Taskbar.TaskbarFrame > Grid#RootGrid",
     "controlStyles[1].styles[0]": "Background:=<SolidColorBrush Color=\"#FF171A1F\" />",
     "controlStyles[1].styles[1]": "Padding=12,2,12,0",

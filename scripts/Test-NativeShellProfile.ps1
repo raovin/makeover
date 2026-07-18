@@ -188,11 +188,18 @@ $taskbandText = if ($taskband) {
 } else { '' }
 $shell = New-Object -ComObject Shell.Application
 $appsFolder = $shell.Namespace('shell:AppsFolder')
+$shortcutRoot = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
+$shortcutFolder = $shell.Namespace($shortcutRoot)
 foreach ($pin in $pinManifest.pins) {
-  $verbs = if ($pin.appId) {
+  $appVerbs = if ($pin.appId) {
     $item = $appsFolder.ParseName([string]$pin.appId)
     if ($item) { @($item.Verbs() | ForEach-Object { $_.Name.Replace('&', '') }) } else { @() }
   } else { @() }
+  $shortcut = $shortcutFolder.ParseName("$($pin.name).lnk")
+  $shortcutVerbs = if ($shortcut) {
+    @($shortcut.Verbs() | ForEach-Object { $_.Name.Replace('&', '') })
+  } else { @() }
+  $verbs = @($appVerbs + $shortcutVerbs | Sort-Object -Unique)
   $foundInTaskband = @($pin.taskbandPatterns | Where-Object {
       $taskbandText.IndexOf([string]$_, [StringComparison]::OrdinalIgnoreCase) -ge 0
     }).Count -gt 0

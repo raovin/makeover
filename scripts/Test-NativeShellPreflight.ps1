@@ -72,10 +72,16 @@ foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-Native
 }
 
 $menuBarSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MenuBarForm.cs') -Raw
+$menuBarProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\Program.cs') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
 if ($menuBarSource -match 'EnsureNativeDockZOrder|MonitorNativeDockAsync' -or
     $nativeSource -match 'IsBorderlessFullscreen|FindTaskbarFor') {
   $failures.Add('A taskbar z-order monitor is present; Explorer must own dock z-order.')
+}
+$displaySubscription = $menuBarProgramSource.IndexOf('SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;', [StringComparison]::Ordinal)
+$initialBarBuild = $menuBarProgramSource.IndexOf('RebuildBars();', [StringComparison]::Ordinal)
+if ($displaySubscription -lt 0 -or $initialBarBuild -lt 0 -or $displaySubscription -gt $initialBarBuild) {
+  $failures.Add('MenuBar must subscribe to display changes before its initial screen enumeration.')
 }
 
 if ($config.settings['controlStyles[1].styles[0]'] -notmatch '#FF[0-9A-Fa-f]{6}') {
@@ -95,7 +101,7 @@ if ($config.settings['controlStyles[1].styles[2]'] -ne 'CornerRadius=12' -or
     $config.settings['controlStyles[1].styles[5]'] -ne 'BackgroundSizing=InnerBorderEdge') {
   $failures.Add('The dock shell does not use the approved graphite squircle geometry.')
 }
-if ($config.settings['controlStyles[0].styles[3]'] -ne 'Margin=120,7,120,3' -or
+if ($config.settings['controlStyles[0].styles[3]'] -ne 'Margin=24,7,24,3' -or
     $config.settings['controlStyles[1].styles[3]'] -notmatch '#C05A6672') {
   $failures.Add('The dock shell does not preserve the approved top-edge clearance and contrast.')
 }
