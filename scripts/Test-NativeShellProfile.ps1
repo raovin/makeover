@@ -15,11 +15,13 @@ $modSettingsRegistry = Join-Path $modRegistry 'Settings'
 
 $menuBar = @(Get-Process MacMakeover.MenuBar -ErrorAction SilentlyContinue)
 $menuHost = @(Get-Process MacMakeover.MenuHost -ErrorAction SilentlyContinue)
+$dock = @(Get-Process MacMakeover.Dock -ErrorAction SilentlyContinue)
 $seelen = @(Get-Process seelen-ui, slu-service -ErrorAction SilentlyContinue)
 $yasb = @(Get-Process yasb -ErrorAction SilentlyContinue)
 
 if ($menuBar.Count -ne 1) { $failures.Add("Expected one MenuBar process; found $($menuBar.Count).") }
 if ($menuHost.Count -ne 1) { $failures.Add("Expected one MenuHost process; found $($menuHost.Count).") }
+if ($dock.Count -ne 1) { $failures.Add("Expected one Dock process; found $($dock.Count).") }
 if ($seelen.Count) { $failures.Add('Seelen is still running alongside the native shell.') }
 if ($yasb.Count) { $failures.Add('YASB is still running alongside the native shell.') }
 if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { $failures.Add('Windows Explorer is not running.') }
@@ -27,6 +29,8 @@ if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { $failures.Add('
 foreach ($required in @(
     'MacMakeover.MenuBar.exe',
     'MacMakeover.MenuHost.exe',
+    'MacMakeover.Dock.exe',
+    'native-taskbar-pins.json',
     'Assets\apple-mark.png',
     'Assets\Fonts\Manrope-Regular.ttf',
     'Assets\Fonts\Manrope-SemiBold.ttf',
@@ -63,57 +67,17 @@ if (-not $runValues -or $runValues.MacMakeoverMenuBar -notmatch 'MacMakeover\.Me
 if (-not $runValues -or $runValues.MacMakeoverMenuHost -notmatch 'MacMakeover\.MenuHost\.exe') {
   $failures.Add('MenuHost is not registered at logon.')
 }
+if (-not $runValues -or $runValues.MacMakeoverDock -notmatch 'MacMakeover\.Dock\.exe') {
+  $failures.Add('Dock is not registered at logon.')
+}
 
 $mod = Get-ItemProperty -LiteralPath $modRegistry -ErrorAction SilentlyContinue
-if (-not $mod) {
-  $failures.Add('Windows 11 Taskbar Styler is not installed.')
-} else {
-  if ($mod.Disabled) { $failures.Add('Windows 11 Taskbar Styler is disabled.') }
-  if ($mod.Version -ne $modConfig.version) { $failures.Add("Unexpected taskbar styler version: $($mod.Version)") }
-  $binary = Join-Path $env:ProgramData "Windhawk\Engine\Mods\64\$($mod.LibraryFileName)"
-  if (-not (Test-Path -LiteralPath $binary)) {
-    $failures.Add('The configured taskbar styler DLL is missing.')
-  } elseif ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash -ne $modConfig.binarySha256) {
-    $failures.Add('The installed taskbar styler DLL hash does not match the pinned build.')
-  }
+if ($mod -and -not $mod.Disabled) {
+  $failures.Add('Windows 11 Taskbar Styler must stay disabled while MacMakeover.Dock owns the production dock.')
 }
-
-$dockSettings = Get-ItemProperty -LiteralPath $modSettingsRegistry -ErrorAction SilentlyContinue
-if (-not $dockSettings -or $dockSettings.theme -ne 'DockLike') {
-  $failures.Add('DockLike is not the active taskbar theme.')
-}
-if (-not $dockSettings -or $dockSettings.'controlStyles[2].styles[0]' -ne 'Visibility=Collapsed') {
-  $failures.Add('The native system tray is not hidden from the bottom dock.')
-}
-$dockSettingNames = if ($dockSettings) { @($dockSettings.PSObject.Properties.Name) } else { @() }
-$searchVisibility = if ($dockSettingNames -contains 'controlStyles[7].styles[0]') {
-  $dockSettings.PSObject.Properties['controlStyles[7].styles[0]'].Value
-} else { $null }
-$widgetsVisibility = if ($dockSettingNames -contains 'controlStyles[8].styles[0]') {
-  $dockSettings.PSObject.Properties['controlStyles[8].styles[0]'].Value
-} else { $null }
-if ($searchVisibility -ne 'Visibility=Collapsed' -or $widgetsVisibility -ne 'Visibility=Collapsed') {
-  $failures.Add('The dock profile does not collapse Windows Search and Widgets.')
-}
-foreach ($settingName in @(
-    'controlStyles[0].styles[3]',
-    'controlStyles[1].styles[2]',
-    'controlStyles[1].styles[3]',
-    'controlStyles[9].target',
-    'controlStyles[9].styles[3]',
-    'controlStyles[10].styles[0]',
-    'controlStyles[10].styles[2]',
-    'controlStyles[10].styles[3]',
-    'controlStyles[13].target',
-    'controlStyles[13].styles[0]',
-    'controlStyles[14].styles[0]'
-  )) {
-  $liveValue = if ($dockSettingNames -contains $settingName) {
-    $dockSettings.PSObject.Properties[$settingName].Value
-  } else { $null }
-  if ($liveValue -ne $modConfig.settings[$settingName]) {
-    $failures.Add("Live dock setting is stale: $settingName")
-  }
+$windhawkService = Get-Service -Name Windhawk -ErrorAction SilentlyContinue
+if ($windhawkService -and ($windhawkService.Status -eq 'Running' -or $windhawkService.StartType -eq 'Automatic')) {
+  $failures.Add('Windhawk service must remain stopped and non-automatic in the production profile.')
 }
 $advancedSearch = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name SearchboxTaskbarMode -ErrorAction SilentlyContinue).SearchboxTaskbarMode
 $searchSettings = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -ErrorAction SilentlyContinue
@@ -140,8 +104,10 @@ public static class NativeShellProbe {
 }
 '@
 $taskbarWindow = [NativeShellProbe]::FindWindow('Shell_TrayWnd', $null)
-if ($taskbarWindow -eq [IntPtr]::Zero -or -not [NativeShellProbe]::IsWindowVisible($taskbarWindow)) {
-  $failures.Add('The native taskbar window is not visible.')
+if ($taskbarWindow -eq [IntPtr]::Zero) {
+  $failures.Add('The native taskbar work-area owner is missing.')
+} elseif ([NativeShellProbe]::IsWindowVisible($taskbarWindow)) {
+  $failures.Add('The duplicate native taskbar is visible behind MacMakeover.Dock.')
 }
 
 foreach ($screen in [Windows.Forms.Screen]::AllScreens) {
@@ -217,6 +183,9 @@ if ($menuBar.Count -eq 1 -and $menuBar[0].WorkingSet64 -gt 100MB) {
 if ($menuHost.Count -eq 1 -and $menuHost[0].WorkingSet64 -gt 100MB) {
   $failures.Add("MenuHost memory exceeds 100 MB: $([math]::Round($menuHost[0].WorkingSet64 / 1MB, 1)) MB")
 }
+if ($dock.Count -eq 1 -and $dock[0].WorkingSet64 -gt 120MB) {
+  $failures.Add("Dock memory exceeds 120 MB: $([math]::Round($dock[0].WorkingSet64 / 1MB, 1)) MB")
+}
 
 $menuBarLog = Join-Path $env:LOCALAPPDATA 'MacMakeover\menu-bar.log'
 if (Test-Path -LiteralPath $menuBarLog) {
@@ -235,4 +204,5 @@ if ($failures.Count) {
 
 $barMb = [math]::Round($menuBar[0].WorkingSet64 / 1MB, 1)
 $hostMb = [math]::Round($menuHost[0].WorkingSet64 / 1MB, 1)
-Write-Host ('PASS: native shell is coherent. MenuBar {0} MB; MenuHost {1} MB.' -f $barMb, $hostMb)
+$dockMb = [math]::Round($dock[0].WorkingSet64 / 1MB, 1)
+Write-Host ('PASS: native shell is coherent. MenuBar {0} MB; MenuHost {1} MB; Dock {2} MB.' -f $barMb, $hostMb, $dockMb)

@@ -29,9 +29,14 @@ if (-not $SkipElevation) {
   if ($process.ExitCode -ne 0) { throw "Privileged rollback failed with exit code $($process.ExitCode)." }
 }
 
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost -ErrorAction SilentlyContinue |
+$dock = Join-Path $env:LOCALAPPDATA 'MacMakeover\bin\MacMakeover.Dock.exe'
+if (Test-Path -LiteralPath $dock) {
+  Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
+  Start-Sleep -Milliseconds 500
+}
+Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
-Remove-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar, MacMakeoverMenuHost -ErrorAction SilentlyContinue
+Remove-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar, MacMakeoverMenuHost, MacMakeoverDock -ErrorAction SilentlyContinue
 
 function Restore-RegistrySnapshot([string]$Path, [string]$Name, $Snapshot) {
   if ($null -eq $Snapshot) { return }

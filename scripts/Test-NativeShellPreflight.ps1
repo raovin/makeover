@@ -10,20 +10,18 @@ $ErrorActionPreference = 'Stop'
 $failures = [System.Collections.Generic.List[string]]::new()
 $warnings = [System.Collections.Generic.List[string]]::new()
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$configPath = Join-Path $repoRoot 'config\windhawk\native-dock.json'
-$config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json -AsHashtable
-
 foreach ($required in @(
     (Join-Path $DeploymentRoot 'MacMakeover.MenuBar.exe'),
     (Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'),
+    (Join-Path $DeploymentRoot 'MacMakeover.Dock.exe'),
+    (Join-Path $DeploymentRoot 'native-taskbar-pins.json'),
     (Join-Path $DeploymentRoot 'Assets\apple-mark.png'),
     (Join-Path $DeploymentRoot 'Assets\Fonts\Manrope-Regular.ttf'),
     (Join-Path $DeploymentRoot 'Assets\Fonts\Manrope-SemiBold.ttf'),
     (Join-Path $DeploymentRoot 'Assets\Fonts\JetBrainsMono-Medium.ttf'),
     (Join-Path $DeploymentRoot 'Assets\Fonts\OFL-Manrope.txt'),
     (Join-Path $DeploymentRoot 'Assets\Fonts\OFL-JetBrainsMono.txt'),
-    (Join-Path $repoRoot 'assets\wallpapers\mac-wallpaper.jpg'),
-    (Join-Path $env:ProgramFiles 'Windhawk\windhawk.exe')
+    (Join-Path $repoRoot 'assets\wallpapers\mac-wallpaper.jpg')
   )) {
   if (-not (Test-Path -LiteralPath $required)) {
     $failures.Add("Missing preflight dependency: $required")
@@ -84,76 +82,37 @@ if ($displaySubscription -lt 0 -or $initialBarBuild -lt 0 -or $displaySubscripti
   $failures.Add('MenuBar must subscribe to display changes before its initial screen enumeration.')
 }
 
-if ($config.settings['controlStyles[1].styles[0]'] -notmatch '#FF[0-9A-Fa-f]{6}') {
-  $failures.Add('The dock background is not configured as fully opaque.')
+$dockSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Dock\Program.cs') -Raw
+if ($dockSource -notmatch 'WsExNoActivate' -or $dockSource -notmatch 'WsExToolWindow') {
+  $failures.Add('Dock must remain a non-activating tool window and stay out of Alt+Tab.')
 }
-if ($config.settings['controlStyles[2].styles[0]'] -ne 'Visibility=Collapsed') {
-  $failures.Add('The duplicate native system tray is not hidden from the dock profile.')
+if ($dockSource -notmatch 'SlotWidth = 44' -or $dockSource -notmatch 'IconSize = 28') {
+  $failures.Add('Dock no longer uses the approved icon and slot geometry.')
 }
-if ($config.settings['controlStyles[6].styles[0]'] -ne 'Visibility=Collapsed') {
-  $failures.Add('The duplicate Start button is not hidden from the dock profile.')
-}
-if ($config.settings['controlStyles[7].styles[0]'] -ne 'Visibility=Collapsed' -or
-    $config.settings['controlStyles[8].styles[0]'] -ne 'Visibility=Collapsed') {
-  $failures.Add('Windows Search or Widgets is still exposed inside the dock profile.')
-}
-if ($config.settings['controlStyles[1].styles[2]'] -ne 'CornerRadius=14' -or
-    $config.settings['controlStyles[1].styles[5]'] -ne 'BackgroundSizing=InnerBorderEdge') {
-  $failures.Add('The dock shell does not use the approved graphite squircle geometry.')
-}
-if ($config.settings['controlStyles[0].styles[3]'] -ne 'Margin=24,5,24,3' -or
-    $config.settings['controlStyles[1].styles[3]'] -notmatch '#A08B98A7') {
-  $failures.Add('The dock shell does not preserve the approved top-edge clearance and contrast.')
-}
-if ($config.settings['controlStyles[13].target'] -ne 'Rectangle#BackgroundStroke' -or
-    $config.settings['controlStyles[13].styles[0]'] -ne 'Visibility=Collapsed') {
-  $failures.Add('The full-width native taskbar stroke is still visible behind the floating dock.')
-}
-if ($config.settings['controlStyles[9].target'] -notmatch 'RunningIndicator' -or
-    $config.settings['controlStyles[9].styles[3]'] -ne 'Height=2') {
-  $failures.Add('The dock running indicator is not using the compact optical-alignment profile.')
-}
-if ($config.settings['controlStyles[10].target'] -notmatch 'Image#Icon' -or
-    $config.settings['controlStyles[10].styles[0]'] -notmatch 'Y=\"0\"') {
-  $failures.Add('The dock icon artwork offset is missing.')
-}
-if ($config.settings['controlStyles[11].styles[1]'] -notmatch 'ScaleX=\"0\.72\"' -or
-    $config.settings['controlStyles[12].styles[1]'] -notmatch 'ScaleX=\"0\.76\"') {
-  $failures.Add('Dock overlay and badge artwork is not optically normalized.')
-}
-if ($config.settings['controlStyles[10].styles[2]'] -ne 'Width=26' -or
-    $config.settings['controlStyles[10].styles[3]'] -ne 'Height=26' -or
-    $config.settings['controlStyles[14].styles[0]'] -ne 'MinWidth=42') {
-  $failures.Add('Dock icons or app slots can compact below the approved visual scale.')
-}
-
-$windhawkProfile = Join-Path $env:ProgramData 'Windhawk\userprofile.json'
-if (Test-Path -LiteralPath $windhawkProfile) {
-  $profile = Get-Content -LiteralPath $windhawkProfile -Raw | ConvertFrom-Json -AsHashtable
-  if (-not $profile.ContainsKey('app') -or -not $profile.app.ContainsKey('version')) {
-    $warnings.Add('Windhawk is installed, but its version metadata was not found.')
-  }
-} else {
-  $failures.Add('Windhawk user profile was not found.')
-}
-
-if (-not $SkipDownloadCheck) {
-  $tempRoot = Join-Path $env:TEMP 'MacMakeover\preflight'
-  New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
-  $tempDll = Join-Path $tempRoot 'taskbar-styler.dll'
-  Invoke-WebRequest -Uri $config.binaryUrl -OutFile $tempDll -UseBasicParsing -TimeoutSec 60
-  $actualHash = (Get-FileHash -LiteralPath $tempDll -Algorithm SHA256).Hash
-  if ($actualHash -ne $config.binarySha256) {
-    $failures.Add("Pinned Windhawk binary hash mismatch: $actualHash")
-  }
+if ($dockSource -match 'RegisterHotKey|SetWindowsHookEx') {
+  $failures.Add('Dock must not own global keyboard hooks.')
 }
 
 $hostPath = Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'
 if (Test-Path -LiteralPath $hostPath) {
-  $hostSelfTest = Start-Process -FilePath $hostPath -ArgumentList '--self-test' `
-    -Wait -PassThru -WindowStyle Hidden
+  $hostSelfTest = $null
+  foreach ($attempt in 1..3) {
+    $hostSelfTest = Start-Process -FilePath $hostPath -ArgumentList '--self-test' `
+      -Wait -PassThru -WindowStyle Hidden
+    if ($hostSelfTest.ExitCode -eq 0) { break }
+    Start-Sleep -Milliseconds 400
+  }
   if ($hostSelfTest.ExitCode -ne 0) {
-    $failures.Add("MenuHost Core Audio self-test failed with exit code $($hostSelfTest.ExitCode).")
+    $failures.Add("MenuHost Core Audio self-test failed after three attempts with exit code $($hostSelfTest.ExitCode).")
+  }
+}
+
+$dockPath = Join-Path $DeploymentRoot 'MacMakeover.Dock.exe'
+if (Test-Path -LiteralPath $dockPath) {
+  $dockSelfTest = Start-Process -FilePath $dockPath -ArgumentList '--self-test' `
+    -Wait -PassThru -WindowStyle Hidden
+  if ($dockSelfTest.ExitCode -ne 0) {
+    $failures.Add("Dock manifest/icon self-test failed with exit code $($dockSelfTest.ExitCode).")
   }
 }
 

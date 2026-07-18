@@ -3,7 +3,7 @@
 A macOS-inspired Windows 11 shell that keeps Windows in charge of productivity.
 
 The production profile uses an owned native menu bar, small native menu panels,
-and the real Windows taskbar styled as an opaque dock. The retired Seelen UI
+and a no-activation native dock. The retired Seelen UI
 generation is preserved under `archive/seelen-ui/` only for reference or rollback.
 
 ## What You Get
@@ -13,7 +13,7 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 - CPU, RAM, network throughput, and combined battery/charging state in the center.
 - Separate Wi-Fi, Bluetooth, volume, Control Center, date, and notification controls.
 - Apple-style power and session commands without the old full-screen launcher.
-- A centered opaque dock that preserves Windows pins, previews, badges, and lifecycle.
+- A centered opaque dock with the complete inherited pin set and live running indicators.
 - Spotlight-style local search through `Alt+Space`, with Bing results suppressed.
 - Native Explorer ownership of Alt+Tab, Win+Tab, snap, maximize, Start, and Search.
 
@@ -34,8 +34,8 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 | --- | --- |
 | Top bar | `MacMakeover.MenuBar` (.NET WinForms AppBar) |
 | Apple and system panels | `MacMakeover.MenuHost` (.NET WinForms) |
-| Dock behavior and window lifecycle | Windows Explorer |
-| Dock appearance | Official Windhawk Windows 11 Taskbar Styler 1.7 |
+| Dock rendering and pin actions | `MacMakeover.Dock` (.NET WinForms tool window) |
+| App switching and window lifecycle | Windows Explorer |
 | Notifications and calendar | Windows Notification Center |
 | Spotlight-style launcher | Microsoft Command Palette / PowerToys Run |
 
@@ -46,7 +46,7 @@ comparison is in [Performance Comparison](docs/PERFORMANCE-COMPARISON-2026-07-17
 ## Install Or Upgrade
 
 Open a normal PowerShell session in this repository. Do not start it as
-administrator; the script requests elevation only for the Windhawk and scheduled
+administrator; the script requests elevation only for the legacy-mod and scheduled
 task phase.
 
 ```powershell
@@ -55,7 +55,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
 Approve the one Windows UAC prompt. The promoter builds and stages the binaries,
-checks the pinned Windhawk hash and Core Audio, applies the privileged phase,
+checks Core Audio and dock invariants, applies the privileged phase,
 restarts Explorer once, and runs acceptance checks.
 
 To verify an existing installation without changing it:
@@ -69,7 +69,7 @@ To verify an existing installation without changing it:
 ## Rollback
 
 Run rollback from a normal PowerShell session. It requests elevation only to
-disable the dock mod and re-enable the Seelen scheduled task; user-profile state
+disable the native profile and re-enable the Seelen scheduled task; user-profile state
 is restored after returning to the normal token.
 
 ```powershell
@@ -81,7 +81,7 @@ is restored after returning to the normal token.
 ```text
 assets/                         Wallpapers and visual assets
 archive/seelen-ui/              Retired Seelen profile, scripts, and history
-config/windhawk/native-dock.json Pinned native dock definition
+config/windhawk/native-dock.json Archived Windhawk rollback profile
 config/native-taskbar-pins.json  Required dock pins inherited from Seelen
 config/powertoys/               Spotlight-style launcher settings
 scripts/Promote-NativeShell.ps1 Production installer/orchestrator
@@ -90,6 +90,7 @@ scripts/Measure-ShellPerformance.ps1 Reproducible process sampler
 archive/seelen-ui/scripts/      Optional legacy rollback utilities
 tools/MacMakeover.MenuBar/      Owned per-monitor top AppBar
 tools/MacMakeover.MenuHost/     Apple and system panels
+tools/MacMakeover.Dock/         No-activation mixed-DPI dock
 docs/                           Architecture, QA, and historical notes
 qa/                             Local visual evidence (normally uncommitted)
 ```
@@ -99,7 +100,7 @@ qa/                             Local visual evidence (normally uncommitted)
 - No credentials, remote-access passwords, browser sessions, or work tokens are
   intentionally stored.
 - Restart, shutdown, sleep, and log out require confirmation.
-- Windhawk downloads are pinned to an official version and SHA-256.
+- Windhawk remains installed for rollback, with its styler disabled and service set to manual.
 - Bundled Manrope and JetBrains Mono files include their OFL license texts and do
   not require a machine-wide font installation.
 - The external display must be physically connected before mixed-DPI signoff.

@@ -77,7 +77,7 @@ if (-not (Test-Path -LiteralPath $statePath)) {
   foreach ($name in 'TaskbarAl', 'TaskbarDa', 'ShowTaskViewButton', 'SearchboxTaskbarMode', 'MMTaskbarEnabled') {
     $state.advanced[$name] = Get-RegistryValueSnapshot $advancedKey $name
   }
-  foreach ($name in 'MacMakeoverMenuBar', 'MacMakeoverMenuHost') {
+  foreach ($name in 'MacMakeoverMenuBar', 'MacMakeoverMenuHost', 'MacMakeoverDock') {
     $state.run[$name] = Get-RegistryValueSnapshot $runKey $name
   }
   foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
@@ -102,6 +102,14 @@ if (-not $savedState.ContainsKey('search')) {
     ($savedState | ConvertTo-Json -Depth 8),
     (New-Object System.Text.UTF8Encoding($false)))
 }
+if (-not $savedState.ContainsKey('run')) { $savedState.run = [ordered]@{} }
+if (-not $savedState.run.ContainsKey('MacMakeoverDock')) {
+  $savedState.run.MacMakeoverDock = Get-RegistryValueSnapshot $runKey 'MacMakeoverDock'
+  [System.IO.File]::WriteAllText(
+    $statePath,
+    ($savedState | ConvertTo-Json -Depth 8),
+    (New-Object System.Text.UTF8Encoding($false)))
+}
 
 $artifactRoot = $deploymentRoot
 if (-not $SkipBuild) {
@@ -111,6 +119,8 @@ if (-not $SkipBuild) {
 foreach ($required in @(
     'MacMakeover.MenuBar.exe',
     'MacMakeover.MenuHost.exe',
+    'MacMakeover.Dock.exe',
+    'native-taskbar-pins.json',
     'Assets\apple-mark.png',
     'Assets\Fonts\Manrope-Regular.ttf',
     'Assets\Fonts\Manrope-SemiBold.ttf',
@@ -121,7 +131,12 @@ foreach ($required in @(
   }
 }
 
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost -ErrorAction SilentlyContinue |
+$deployedDock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
+if (Test-Path -LiteralPath $deployedDock) {
+  Start-Process -FilePath $deployedDock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
+  Start-Sleep -Milliseconds 500
+}
+Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
 if ($artifactRoot -ne $deploymentRoot) {
   New-Item -ItemType Directory -Force -Path $deploymentRoot | Out-Null
@@ -161,11 +176,13 @@ foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
   New-ItemProperty -LiteralPath $searchKey -Name $name -Value 0 -PropertyType DWord -Force | Out-Null
 }
 
-if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
+if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
 $menuBar = Join-Path $deploymentRoot 'MacMakeover.MenuBar.exe'
 $menuHost = Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe'
+$dock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
 New-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuHost -Value ('"{0}"' -f $menuHost) -PropertyType String -Force | Out-Null
 New-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar -Value ('"{0}"' -f $menuBar) -PropertyType String -Force | Out-Null
+New-ItemProperty -LiteralPath $runKey -Name MacMakeoverDock -Value ('"{0}"' -f $dock) -PropertyType String -Force | Out-Null
 
 $prepared = [ordered]@{ preparedAt = (Get-Date).ToString('o'); deploymentRoot = $deploymentRoot } | ConvertTo-Json
 [System.IO.File]::WriteAllText($preparedPath, $prepared, (New-Object System.Text.UTF8Encoding($false)))

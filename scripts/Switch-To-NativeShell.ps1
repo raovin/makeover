@@ -20,7 +20,9 @@ Remove-Item -LiteralPath $systemPath -Force -ErrorAction SilentlyContinue
 $seelenTask = Get-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction SilentlyContinue
 
 try {
-  & (Join-Path $PSScriptRoot 'Install-NativeDock.ps1') -Enable
+  & (Join-Path $PSScriptRoot 'Install-NativeDock.ps1') -Disable
+  Stop-Service -Name Windhawk -Force -ErrorAction SilentlyContinue
+  Set-Service -Name Windhawk -StartupType Manual -ErrorAction SilentlyContinue
 
   if ($seelenTask) {
     Stop-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction SilentlyContinue
@@ -28,7 +30,7 @@ try {
   }
 
   & (Join-Path $PSScriptRoot 'stop-hot-corners.ps1')
-  Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
+  Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 
   $result = [ordered]@{

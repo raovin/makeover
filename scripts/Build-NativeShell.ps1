@@ -10,7 +10,8 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $projects = @(
   (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj'),
-  (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MacMakeover.MenuBar.csproj')
+  (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MacMakeover.MenuBar.csproj'),
+  (Join-Path $repoRoot 'tools\MacMakeover.Dock\MacMakeover.Dock.csproj')
 )
 $publishRoot = Join-Path $env:TEMP 'MacMakeover\native-shell-publish'
 
@@ -44,6 +45,8 @@ foreach ($project in $projects) {
 $required = @(
   'MacMakeover.MenuBar.exe',
   'MacMakeover.MenuHost.exe',
+  'MacMakeover.Dock.exe',
+  'native-taskbar-pins.json',
   'Assets\apple-mark.png',
   'Assets\Fonts\Manrope-Regular.ttf',
   'Assets\Fonts\Manrope-SemiBold.ttf',

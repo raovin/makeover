@@ -19,7 +19,12 @@ if (-not (Test-Path -LiteralPath $resultPath) -or (Get-Content -LiteralPath $res
   throw 'The privileged native-shell phase did not report success.'
 }
 
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
+$dock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
+if (Test-Path -LiteralPath $dock) {
+  Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
+  Start-Sleep -Milliseconds 500
+}
+Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
 Get-Process explorer -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
@@ -31,6 +36,8 @@ $menuBar = Join-Path $deploymentRoot 'MacMakeover.MenuBar.exe'
 Start-Process -FilePath $menuHost -WindowStyle Hidden
 Start-Sleep -Milliseconds 500
 Start-Process -FilePath $menuBar -WindowStyle Hidden
+Start-Sleep -Milliseconds 500
+Start-Process -FilePath $dock -WindowStyle Hidden
 Start-Sleep -Seconds 6
 
 & (Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1')

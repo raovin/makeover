@@ -11,8 +11,8 @@ that provide reliable task switching, window management, and application lifecyc
 | --- | --- |
 | Top menu bar rendering and hit testing | `MacMakeover.MenuBar` |
 | Apple, Control Center, Network, and Bluetooth panels | `MacMakeover.MenuHost` |
-| Bottom dock rendering, pins, previews, and work area | Windows Explorer |
-| Dock appearance only | Windhawk Windows 11 Taskbar Styler |
+| Bottom dock rendering and pin actions | `MacMakeover.Dock` |
+| App switching, snap, maximize, and lifecycle | Windows Explorer |
 | Alt+Tab, Win+Tab, snap, maximize, Start, and Search | Windows Explorer |
 | Notifications and calendar | Windows Notification Center |
 | Spotlight-style launcher | PowerToys Run / Command Palette |
@@ -63,27 +63,21 @@ the taskbar, and `Win+D`.
 
 ## Dock
 
-The dock is the native Windows 11 taskbar with the official Windhawk
-`windows-11-taskbar-styler` 1.7 module. The binary URL and SHA-256 are pinned in
-`config/windhawk/native-dock.json`.
+`tools/MacMakeover.Dock` is an owner-drawn, per-monitor WinForms surface. It uses
+`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`, so it cannot take focus and never appears in
+Alt+Tab. It does not install keyboard or mouse hooks.
 
-The profile keeps native pins, jump lists, hover previews, badges, and task
-lifecycle; uses a centered fully opaque graphite surface with a restrained silver
-border; uses a compact native running indicator; and offsets only icon artwork to
-correct Windows' indicator-biased optical alignment. It hides the duplicate Start
-button and tray and disables taskbar auto-hide. No pin database is rewritten.
-The shell is inset farther from the top of the reserved taskbar strip and uses an
-graphite-gray outline so all four corners remain legible against both dark
-maximized windows and bright desktop wallpaper.
-Both native full-width background rectangles are collapsed. App activity uses the
-compact running indicator instead of a persistent rectangular selection well.
+The dock loads all 21 inherited pins from `config/native-taskbar-pins.json`, resolves
+classic shortcut and packaged-app artwork through the Windows shell, spaces 28 px
+logical icons in deterministic 44 px slots, and paints live running dots from a
+single process snapshot every three seconds. Clicking an item focuses a matching
+window or asks the shell to launch the pinned app.
 
-Explorer owns the taskbar's z-order. The profile does not poll, force topmost, or
-fight normal shell transitions. Dock visibility comes from the native reserved
-bottom work area: maximized windows end at its top edge, while genuine fullscreen
-apps retain normal Windows behavior. The live profile test checks taskbar visibility
-and reserved work-area geometry rather than requiring an implementation-specific
-`WS_EX_TOPMOST` flag.
+Windows' native taskbar remains the owner of the reserved 48 px bottom work area but
+is visually hidden while the dock runs. This keeps maximized windows above the dock
+without a second AppBar reservation. Graceful shutdown restores every native taskbar.
+The dock has no custom task switcher, window mover, or Explorer injection. Windhawk's
+taskbar styler remains installed as rollback material, disabled with its service manual.
 
 ## Privilege Boundary
 
@@ -93,7 +87,7 @@ Promotion is intentionally split:
 1. `Prepare-NativeShellUserProfile.ps1` builds, deploys, registers user protocols,
    applies wallpaper/startup entries, and prepares Explorer from the normal token.
 2. `Request-NativeShellPromotion.ps1` requests UAC for the narrow privileged phase.
-3. `Switch-To-NativeShell.ps1` installs Windhawk and disables Seelen/hot-corner tasks.
+3. `Switch-To-NativeShell.ps1` disables the legacy Windhawk profile and Seelen tasks.
 4. `Complete-NativeShellPromotion.ps1` returns to the normal token, restarts Explorer,
    starts the owned processes, and runs live acceptance.
 
@@ -103,14 +97,14 @@ and `archive/seelen-ui/scripts/Restore-SeelenProfile.ps1`.
 
 ## Release Gates
 
-1. Build, PowerShell parsing, pinned hash, and real Core Audio test pass.
-2. Exactly one MenuBar and MenuHost run; Seelen and YASB do not.
+1. Build, PowerShell parsing, dock invariants, and real Core Audio test pass.
+2. Exactly one MenuBar, MenuHost, and Dock run; Seelen and YASB do not.
 3. Every monitor reserves both top and bottom work areas.
 4. Desktop, maximized, restored, and snapped visual checks pass at real DPI.
 5. Repeated Alt+Tab works with every custom panel open and closed.
 6. Apple, Network, Bluetooth, Control Center, bell, date, volume, and corners are
    behaviorally independent.
 7. Explorer navigation, restart, and sign-in preserve one coherent shell.
-8. MenuBar and MenuHost each stay below 100 MB without growth in the soak sample.
+8. MenuBar and MenuHost stay below 100 MB; Dock stays below 120 MB without growth.
 9. Rollback never leaves Seelen and the native profile running together.
 10. Mixed-DPI signoff is repeated whenever the external display is connected.
