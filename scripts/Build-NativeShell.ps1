@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$Configuration = 'Release',
-  [string]$Destination = (Join-Path $env:LOCALAPPDATA 'MacMakeover\bin')
+  [string]$Destination = (Join-Path $env:TEMP 'MacMakeover\native-shell-build')
 )
 
 Set-StrictMode -Version Latest

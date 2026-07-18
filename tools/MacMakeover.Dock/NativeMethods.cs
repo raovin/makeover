@@ -7,6 +7,7 @@ internal static class NativeMethods
 {
     public const int WsExToolWindow = 0x80;
     public const int WsExTransparent = 0x20;
+    public const int WsExLayered = 0x80000;
     public const int WsExNoActivate = 0x08000000;
     public const int AbmNew = 0;
     public const int AbmRemove = 1;

@@ -71,7 +71,12 @@ foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-Native
 
 $menuBarSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MenuBarForm.cs') -Raw
 $menuBarProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\Program.cs') -Raw
+$menuHostSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\Program.cs') -Raw
+$buildSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
+if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
+  $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
+}
 if ($menuBarSource -match 'EnsureNativeDockZOrder|MonitorNativeDockAsync' -or
     $nativeSource -match 'IsBorderlessFullscreen|FindTaskbarFor') {
   $failures.Add('A taskbar z-order monitor is present; Explorer must own dock z-order.')
@@ -80,6 +85,9 @@ $displaySubscription = $menuBarProgramSource.IndexOf('SystemEvents.DisplaySettin
 $initialBarBuild = $menuBarProgramSource.IndexOf('RebuildBars();', [StringComparison]::Ordinal)
 if ($displaySubscription -lt 0 -or $initialBarBuild -lt 0 -or $displaySubscription -gt $initialBarBuild) {
   $failures.Add('MenuBar must subscribe to display changes before its initial screen enumeration.')
+}
+if ($menuHostSource -notmatch 'PowerLineStatus\.Online && pct < 100') {
+  $failures.Add('MenuHost charging state can disagree with the menu-bar battery state at 100 percent.')
 }
 
 $dockSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Dock\Program.cs') -Raw
@@ -93,6 +101,18 @@ if ($dockSource -notmatch 'LogicalGap = 8' -or
     $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmNew' -or
     $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmRemove') {
   $failures.Add('Dock no longer owns the approved reversible 8 px work-area gap reservation.')
+}
+if ($dockSource -notmatch 'dispatcher\.InvokeRequired' -or
+    $dockSource -notmatch 'Interlocked\.Exchange\(ref _displayRebuildPending') {
+  $failures.Add('Dock display changes are no longer marshalled and deduplicated on the UI thread.')
+}
+if ($dockSource -notmatch 'class DockBackdropForm' -or
+    $dockSource -notmatch 'WsExLayered' -or
+    $dockSource -notmatch 'WsExTransparent' -or
+    $dockSource -notmatch 'WallpaperSlice\.Draw' -or
+    $dockSource -notmatch 'Region = new Region\(path\)' -or
+    $dockSource -notmatch '_frame\.Width <= 0') {
+  $failures.Add('Dock no longer isolates its wallpaper-backed click-through strip from the interactive rounded frame.')
 }
 if ($dockSource -match 'RegisterHotKey|SetWindowsHookEx') {
   $failures.Add('Dock must not own global keyboard hooks.')

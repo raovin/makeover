@@ -15,6 +15,12 @@ fixed width or running-panel margins crashed `Explorer.EXE` in
   top/bottom inset inside the reserved taskbar strip.
 - An additional 8 px transparent appbar reservation above the hidden native
   taskbar strip keeps maximized DWM borders visibly clear of the dock frame.
+- The reserved gap and outer dock strip repaint the matching wallpaper slice.
+  This prevents a background fullscreen window from leaking text or scrollbars
+  around the floating dock.
+- The wallpaper backplate is a layered, click-through tool window. The interactive
+  dock window is physically clipped to the rounded frame, so the outer strip is
+  not a dead input zone.
 - Laptop at 150%: 1,452 px frame and 66 px physical icon centers.
 - External display at 100%: 968 px frame and 44 px physical icon centers.
 - Frame stays entirely below the maximized work area on both displays.
@@ -42,8 +48,10 @@ fixed width or running-panel margins crashed `Explorer.EXE` in
   one core, including the native-taskbar visibility guard.
 - Working set: 96.8 MB; private memory: 34 MB.
 - Running-state polling uses one process snapshot per monitor every three seconds.
-- Zero Explorer application faults were recorded after Windhawk was removed from
-  Explorer and its service was stopped.
+- Explorer/XAML faults were recorded between 22:23 and 23:01 during the rejected
+  Windhawk selector experiments and repeated Explorer restarts. No relevant
+  Explorer, XAML, .NET, or MacMakeover application fault was recorded after
+  midnight during the final native-shell audit.
 
 ## Automated Gates
 
@@ -62,3 +70,38 @@ Windows exposed only the laptop display during the final post-guard screenshot.
 The profile gate now enumerates both `Shell_TrayWnd` and
 `Shell_SecondaryTrayWnd`; repeat the final external-display screenshot when that
 display is active again.
+
+## Final Release Audit - 2026-07-19
+
+- Rebuilt and deployed the exact checked-out source after every accepted fix.
+- Ran five complete Dock shutdown/relaunch cycles, then three more after the final
+  wallpaper-backplate change. Every stopped state restored one native taskbar and
+  a 48 px bottom reserve; every running state restored the 56 px reserve, hid the
+  native taskbar, and left exactly one Dock process.
+- Broadcast three consecutive `WM_DISPLAYCHANGE` events. The same Dock process
+  remained responsive, with stable window ownership and work-area geometry.
+- Marshalled display rebuilds to the WinForms UI thread and deduplicated concurrent
+  monitor events with an interlocked guard.
+- Exercised Apple, Control Center, Wi-Fi, Bluetooth, and Notification Center panels;
+  verified menu dismissal and application switching through Alt+Tab.
+- Verified `Win+D` show-desktop and restore as a round trip.
+- Activated Chrome and ChatGPT with real dock clicks using DPI-aware coordinates.
+- Changed brightness from 99% to 41% and restored 99% through the visible slider.
+- Ran the MenuHost Core Audio self-test, including volume change, verification, and
+  restoration. The test exited successfully.
+- Corrected Control Center's full-battery label so 100% no longer claims to be
+  charging when the menu bar correctly shows a full battery.
+- The final 30-second sample measured 0.477% median custom-shell CPU, 0.769% p95 CPU,
+  186.8 MB median working set, and 61.5 MB median private memory across MenuBar,
+  MenuHost, and Dock.
+- Rejected an intermediate wallpaper-backdrop build after visual QA exposed a
+  zero-size first-paint exception. The final build guards that path and passed a
+  fresh restart, screenshot, and profile check.
+- Hit-test probes on the final build resolved the left and right outer strip to
+  the underlying desktop, while the dock center alone resolved to the Dock process.
+- Final laptop screenshot: `qa/release-audit-final-signoff.png`.
+
+Final gates: clean publish, zero compiler warnings/errors, preflight pass, 21/21
+inherited pins present, live profile pass, aggregate verifier pass, and
+`git diff --check` pass. The physically disconnected external display remains the
+only visual signoff that could not be repeated on the final guard build.

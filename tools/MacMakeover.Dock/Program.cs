@@ -46,10 +46,12 @@ internal sealed class DockContext : ApplicationContext
     private readonly bool _preview;
     private readonly List<DockForm> _forms = [];
     private readonly List<WorkAreaGapForm> _gapForms = [];
+    private readonly List<DockBackdropForm> _backdropForms = [];
     private readonly List<IntPtr> _taskbars = [];
     private readonly System.Windows.Forms.Timer _taskbarGuard = new() { Interval = 1500 };
     private readonly RegisteredWaitHandle _exitRegistration;
     private bool _rebuilding;
+    private int _displayRebuildPending;
     private bool _exiting;
 
     public DockContext(bool preview, EventWaitHandle exit)
@@ -80,6 +82,9 @@ internal sealed class DockContext : ApplicationContext
                 var gapForm = new WorkAreaGapForm(screen);
                 _gapForms.Add(gapForm);
                 gapForm.Show();
+                var backdropForm = new DockBackdropForm(screen);
+                _backdropForms.Add(backdropForm);
+                backdropForm.Show();
             }
             var form = new DockForm(screen, apps, _preview);
             form.FormClosed += (_, _) => { _forms.Remove(form); if (!_rebuilding && !_exiting && _forms.Count == 0) ExitThread(); };
@@ -91,6 +96,23 @@ internal sealed class DockContext : ApplicationContext
 
     private void OnDisplayChanged(object? sender, EventArgs e)
     {
+        if (_exiting) return;
+        var dispatcher = _forms.FirstOrDefault(form => form.IsHandleCreated && !form.IsDisposed);
+        if (dispatcher is not null && dispatcher.InvokeRequired)
+        {
+            if (Interlocked.Exchange(ref _displayRebuildPending, 1) != 0) return;
+            try
+            {
+                dispatcher.BeginInvoke(new Action(() =>
+                {
+                    Interlocked.Exchange(ref _displayRebuildPending, 0);
+                    OnDisplayChanged(sender, e);
+                }));
+            }
+            catch (InvalidOperationException) { Interlocked.Exchange(ref _displayRebuildPending, 0); }
+            return;
+        }
+        if (_rebuilding) return;
         _rebuilding = true;
         try
         {
@@ -98,6 +120,8 @@ internal sealed class DockContext : ApplicationContext
             _forms.Clear();
             foreach (var gapForm in _gapForms.ToArray()) gapForm.Close();
             _gapForms.Clear();
+            foreach (var backdropForm in _backdropForms.ToArray()) backdropForm.Close();
+            _backdropForms.Clear();
             BuildForms();
         }
         finally { _rebuilding = false; }
@@ -128,6 +152,7 @@ internal sealed class DockContext : ApplicationContext
         _taskbarGuard.Dispose();
         foreach (var form in _forms.ToArray()) form.Dispose();
         foreach (var gapForm in _gapForms.ToArray()) gapForm.Dispose();
+        foreach (var backdropForm in _backdropForms.ToArray()) backdropForm.Dispose();
         foreach (var taskbar in _taskbars) NativeMethods.ShowWindow(taskbar, NativeMethods.SwShow);
         base.ExitThreadCore();
     }
@@ -150,7 +175,11 @@ internal sealed class WorkAreaGapForm : Form
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
-        Opacity = 0;
+        TopMost = true;
+        Enabled = false;
+        Opacity = 0.999;
+        BackColor = Color.FromArgb(16, 18, 28);
+        DoubleBuffered = true;
         Location = new Point(screen.Bounds.Left, screen.Bounds.Bottom - 1);
         Size = new Size(1, 1);
         Shown += (_, _) => RegisterAndPosition();
@@ -162,7 +191,8 @@ internal sealed class WorkAreaGapForm : Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate | NativeMethods.WsExTransparent;
+            cp.ExStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate |
+                NativeMethods.WsExTransparent | NativeMethods.WsExLayered;
             return cp;
         }
     }
@@ -193,6 +223,12 @@ internal sealed class WorkAreaGapForm : Form
         data.Bounds.Top = data.Bounds.Bottom - gap;
         NativeMethods.SHAppBarMessage(NativeMethods.AbmSetPos, ref data);
         Bounds = Rectangle.FromLTRB(data.Bounds.Left, data.Bounds.Top, data.Bounds.Right, data.Bounds.Bottom);
+        Invalidate();
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        WallpaperSlice.Draw(e.Graphics, ClientRectangle, _screen.Bounds, Bounds.Top);
     }
 
     protected override void WndProc(ref Message message)
@@ -217,6 +253,64 @@ internal sealed class WorkAreaGapForm : Form
     }
 }
 
+internal sealed class DockBackdropForm : Form
+{
+    private const int LogicalHeight = 48;
+    private const int WmNcHitTest = 0x0084;
+    private static readonly IntPtr HtTransparent = new(-1);
+    private readonly Screen _screen;
+
+    public DockBackdropForm(Screen screen)
+    {
+        _screen = screen;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        StartPosition = FormStartPosition.Manual;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        Enabled = false;
+        Opacity = 0.999;
+        BackColor = Color.FromArgb(16, 18, 28);
+        DoubleBuffered = true;
+        Shown += (_, _) => PositionBackdrop();
+        DpiChanged += (_, _) => BeginInvoke(new Action(PositionBackdrop));
+    }
+
+    protected override bool ShowWithoutActivation => true;
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate |
+                NativeMethods.WsExTransparent | NativeMethods.WsExLayered;
+            return cp;
+        }
+    }
+
+    private void PositionBackdrop()
+    {
+        var height = (int)Math.Round(LogicalHeight * DeviceDpi / 96f);
+        Bounds = new Rectangle(_screen.Bounds.Left, _screen.Bounds.Bottom - height, _screen.Bounds.Width, height);
+        Invalidate();
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        WallpaperSlice.Draw(e.Graphics, ClientRectangle, _screen.Bounds, Bounds.Top);
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        if (message.Msg == WmNcHitTest)
+        {
+            message.Result = HtTransparent;
+            return;
+        }
+        base.WndProc(ref message);
+    }
+}
+
 internal sealed class DockForm : Form
 {
     private const int LogicalHeight = 48;
@@ -227,6 +321,7 @@ internal sealed class DockForm : Form
     private readonly bool _preview;
     private readonly FlowLayoutPanel _items;
     private readonly System.Windows.Forms.Timer _stateTimer = new() { Interval = 3000 };
+    private Rectangle _frame;
 
     public DockForm(Screen screen, IReadOnlyList<PinnedApp> apps, bool preview)
     {
@@ -237,8 +332,7 @@ internal sealed class DockForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
-        BackColor = Color.FromArgb(1, 2, 3);
-        TransparencyKey = BackColor;
+        BackColor = Color.FromArgb(16, 18, 28);
         DoubleBuffered = true;
         _items = new FlowLayoutPanel
         {
@@ -283,14 +377,14 @@ internal sealed class DockForm : Form
         var contentWidth = _items.Controls.Count * (int)Math.Round(SlotWidth * scale);
         var frameWidth = contentWidth + (int)Math.Round(HorizontalPadding * 2 * scale);
         var frameHeight = (int)Math.Round(42 * scale);
-        var frame = new Rectangle((Width - frameWidth) / 2, (Height - frameHeight) / 2, frameWidth, frameHeight);
+        _frame = new Rectangle((Width - frameWidth) / 2, (Height - frameHeight) / 2, frameWidth, frameHeight);
         foreach (DockButton button in _items.Controls)
         {
             button.Width = (int)Math.Round(SlotWidth * scale);
             button.Height = frameHeight - (int)Math.Round(4 * scale);
         }
-        _items.Bounds = new Rectangle(frame.Left + (int)Math.Round(HorizontalPadding * scale), frame.Top + (int)Math.Round(2 * scale), contentWidth, frameHeight - (int)Math.Round(4 * scale));
-        using var path = Rounded(frame, (int)Math.Round(14 * scale));
+        _items.Bounds = new Rectangle(_frame.Left + (int)Math.Round(HorizontalPadding * scale), _frame.Top + (int)Math.Round(2 * scale), contentWidth, frameHeight - (int)Math.Round(4 * scale));
+        using var path = Rounded(_frame, (int)Math.Round(14 * scale));
         Region = new Region(path);
         Invalidate();
     }
@@ -298,13 +392,17 @@ internal sealed class DockForm : Form
     protected override void OnPaintBackground(PaintEventArgs e)
     {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        var rect = ClientRectangle;
-        using var brush = new LinearGradientBrush(rect, Color.FromArgb(250, 38, 44, 52), Color.FromArgb(252, 15, 18, 23), LinearGradientMode.Vertical);
-        e.Graphics.FillRectangle(brush, rect);
+        WallpaperSlice.Draw(e.Graphics, ClientRectangle, _screen.Bounds, Bounds.Top);
+        if (_frame.Width <= 0 || _frame.Height <= 0) return;
+        using var framePath = Rounded(_frame, (int)Math.Round(14 * DeviceDpi / 96f));
+        using var brush = new LinearGradientBrush(_frame, Color.FromArgb(250, 38, 44, 52), Color.FromArgb(252, 15, 18, 23), LinearGradientMode.Vertical);
+        e.Graphics.FillPath(brush, framePath);
         using var top = new Pen(Color.FromArgb(150, 137, 151, 166), Math.Max(1, DeviceDpi / 96f));
-        e.Graphics.DrawLine(top, 15, 1, Width - 15, 1);
+        e.Graphics.DrawLine(top, _frame.Left + 15, _frame.Top + 1, _frame.Right - 15, _frame.Top + 1);
         using var edge = new Pen(Color.FromArgb(110, 83, 96, 110), Math.Max(1, DeviceDpi / 96f));
-        e.Graphics.DrawLine(edge, 1, Height - 2, Width - 2, Height - 2);
+        e.Graphics.DrawArc(edge, _frame.Left, _frame.Top, _frame.Height, _frame.Height, 90, 180);
+        e.Graphics.DrawArc(edge, _frame.Right - _frame.Height, _frame.Top, _frame.Height, _frame.Height, 270, 180);
+        e.Graphics.DrawLine(edge, _frame.Left + _frame.Height / 2, _frame.Bottom - 1, _frame.Right - _frame.Height / 2, _frame.Bottom - 1);
     }
 
     private static GraphicsPath Rounded(Rectangle rectangle, int radius)
@@ -331,6 +429,49 @@ internal sealed class DockForm : Form
     {
         if (disposing) _stateTimer.Dispose();
         base.Dispose(disposing);
+    }
+}
+
+internal static class WallpaperSlice
+{
+    private static readonly Image? Wallpaper = LoadWallpaper();
+
+    public static void Draw(Graphics graphics, Rectangle target, Rectangle screenBounds, int absoluteTop)
+    {
+        if (Wallpaper is null)
+        {
+            using var fallback = new SolidBrush(Color.FromArgb(16, 18, 28));
+            graphics.FillRectangle(fallback, target);
+            return;
+        }
+
+        var scale = Math.Max(screenBounds.Width / (double)Wallpaper.Width, screenBounds.Height / (double)Wallpaper.Height);
+        var scaledWidth = Wallpaper.Width * scale;
+        var scaledHeight = Wallpaper.Height * scale;
+        var cropX = (scaledWidth - screenBounds.Width) / 2d;
+        var cropY = (scaledHeight - screenBounds.Height) / 2d;
+        var relativeTop = absoluteTop - screenBounds.Top;
+        var source = new RectangleF(
+            (float)(cropX / scale),
+            (float)((cropY + relativeTop) / scale),
+            (float)(target.Width / scale),
+            (float)(target.Height / scale));
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.DrawImage(Wallpaper, target, source, GraphicsUnit.Pixel);
+    }
+
+    private static Image? LoadWallpaper()
+    {
+        try
+        {
+            var path = Registry.GetValue(@"HKEY_CURRENT_USER\Control Panel\Desktop", "WallPaper", null) as string;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
+            using var stream = File.OpenRead(path);
+            using var source = Image.FromStream(stream);
+            return new Bitmap(source);
+        }
+        catch { return null; }
     }
 }
 

@@ -1270,8 +1270,12 @@ internal sealed class MenuForm : Form
         {
             var status = SystemInformation.PowerStatus;
             if (status.BatteryChargeStatus.HasFlag(BatteryChargeStatus.NoSystemBattery)) return "Plugged in";
-            var pct = Math.Round(status.BatteryLifePercent * 100);
-            var charging = status.PowerLineStatus == PowerLineStatus.Online ? " - charging" : string.Empty;
+            var pct = status.BatteryLifePercent < 0
+                ? 100
+                : Math.Clamp((int)Math.Round(status.BatteryLifePercent * 100), 0, 100);
+            var charging = status.PowerLineStatus == PowerLineStatus.Online && pct < 100
+                ? " - charging"
+                : string.Empty;
             return $"Battery {pct}%{charging}";
         }
         catch
