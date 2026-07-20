@@ -70,8 +70,10 @@ Alt+Tab. It does not install keyboard or mouse hooks.
 
 The dock loads all 21 inherited pins from `config/native-taskbar-pins.json`, resolves
 classic shortcut and packaged-app artwork through the Windows shell, spaces 28 px
-logical icons in deterministic 44 px slots, and paints live running dots from a
-single process snapshot every three seconds. Clicking an item focuses a matching
+logical icons in deterministic 44 px slots, and paints icons, hover lift, and live
+running dots directly onto the same buffered surface as the frame. It deliberately
+has no transparent child controls: WinForms child transparency composites against a
+fallback color and creates black icon tiles. Clicking an item focuses a matching
 window or asks the shell to launch the pinned app.
 
 Windows' native taskbar remains the owner of its 48 px bottom work area and is

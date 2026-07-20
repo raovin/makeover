@@ -110,8 +110,19 @@ if ($dockSource -notmatch 'SlotWidth = 44' -or $dockSource -notmatch 'IconSize =
 }
 if ($dockSource -notmatch 'screen\.Primary \? 1F : 1\.25F' -or
     $dockSource -notmatch 'app\.LoadIcon\(iconSize \* 3\)' -or
-    $dockSource -notmatch 'if \(AppId is not null\)') {
+    $dockSource -notmatch 'if \(AppId is not null\)' -or
+    $dockSource -notmatch 'CopyShellBitmap' -or
+    $dockSource -notmatch 'Format32bppPArgb') {
   $failures.Add('Dock no longer applies external optical scaling and high-resolution packaged icons.')
+}
+if ($dockSource -match 'FillPath\(hover' -or $dockSource -match 'new SolidBrush\(Color\.FromArgb\(32, 255, 255, 255\)\)') {
+  $failures.Add('Dock hover styling reintroduced an opaque-looking rectangular tile.')
+}
+if ($dockSource -match 'FlowLayoutPanel' -or $dockSource -match 'class DockButton : Control') {
+  $failures.Add('Dock icons are child controls again; WinForms transparency creates black slot backgrounds.')
+}
+if ($dockSource -notmatch '--export-icons' -or $dockSource -notmatch '--preview-hover') {
+  $failures.Add('Dock no longer exposes the icon-export and hover-preview paths used by visual release QA.')
 }
 if ($dockSource -notmatch 'LogicalGap = 8' -or
     $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmNew' -or

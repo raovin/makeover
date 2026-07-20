@@ -18,6 +18,9 @@ and remains local by repository policy.
   telemetry, date, separators, battery, and icons have no clipping or overlap.
 - Packaged applications are resolved through their AppIds at high resolution.
   Claude uses the installed app's 300x300 logo rather than a blurry shell thumbnail.
+- All 21 icons are alpha-validated and owner-drawn on the frame surface. No synthetic
+  black slot backgrounds are present; the forced-hover capture enlarges and lifts the
+  icon without painting the former grey rollover tile.
 - Apple, Network, Bluetooth, and Control Center each rendered their independent
   panel without a console window, stale panel, or duplicate MenuHost process.
 
@@ -25,6 +28,9 @@ and remains local by repository policy.
 
 - Three stop/start cycles restored exactly one responsive MenuBar, MenuHost, and
   Dock. The native taskbars reappeared while stopped and were hidden after restart.
+- A second three-cycle dock-compositing pass kept all processes responsive, retained
+  all 21 pins on both displays, matched the staged and deployed binaries, and logged
+  no MacMakeover application errors.
 - Eight rapid `WM_DISPLAYCHANGE` broadcasts preserved process identities and all
   processes stayed responsive. The bounded AppBar settling logic restored both work
   areas after Explorer's secondary taskbar completed registration.

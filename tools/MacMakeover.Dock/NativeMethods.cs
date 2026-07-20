@@ -40,6 +40,34 @@ internal static class NativeMethods
     public struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
     [StructLayout(LayoutKind.Sequential)]
     public struct NativePoint { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BitmapObject
+    {
+        public int Type;
+        public int Width;
+        public int Height;
+        public int WidthBytes;
+        public ushort Planes;
+        public ushort BitsPixel;
+        public IntPtr Bits;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BitmapInfoHeader
+    {
+        public uint Size;
+        public int Width;
+        public int Height;
+        public ushort Planes;
+        public ushort BitCount;
+        public uint Compression;
+        public uint SizeImage;
+        public int XPelsPerMeter;
+        public int YPelsPerMeter;
+        public uint ColorsUsed;
+        public uint ColorsImportant;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BitmapInfo { public BitmapInfoHeader Header; public uint Colors; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct ShFileInfo { public IntPtr Icon; public int IconIndex; public uint Attributes; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string DisplayName; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string TypeName; }
 
@@ -58,8 +86,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(NativePoint point, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr window);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr window, IntPtr deviceContext);
     [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr icon);
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr handle);
+    [DllImport("gdi32.dll")] public static extern int GetObject(IntPtr handle, int size, out BitmapObject bitmap);
+    [DllImport("gdi32.dll")] public static extern int GetDIBits(IntPtr deviceContext, IntPtr bitmap, uint firstScanLine, uint scanLineCount, IntPtr bits, ref BitmapInfo info, uint usage);
 }

@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -11,6 +12,12 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        var preview = args.Any(value => value.Equals("--preview", StringComparison.OrdinalIgnoreCase));
+        if (args.Length >= 2 && args[0].Equals("--export-icons", StringComparison.OrdinalIgnoreCase))
+        {
+            ExportIcons(args[1]);
+            return;
+        }
         if (args.Any(value => value.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
         {
             try
@@ -29,21 +36,36 @@ internal static class Program
         }
         if (args.Any(value => value.Equals("--shutdown", StringComparison.OrdinalIgnoreCase)))
         {
-            try { EventWaitHandle.OpenExisting("Local\\MacMakeover.Dock.Exit").Set(); } catch (WaitHandleCannotBeOpenedException) { }
+            var eventName = preview ? "Local\\MacMakeover.Dock.Preview.Exit" : "Local\\MacMakeover.Dock.Exit";
+            try { EventWaitHandle.OpenExisting(eventName).Set(); } catch (WaitHandleCannotBeOpenedException) { }
             return;
         }
-        var preview = args.Any(value => value.Equals("--preview", StringComparison.OrdinalIgnoreCase));
+        var previewHover = args.Any(value => value.Equals("--preview-hover", StringComparison.OrdinalIgnoreCase));
         using var mutex = new Mutex(true, preview ? "Local\\MacMakeover.Dock.Preview" : "Local\\MacMakeover.Dock", out var first);
         if (!first) return;
         using var exit = new EventWaitHandle(false, EventResetMode.AutoReset, preview ? "Local\\MacMakeover.Dock.Preview.Exit" : "Local\\MacMakeover.Dock.Exit");
         ApplicationConfiguration.Initialize();
-        Application.Run(new DockContext(preview, exit));
+        Application.Run(new DockContext(preview, previewHover, exit));
+    }
+
+    private static void ExportIcons(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        foreach (var app in PinnedApp.Load())
+        {
+            using var icon = app.LoadIcon(84);
+            if (icon is null) continue;
+            var fileName = string.Concat(app.Name.Select(character =>
+                Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+            icon.Save(Path.Combine(directory, fileName + ".png"), ImageFormat.Png);
+        }
     }
 }
 
 internal sealed class DockContext : ApplicationContext
 {
     private readonly bool _preview;
+    private readonly bool _previewHover;
     private readonly List<DockForm> _forms = [];
     private readonly List<WorkAreaGapForm> _gapForms = [];
     private readonly List<DockBackdropForm> _backdropForms = [];
@@ -54,9 +76,10 @@ internal sealed class DockContext : ApplicationContext
     private int _displayRebuildPending;
     private bool _exiting;
 
-    public DockContext(bool preview, EventWaitHandle exit)
+    public DockContext(bool preview, bool previewHover, EventWaitHandle exit)
     {
         _preview = preview;
+        _previewHover = previewHover;
         if (!preview)
         {
             HideWindowsTaskbars();
@@ -86,7 +109,7 @@ internal sealed class DockContext : ApplicationContext
                 _backdropForms.Add(backdropForm);
                 backdropForm.Show();
             }
-            var form = new DockForm(screen, apps, _preview);
+            var form = new DockForm(screen, apps, _preview, _previewHover);
             form.FormClosed += (_, _) => { _forms.Remove(form); if (!_rebuilding && !_exiting && _forms.Count == 0) ExitThread(); };
             _forms.Add(form);
             form.Show();
@@ -461,12 +484,14 @@ internal sealed class DockForm : Form
     private const int HorizontalPadding = 22;
     private readonly Screen _screen;
     private readonly bool _preview;
-    private readonly FlowLayoutPanel _items;
+    private readonly List<DockItem> _items = [];
+    private readonly ToolTip _toolTip = new() { InitialDelay = 450, ReshowDelay = 100, AutoPopDelay = 5000 };
     private readonly System.Windows.Forms.Timer _stateTimer = new() { Interval = 3000 };
     private Rectangle _frame;
     private float _visualScale = 1F;
+    private int _hoveredItem = -1;
 
-    public DockForm(Screen screen, IReadOnlyList<PinnedApp> apps, bool preview)
+    public DockForm(Screen screen, IReadOnlyList<PinnedApp> apps, bool preview, bool previewHover)
     {
         _screen = screen;
         _preview = preview;
@@ -477,23 +502,14 @@ internal sealed class DockForm : Form
         TopMost = true;
         BackColor = Color.FromArgb(16, 18, 28);
         DoubleBuffered = true;
-        _items = new FlowLayoutPanel
-        {
-            BackColor = Color.Transparent,
-            WrapContents = false,
-            FlowDirection = FlowDirection.LeftToRight,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty,
-            AutoSize = false
-        };
-        Controls.Add(_items);
-        var tips = new ToolTip { InitialDelay = 450, ReshowDelay = 100, AutoPopDelay = 5000 };
         foreach (var app in apps)
         {
-            var button = new DockButton(app, IconSize) { Width = SlotWidth, Height = 48, Margin = Padding.Empty };
-            tips.SetToolTip(button, app.Name);
-            _items.Controls.Add(button);
+            _items.Add(new DockItem(app, IconSize));
         }
+        if (preview && previewHover) _hoveredItem = Math.Min(4, _items.Count - 1);
+        MouseMove += OnDockMouseMove;
+        MouseLeave += OnDockMouseLeave;
+        MouseUp += OnDockMouseUp;
         Shown += (_, _) =>
         {
             Location = _screen.Bounds.Location;
@@ -503,7 +519,7 @@ internal sealed class DockForm : Form
         _stateTimer.Tick += (_, _) =>
         {
             var running = SnapshotProcesses();
-            foreach (DockButton button in _items.Controls) button.RefreshState(running);
+            if (_items.Any(item => item.RefreshState(running))) Invalidate();
         };
         _stateTimer.Start();
     }
@@ -517,20 +533,24 @@ internal sealed class DockForm : Form
         var scale = DisplayScale.For(_screen, targetDpi);
         _visualScale = scale;
         var height = (int)Math.Round(LogicalHeight * scale);
-        Location = new Point(_screen.Bounds.Left, _screen.Bounds.Bottom - height);
+        var bottom = _preview ? _screen.WorkingArea.Bottom : _screen.Bounds.Bottom;
+        Location = new Point(_screen.Bounds.Left, bottom - height);
         Size = new Size(_screen.Bounds.Width, height);
-        var contentWidth = _items.Controls.Count * (int)Math.Round(SlotWidth * scale);
+        var slotWidth = (int)Math.Round(SlotWidth * scale);
+        var contentWidth = _items.Count * slotWidth;
         var frameWidth = contentWidth + (int)Math.Round(HorizontalPadding * 2 * scale);
         var frameHeight = (int)Math.Round(42 * scale);
         if ((height - frameHeight) % 2 != 0) frameHeight--;
         _frame = new Rectangle((Width - frameWidth) / 2, (Height - frameHeight) / 2, frameWidth, frameHeight);
-        foreach (DockButton button in _items.Controls)
+        var itemHeight = frameHeight - (int)Math.Round(4 * scale);
+        var itemLeft = _frame.Left + (int)Math.Round(HorizontalPadding * scale);
+        var itemTop = _frame.Top + (int)Math.Round(2 * scale);
+        for (var index = 0; index < _items.Count; index++)
         {
-            button.SetVisualScale(scale);
-            button.Width = (int)Math.Round(SlotWidth * scale);
-            button.Height = frameHeight - (int)Math.Round(4 * scale);
+            _items[index].SetLayout(
+                new Rectangle(itemLeft + index * slotWidth, itemTop, slotWidth, itemHeight),
+                scale);
         }
-        _items.Bounds = new Rectangle(_frame.Left + (int)Math.Round(HorizontalPadding * scale), _frame.Top + (int)Math.Round(2 * scale), contentWidth, frameHeight - (int)Math.Round(4 * scale));
         using var path = Rounded(_frame, (int)Math.Round(14 * scale));
         Region = new Region(path);
         Invalidate();
@@ -551,6 +571,44 @@ internal sealed class DockForm : Form
         e.Graphics.DrawArc(edge, _frame.Left, _frame.Top, _frame.Height, _frame.Height, 90, 180);
         e.Graphics.DrawArc(edge, _frame.Right - _frame.Height, _frame.Top, _frame.Height, _frame.Height, 270, 180);
         e.Graphics.DrawLine(edge, _frame.Left + _frame.Height / 2, _frame.Bottom - 1, _frame.Right - _frame.Height / 2, _frame.Bottom - 1);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        for (var index = 0; index < _items.Count; index++)
+        {
+            _items[index].Draw(e.Graphics, index == _hoveredItem);
+        }
+    }
+
+    private void OnDockMouseMove(object? sender, MouseEventArgs e)
+    {
+        var next = _items.FindIndex(item => item.Bounds.Contains(e.Location));
+        if (next == _hoveredItem) return;
+        _hoveredItem = next;
+        Cursor = next >= 0 ? Cursors.Hand : Cursors.Default;
+        _toolTip.SetToolTip(this, next >= 0 ? _items[next].Name : string.Empty);
+        Invalidate();
+    }
+
+    private void OnDockMouseLeave(object? sender, EventArgs e)
+    {
+        if (_hoveredItem < 0) return;
+        _hoveredItem = -1;
+        Cursor = Cursors.Default;
+        _toolTip.SetToolTip(this, string.Empty);
+        Invalidate();
+    }
+
+    private void OnDockMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        var item = _items.FirstOrDefault(candidate => candidate.Bounds.Contains(e.Location));
+        item?.ActivateOrLaunch();
     }
 
     private static GraphicsPath Rounded(Rectangle rectangle, int radius)
@@ -575,7 +633,12 @@ internal sealed class DockForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _stateTimer.Dispose();
+        if (disposing)
+        {
+            _stateTimer.Dispose();
+            _toolTip.Dispose();
+            foreach (var item in _items) item.Dispose();
+        }
         base.Dispose(disposing);
     }
 }
@@ -651,75 +714,72 @@ internal static class DisplayScale
         Math.Max(Math.Max(1F, dpi / 96F), screen.Primary ? 1F : 1.25F);
 }
 
-internal sealed class DockButton : Control
+internal sealed class DockItem : IDisposable
 {
     private readonly PinnedApp _app;
     private readonly Image? _icon;
     private float _visualScale = 1F;
     private bool _running;
-    private bool _hover;
 
-    public DockButton(PinnedApp app, int iconSize)
+    public DockItem(PinnedApp app, int iconSize)
     {
         _app = app;
         _icon = app.LoadIcon(iconSize * 3);
-        SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        BackColor = Color.Transparent;
-        Cursor = Cursors.Hand;
-        AccessibleName = app.Name;
-        TabStop = false;
-        MouseEnter += (_, _) => { _hover = true; Invalidate(); };
-        MouseLeave += (_, _) => { _hover = false; Invalidate(); };
-        Click += (_, _) => _app.ActivateOrLaunch();
     }
 
-    public void RefreshState(IReadOnlySet<string> processes) { var running = _app.IsRunning(processes); if (running != _running) { _running = running; Invalidate(); } }
+    public string Name => _app.Name;
+    public Rectangle Bounds { get; private set; }
 
-    public void SetVisualScale(float value)
+    public bool RefreshState(IReadOnlySet<string> processes)
     {
-        if (Math.Abs(_visualScale - value) < 0.01F) return;
-        _visualScale = value;
-        Invalidate();
+        var running = _app.IsRunning(processes);
+        if (running == _running) return false;
+        _running = running;
+        return true;
     }
 
-    protected override void OnPaint(PaintEventArgs e)
+    public void SetLayout(Rectangle bounds, float visualScale)
     {
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        Bounds = bounds;
+        _visualScale = visualScale;
+    }
+
+    public void ActivateOrLaunch() => _app.ActivateOrLaunch();
+
+    public void Draw(Graphics graphics, bool hovered)
+    {
         var scale = _visualScale;
-        if (_hover)
-        {
-            using var hover = new SolidBrush(Color.FromArgb(32, 255, 255, 255));
-            using var path = new GraphicsPath();
-            var box = Rectangle.Inflate(ClientRectangle, -(int)(3 * scale), -(int)(4 * scale));
-            path.AddArc(box.Left, box.Top, 12, 12, 180, 90); path.AddArc(box.Right - 12, box.Top, 12, 12, 270, 90); path.AddArc(box.Right - 12, box.Bottom - 12, 12, 12, 0, 90); path.AddArc(box.Left, box.Bottom - 12, 12, 12, 90, 90); path.CloseFigure();
-            e.Graphics.FillPath(hover, path);
-        }
         if (_icon != null)
         {
-            var size = (int)Math.Round(28 * scale);
-            var x = (Width - size) / 2; var y = (Height - size) / 2 - (int)Math.Round(2 * scale);
-            e.Graphics.DrawImage(_icon, new Rectangle(x, y, size, size));
+            var size = (int)Math.Round((hovered ? 30 : 28) * scale);
+            var x = Bounds.Left + (Bounds.Width - size) / 2;
+            var y = Bounds.Top + (Bounds.Height - size) / 2 - (int)Math.Round((hovered ? 3 : 2) * scale);
+            graphics.DrawImage(_icon, new Rectangle(x, y, size, size));
         }
         else
         {
             var size = (int)Math.Round(28 * scale);
-            var x = (Width - size) / 2; var y = (Height - size) / 2 - (int)Math.Round(2 * scale);
+            var x = Bounds.Left + (Bounds.Width - size) / 2;
+            var y = Bounds.Top + (Bounds.Height - size) / 2 - (int)Math.Round(2 * scale);
             using var tile = new SolidBrush(Color.FromArgb(255, 57, 66, 78));
-            e.Graphics.FillEllipse(tile, x, y, size, size);
+            graphics.FillEllipse(tile, x, y, size, size);
             using var font = new Font("Segoe UI Semibold", 9.5f * scale, FontStyle.Bold, GraphicsUnit.Pixel);
-            TextRenderer.DrawText(e.Graphics, string.Concat(_app.Name.Where(char.IsLetter).Take(2)).ToUpperInvariant(), font, new Rectangle(x, y, size, size), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(graphics, string.Concat(_app.Name.Where(char.IsLetter).Take(2)).ToUpperInvariant(), font, new Rectangle(x, y, size, size), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
         if (_running)
         {
             var dot = (int)Math.Round(3 * scale);
             using var brush = new SolidBrush(Color.FromArgb(225, 207, 221, 233));
-            e.Graphics.FillEllipse(brush, (Width - dot) / 2, Height - (int)Math.Round(5 * scale), dot, dot);
+            graphics.FillEllipse(
+                brush,
+                Bounds.Left + (Bounds.Width - dot) / 2,
+                Bounds.Bottom - (int)Math.Round(5 * scale),
+                dot,
+                dot);
         }
     }
 
-    protected override void Dispose(bool disposing) { if (disposing) _icon?.Dispose(); base.Dispose(disposing); }
+    public void Dispose() => _icon?.Dispose();
 }
 
 internal sealed class PinnedApp
@@ -835,10 +895,63 @@ internal sealed class PinnedApp
             var id = typeof(NativeMethods.IShellItemImageFactory).GUID;
             NativeMethods.SHCreateItemFromParsingName(path, IntPtr.Zero, ref id, out factory);
             if (factory.GetImage(new Size(size, size), NativeMethods.ShellImageFlags.IconOnly | NativeMethods.ShellImageFlags.BiggerSizeOk, out var bitmap) != 0 || bitmap == IntPtr.Zero) return null;
-            try { using var image = Image.FromHbitmap(bitmap); return new Bitmap(image, new Size(size, size)); }
+            try { return CopyShellBitmap(bitmap, size); }
             finally { NativeMethods.DeleteObject(bitmap); }
         }
         catch { return null; }
         finally { if (factory is not null && Marshal.IsComObject(factory)) Marshal.FinalReleaseComObject(factory); }
+    }
+
+    private static Image? CopyShellBitmap(IntPtr handle, int size)
+    {
+        if (NativeMethods.GetObject(handle, Marshal.SizeOf<NativeMethods.BitmapObject>(), out var source) == 0 ||
+            source.Width <= 0 || source.Height == 0)
+        {
+            return null;
+        }
+
+        var width = source.Width;
+        var height = Math.Abs(source.Height);
+        using var preserved = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+        var pixels = preserved.LockBits(
+            new Rectangle(0, 0, width, height),
+            ImageLockMode.WriteOnly,
+            PixelFormat.Format32bppPArgb);
+        var deviceContext = NativeMethods.GetDC(IntPtr.Zero);
+        try
+        {
+            var info = new NativeMethods.BitmapInfo
+            {
+                Header = new NativeMethods.BitmapInfoHeader
+                {
+                    Size = (uint)Marshal.SizeOf<NativeMethods.BitmapInfoHeader>(),
+                    Width = width,
+                    Height = -height,
+                    Planes = 1,
+                    BitCount = 32,
+                    Compression = 0,
+                    SizeImage = (uint)(Math.Abs(pixels.Stride) * height)
+                }
+            };
+            if (deviceContext == IntPtr.Zero ||
+                NativeMethods.GetDIBits(deviceContext, handle, 0, (uint)height, pixels.Scan0, ref info, 0) == 0)
+            {
+                return null;
+            }
+        }
+        finally
+        {
+            if (deviceContext != IntPtr.Zero) NativeMethods.ReleaseDC(IntPtr.Zero, deviceContext);
+            preserved.UnlockBits(pixels);
+        }
+
+        var result = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(result);
+        graphics.CompositingMode = CompositingMode.SourceCopy;
+        graphics.CompositingQuality = CompositingQuality.HighQuality;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.DrawImage(preserved, new Rectangle(0, 0, size, size));
+        return result;
     }
 }
