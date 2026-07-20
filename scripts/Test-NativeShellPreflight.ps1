@@ -105,9 +105,10 @@ if ($nativeSource -notmatch 'PowerGetUserConfiguredACPowerMode' -or
   $failures.Add('MenuBar no longer distinguishes power source, charging state, and Windows power mode.')
 }
 if ($menuBarSource -match '\\u26A1' -or
-    $menuBarSource -notmatch 'if \(snapshot\.Charging\)' -or
-    $menuBarSource -notmatch 'DrawChargingBolt') {
-  $failures.Add('MenuBar charging state has regressed to the cramped font glyph or marks plugged-in batteries as charging.')
+    $menuBarSource -notmatch 'ShowsExternalPowerIndicator\(snapshot\)' -or
+    $menuBarSource -notmatch 'ShowsExternalPowerIndicator\(SystemSnapshot snapshot\) => snapshot\.OnAcPower' -or
+    $menuBarSource -notmatch 'DrawExternalPowerBolt') {
+  $failures.Add('MenuBar no longer shows a separate vector power indicator whenever AC is connected.')
 }
 if ($menuBarSource -notmatch 'LogicalCornerHitSize = 8' -or
     $menuBarSource -notmatch 'IsShowDesktopCorner\(e\.Location') {

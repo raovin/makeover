@@ -39,7 +39,7 @@ internal static class Program
             PowerMode = PowerModeKind.Saver
         };
         var charging = battery with { OnAcPower = true, Charging = true, PowerMode = PowerModeKind.Performance };
-        var pluggedIn = battery with { BatteryPercent = 100, OnAcPower = true, PowerMode = PowerModeKind.Balanced };
+        var pluggedIn = battery with { BatteryPercent = 94, OnAcPower = true, Charging = false, PowerMode = PowerModeKind.Balanced };
         return SystemStateProvider.ClassifyPowerMode(new Guid("961cc777-2547-4f9d-8174-7d86181b8a7a")) == PowerModeKind.Saver &&
                SystemStateProvider.ClassifyPowerMode(Guid.Empty) == PowerModeKind.Balanced &&
                SystemStateProvider.ClassifyPowerMode(new Guid("381b4222-f694-41f0-9685-ff5bb260df2e")) == PowerModeKind.Balanced &&
@@ -47,8 +47,11 @@ internal static class Program
                MenuBarForm.PowerSourceLabel(battery) == "Battery 42%" &&
                MenuBarForm.PowerModeLabel(battery.PowerMode) == "Power saver" &&
                MenuBarForm.PowerSourceLabel(charging) == "Charging 42%" &&
+               MenuBarForm.ShowsExternalPowerIndicator(charging) &&
                MenuBarForm.PowerModeLabel(charging.PowerMode) == "High performance" &&
-               MenuBarForm.PowerSourceLabel(pluggedIn) == "Plugged in 100%" &&
+               MenuBarForm.PowerSourceLabel(pluggedIn) == "Plugged in 94%" &&
+               MenuBarForm.ShowsExternalPowerIndicator(pluggedIn) &&
+               !MenuBarForm.ShowsExternalPowerIndicator(battery) &&
                MenuBarForm.PowerModeLabel(pluggedIn.PowerMode) == "Balanced" &&
                MenuBarForm.IsShowDesktopCorner(new Point(0, 0), new Size(1280, 20), 8) &&
                MenuBarForm.IsShowDesktopCorner(new Point(1279, 0), new Size(1280, 20), 8) &&
