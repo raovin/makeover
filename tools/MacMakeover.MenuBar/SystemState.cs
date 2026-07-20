@@ -15,6 +15,14 @@ internal enum ConnectionKind
     Vpn
 }
 
+internal enum PowerModeKind
+{
+    Saver,
+    Balanced,
+    Performance,
+    Unknown
+}
+
 internal sealed record SystemSnapshot(
     int CpuPercent,
     double UsedMemoryGb,
@@ -22,13 +30,16 @@ internal sealed record SystemSnapshot(
     long DownloadBytesPerSecond,
     long UploadBytesPerSecond,
     int BatteryPercent,
+    bool OnAcPower,
     bool Charging,
+    PowerModeKind PowerMode,
     ConnectionKind Connection,
     string ConnectionName,
     string ActiveApp)
 {
     public static SystemSnapshot Empty { get; } = new(
-        0, 0, 0, 0, 0, 100, false, ConnectionKind.Offline, "Offline", "Finder");
+        0, 0, 0, 0, 0, 100, true, false, PowerModeKind.Balanced,
+        ConnectionKind.Offline, "Offline", "Finder");
 }
 
 internal sealed class SystemStateProvider : IDisposable
@@ -79,7 +90,9 @@ internal sealed class SystemStateProvider : IDisposable
             var battery = power.BatteryLifePercent < 0
                 ? 100
                 : Math.Clamp((int)Math.Round(power.BatteryLifePercent * 100), 0, 100);
-            var charging = power.PowerLineStatus == PowerLineStatus.Online && battery < 100;
+            var onAcPower = power.PowerLineStatus == PowerLineStatus.Online;
+            var charging = power.BatteryChargeStatus.HasFlag(BatteryChargeStatus.Charging);
+            var powerMode = ReadPowerMode(onAcPower);
             var activeApp = ReadActiveApp();
 
             lock (_gate)
@@ -91,7 +104,9 @@ internal sealed class SystemStateProvider : IDisposable
                     down,
                     up,
                     battery,
+                    onAcPower,
                     charging,
+                    powerMode,
                     connection,
                     interfaceName,
                     activeApp);
@@ -106,6 +121,35 @@ internal sealed class SystemStateProvider : IDisposable
         {
             Volatile.Write(ref _polling, 0);
         }
+    }
+
+    private static PowerModeKind ReadPowerMode(bool onAcPower)
+    {
+        try
+        {
+            var result = onAcPower
+                ? NativeMethods.PowerGetUserConfiguredACPowerMode(out var configured)
+                : NativeMethods.PowerGetUserConfiguredDCPowerMode(out configured);
+            if (result == 0) return ClassifyPowerMode(configured);
+            if (NativeMethods.PowerGetEffectiveOverlayScheme(out var effective) == 0)
+            {
+                return ClassifyPowerMode(effective);
+            }
+        }
+        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { }
+        return PowerModeKind.Unknown;
+    }
+
+    internal static PowerModeKind ClassifyPowerMode(Guid mode)
+    {
+        if (mode == new Guid("961cc777-2547-4f9d-8174-7d86181b8a7a")) return PowerModeKind.Saver;
+        if (mode == Guid.Empty || mode == new Guid("381b4222-f694-41f0-9685-ff5bb260df2e"))
+        {
+            return PowerModeKind.Balanced;
+        }
+        if (mode == new Guid("ded574b5-45a0-4f42-8737-46345c09c238")) return PowerModeKind.Performance;
+        return PowerModeKind.Unknown;
     }
 
     private int ReadCpuPercent()

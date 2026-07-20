@@ -30,6 +30,10 @@ and remains local by repository policy.
   icon without painting the former grey rollover tile.
 - Apple, Network, Bluetooth, and Control Center each rendered their independent
   panel without a console window, stale panel, or duplicate MenuHost process.
+- Power telemetry now distinguishes `Battery`, `Charging`, and `Plugged in` from
+  the real Windows power-line state. A separate label distinguishes `Power saver`,
+  `Balanced`, and `High performance`; all three deterministic fixtures rendered
+  without moving, clipping, or overlapping the right-side controls.
 
 ## Adversarial Results
 
@@ -48,6 +52,9 @@ and remains local by repository policy.
   directions. The no-activation dock and tool windows did not enter the switcher.
 - The MenuHost Core Audio self-test changed master volume, read it back, restored
   the original value, and passed. All 21 archived Seelen pins are still present.
+- The MenuBar power-state self-test passed the Windows AC/DC mode GUID mappings
+  and all six source/mode labels. Preflight now rejects generic battery output,
+  inferred 100%-charging state, or removal of the deterministic visual fixtures.
 - The profile installer was exercised from the normal user token. Its prior
   `OrderedDictionary.ContainsKey` compatibility failure is fixed and gated.
 - A 30-second settled sample kept all processes responsive. Custom-shell CPU was

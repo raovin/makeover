@@ -108,4 +108,13 @@ internal static class NativeMethods
     [DllImport("iphlpapi.dll", SetLastError = true)]
     public static extern int GetBestInterface(uint destinationAddress, out uint bestInterfaceIndex);
 
+    [DllImport("powrprof.dll")]
+    public static extern uint PowerGetUserConfiguredACPowerMode(out Guid powerMode);
+
+    [DllImport("powrprof.dll")]
+    public static extern uint PowerGetUserConfiguredDCPowerMode(out Guid powerMode);
+
+    [DllImport("powrprof.dll")]
+    public static extern uint PowerGetEffectiveOverlayScheme(out Guid powerMode);
+
 }

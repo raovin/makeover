@@ -29,7 +29,8 @@ The current visual target is captured in
 [`concepts/native-shell-graphite.png`](concepts/native-shell-graphite.png).
 
 - Left: Apple mark and focused application.
-- Center: CPU, RAM, best-route network throughput, and combined battery state.
+- Center: CPU, RAM, best-route network throughput, explicit battery/charging
+  source, and the active Windows AC/DC power mode.
 - Right: actual connection type, Bluetooth, volume, Control Center, date, and bell.
 - Segoe UI Variable Text and its native semibold face render every text cluster on
   one baseline. Native hinting keeps the 100% external display as crisp as the

@@ -22,6 +22,7 @@ internal sealed class MenuBarForm : Form
     private readonly Screen _screen;
     private readonly SystemStateProvider _state;
     private readonly bool _preview;
+    private readonly string? _previewPower;
     private readonly List<(Rectangle Bounds, BarAction Action)> _hits = [];
     private Typography? _typography;
     private Font _textFont = null!;
@@ -34,11 +35,12 @@ internal sealed class MenuBarForm : Form
     private bool _appBarRegistered;
     private BarAction? _hovered;
 
-    public MenuBarForm(Screen screen, SystemStateProvider state, bool preview)
+    public MenuBarForm(Screen screen, SystemStateProvider state, bool preview, string? previewPower)
     {
         _screen = screen;
         _state = state;
         _preview = preview;
+        _previewPower = previewPower;
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -222,7 +224,7 @@ internal sealed class MenuBarForm : Form
         if (_typography is null) return;
 
         _hits.Clear();
-        var snapshot = _state.Snapshot;
+        var snapshot = ApplyPowerPreview(_state.Snapshot, _previewPower);
         var leftEnd = DrawLeft(e.Graphics, snapshot);
         var rightStart = DrawRight(e.Graphics, snapshot);
         DrawCenter(e.Graphics, snapshot, leftEnd, rightStart);
@@ -304,14 +306,17 @@ internal sealed class MenuBarForm : Form
             },
             new[] { $"CPU {snapshot.CpuPercent}%", $"RAM {snapshot.UsedMemoryGb:0}G" }
         };
-        var battery = $"{snapshot.BatteryPercent}%";
+        var battery = PowerSourceLabel(snapshot);
+        var powerMode = PowerModeLabel(snapshot.PowerMode);
         var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(25);
+        var powerModeWidth = TextRenderer.MeasureText(powerMode, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(6);
         string[]? segments = null;
         var groupWidth = 0;
         foreach (var candidate in candidates)
         {
             var candidateWidth = candidate.Sum(MeasureTelemetry) +
-                                 Math.Max(0, candidate.Length) * Scale(17) + batteryWidth;
+                                 Math.Max(0, candidate.Length) * Scale(17) + batteryWidth +
+                                 Scale(17) + powerModeWidth;
             if (candidateWidth > available) continue;
             segments = candidate;
             groupWidth = candidateWidth;
@@ -335,7 +340,11 @@ internal sealed class MenuBarForm : Form
             x += Scale(9);
         }
 
-        DrawBattery(graphics, new Rectangle(x, 0, batteryWidth, Height), snapshot.BatteryPercent, snapshot.Charging, battery);
+        DrawBattery(graphics, new Rectangle(x, 0, batteryWidth, Height), snapshot, battery);
+        x += batteryWidth + Scale(8);
+        DrawTelemetrySeparator(graphics, x);
+        x += Scale(9);
+        DrawPowerMode(graphics, new Rectangle(x, 0, powerModeWidth, Height), snapshot.PowerMode, powerMode);
     }
 
     private int MeasureTelemetry(string text) =>
@@ -347,23 +356,26 @@ internal sealed class MenuBarForm : Form
         graphics.DrawLine(pen, x, Scale(5), x, Height - Scale(5));
     }
 
-    private void DrawBattery(Graphics graphics, Rectangle area, int percent, bool charging, string label)
+    private void DrawBattery(Graphics graphics, Rectangle area, SystemSnapshot snapshot, string label)
     {
+        var percent = snapshot.BatteryPercent;
         var iconWidth = Scale(15);
         var iconHeight = Scale(7);
         var iconX = area.Left + Scale(1);
         var iconY = area.Top + (area.Height - iconHeight) / 2;
         var batteryRect = new Rectangle(iconX, iconY, iconWidth - Scale(2), iconHeight);
-        var color = charging || percent >= 20
+        var color = snapshot.OnAcPower
             ? Color.FromArgb(79, 224, 120)
-            : Color.FromArgb(255, 100, 92);
+            : percent < 20 || snapshot.PowerMode == PowerModeKind.Saver
+                ? Color.FromArgb(247, 190, 80)
+                : Color.FromArgb(220, 228, 236);
         using var pen = new Pen(color, Math.Max(1, ScaleValue(1F)));
         using var fill = new SolidBrush(color);
         graphics.DrawRectangle(pen, batteryRect);
         graphics.FillRectangle(fill, batteryRect.Right + Scale(1), batteryRect.Top + Scale(2), Scale(2), Math.Max(1, batteryRect.Height - Scale(4)));
         var fillWidth = Math.Max(1, (batteryRect.Width - Scale(2)) * percent / 100);
         graphics.FillRectangle(fill, batteryRect.Left + Scale(1), batteryRect.Top + Scale(1), fillWidth, Math.Max(1, batteryRect.Height - Scale(2)));
-        if (charging)
+        if (snapshot.OnAcPower)
         {
             DrawCenteredText(graphics, "\u26A1", _smallFont, batteryRect, Color.White);
         }
@@ -371,6 +383,60 @@ internal sealed class MenuBarForm : Form
         TextRenderer.DrawText(graphics, label, _smallFont, labelRect, color,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
     }
+
+    private void DrawPowerMode(Graphics graphics, Rectangle area, PowerModeKind mode, string label)
+    {
+        var color = mode switch
+        {
+            PowerModeKind.Saver => Color.FromArgb(247, 190, 80),
+            PowerModeKind.Performance => Color.FromArgb(104, 202, 255),
+            PowerModeKind.Balanced => Color.FromArgb(214, 222, 231),
+            _ => Color.FromArgb(170, 180, 191)
+        };
+        TextRenderer.DrawText(graphics, label, _smallFont, area, color,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+    }
+
+    internal static string PowerSourceLabel(SystemSnapshot snapshot) => snapshot.OnAcPower
+        ? snapshot.Charging
+            ? $"Charging {snapshot.BatteryPercent}%"
+            : $"Plugged in {snapshot.BatteryPercent}%"
+        : $"Battery {snapshot.BatteryPercent}%";
+
+    internal static string PowerModeLabel(PowerModeKind mode) => mode switch
+    {
+        PowerModeKind.Saver => "Power saver",
+        PowerModeKind.Balanced => "Balanced",
+        PowerModeKind.Performance => "High performance",
+        _ => "Power mode"
+    };
+
+    private static SystemSnapshot ApplyPowerPreview(SystemSnapshot snapshot, string? preview) =>
+        preview?.ToLowerInvariant() switch
+        {
+            "battery-saver" => snapshot with
+            {
+                BatteryPercent = 31,
+                OnAcPower = false,
+                Charging = false,
+                PowerMode = PowerModeKind.Saver
+            },
+            "battery-balanced" => snapshot with
+            {
+                BatteryPercent = 68,
+                OnAcPower = false,
+                Charging = false,
+                PowerMode = PowerModeKind.Balanced
+            },
+            "charging-performance" => snapshot with
+            {
+                BatteryPercent = 74,
+                OnAcPower = true,
+                Charging = true,
+                PowerMode = PowerModeKind.Performance
+            },
+            _ => snapshot
+        };
 
     private void DrawHover(Graphics graphics, Rectangle rect, BarAction action)
     {

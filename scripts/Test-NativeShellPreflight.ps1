@@ -71,6 +71,7 @@ foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-Native
 
 $menuBarSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MenuBarForm.cs') -Raw
 $menuBarProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\Program.cs') -Raw
+$systemStateSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\SystemState.cs') -Raw
 $menuHostSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\Program.cs') -Raw
 $buildSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Raw
 $prepareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Prepare-NativeShellUserProfile.ps1') -Raw
@@ -87,6 +88,13 @@ if ($menuBarSource -notmatch '_screen\.Primary \? 1F : 1\.5F' -or
     $menuBarSource -notmatch 'opticalScale = 1F \+ \(\(VisualScale / DpiScale\) - 1F\) \* 0\.3F' -or
     $menuBarProgramSource -notmatch '--preview-all') {
   $failures.Add('MenuBar no longer keeps external-monitor geometry and typography at physical parity with the laptop.')
+}
+if ($nativeSource -notmatch 'PowerGetUserConfiguredACPowerMode' -or
+    $nativeSource -notmatch 'PowerGetUserConfiguredDCPowerMode' -or
+    $systemStateSource -notmatch 'BatteryChargeStatus\.Charging' -or
+    $menuBarSource -notmatch 'High performance' -or
+    $menuBarProgramSource -notmatch '--preview-power=') {
+  $failures.Add('MenuBar no longer distinguishes power source, charging state, and Windows power mode.')
 }
 if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
   $failures.Add('Profile preparation uses Hashtable-only ContainsKey on ConvertFrom-Json ordered dictionaries.')
@@ -171,6 +179,15 @@ if (Test-Path -LiteralPath $hostPath) {
   }
   if ($hostSelfTest.ExitCode -ne 0) {
     $failures.Add("MenuHost Core Audio self-test failed after three attempts with exit code $($hostSelfTest.ExitCode).")
+  }
+}
+
+$menuBarPath = Join-Path $DeploymentRoot 'MacMakeover.MenuBar.exe'
+if (Test-Path -LiteralPath $menuBarPath) {
+  $menuBarSelfTest = Start-Process -FilePath $menuBarPath -ArgumentList '--self-test' `
+    -Wait -PassThru -WindowStyle Hidden
+  if ($menuBarSelfTest.ExitCode -ne 0) {
+    $failures.Add("MenuBar power-state self-test failed with exit code $($menuBarSelfTest.ExitCode).")
   }
 }
 

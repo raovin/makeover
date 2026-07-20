@@ -10,7 +10,8 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 
 - Apple mark and focused app at the left of a 20 px logical menu bar.
 - Crisp Segoe UI Variable Text typography, optically scaled for mixed-DPI displays.
-- CPU, RAM, network throughput, and combined battery/charging state in the center.
+- CPU, RAM, network throughput, explicit battery/charging source, and Windows
+  power mode in the center.
 - Separate Wi-Fi, Bluetooth, volume, Control Center, date, and notification controls.
 - Apple-style power and session commands without the old full-screen launcher.
 - A centered opaque dock with the complete inherited pin set and live running indicators.
