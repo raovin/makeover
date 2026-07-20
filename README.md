@@ -9,6 +9,7 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 ## What You Get
 
 - Apple mark and focused app at the left of a 20 px logical menu bar.
+- The original Seelen `Big Sur (Day)` 6K wallpaper, preserved and managed locally.
 - Crisp Segoe UI Variable Text typography, optically scaled for mixed-DPI displays.
 - CPU, RAM, network throughput, explicit battery/charging source, and Windows
   power mode in the center.

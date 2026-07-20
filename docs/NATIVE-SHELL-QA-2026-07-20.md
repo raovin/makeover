@@ -30,10 +30,17 @@ and remains local by repository policy.
   icon without painting the former grey rollover tile.
 - Apple, Network, Bluetooth, and Control Center each rendered their independent
   panel without a console window, stale panel, or duplicate MenuHost process.
+- The minimized-desktop pass uses the exact 6016 px `Big Sur (Day)` image recovered
+  from the archived Seelen collection. Installer and live-profile checks compare its
+  SHA-256 hash so the former generated gradient cannot replace it during upgrades.
+  The installer also clears the stale `DesktopPreto.png` user-policy override and
+  assigns the managed image to every Windows virtual desktop.
 - Power telemetry now distinguishes `Battery`, `Charging`, and `Plugged in` from
   the real Windows power-line state. A separate label distinguishes `Power saver`,
   `Balanced`, and `High performance`; all three deterministic fixtures rendered
   without moving, clipping, or overlapping the right-side controls.
+- The battery uses a clean filled icon when merely plugged in and a purpose-drawn
+  vector bolt only while genuinely charging; no font glyph is squeezed into the icon.
 
 ## Adversarial Results
 
@@ -60,10 +67,14 @@ and remains local by repository policy.
 - A 30-second settled sample kept all processes responsive. Custom-shell CPU was
   0.57% median / 1.15% p95 of the 16-logical-processor machine; private memory was
   79.7 MB with a stable 235.1 MB aggregate working set.
+- The 6016 px wallpaper initially raised Dock working set to 230 MB because GDI+
+  retained the full decoded bitmap. The dock now keeps a high-quality display-sized
+  copy; two cold promotion cycles passed at 94-109 MB, and preflight rejects a return
+  to full-source decoding.
 
-## Remaining Privileged Gate
+## Privileged Promotion
 
-`WindhawkRunUITask` must be disabled by the elevated promotion phase. Windhawk's
-service is stopped and manual and no Windhawk process is running, but an existing
-administrator-owned scheduled task cannot be changed from the normal token. The
-live profile test intentionally fails until the one UAC prompt is approved.
+The elevated promotion completed successfully. It removed the protected
+`DesktopPreto.png` wallpaper policy, disabled the administrator-owned Windhawk and
+hot-corner startup paths, and left no Seelen, Windhawk, or YASB process active. Two
+subsequent normal-token shell promotions and the final live-profile test passed.

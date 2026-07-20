@@ -686,7 +686,20 @@ internal static class WallpaperSlice
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
             using var stream = File.OpenRead(path);
             using var source = Image.FromStream(stream);
-            return new Bitmap(source);
+            var displayEdge = Screen.AllScreens
+                .Select(screen => Math.Max(screen.Bounds.Width, screen.Bounds.Height))
+                .DefaultIfEmpty(1920)
+                .Max();
+            var scale = Math.Min(1d, displayEdge / (double)Math.Max(source.Width, source.Height));
+            var width = Math.Max(1, (int)Math.Round(source.Width * scale));
+            var height = Math.Max(1, (int)Math.Round(source.Height * scale));
+            var wallpaper = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+            using var graphics = Graphics.FromImage(wallpaper);
+            graphics.CompositingQuality = CompositingQuality.HighQuality;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.DrawImage(source, new Rectangle(0, 0, width, height));
+            return wallpaper;
         }
         catch { return null; }
     }

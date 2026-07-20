@@ -15,6 +15,7 @@ if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
 
 $stateRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\migration'
 $statePath = Join-Path $stateRoot 'native-shell-state.json'
+$virtualDesktopsPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $advancedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
 $searchKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search'
@@ -68,6 +69,9 @@ if (Test-Path -LiteralPath $statePath) {
     }
   }
   if ($state.wallpaper -and (Test-Path -LiteralPath $state.wallpaper)) {
+    Get-ChildItem -LiteralPath $virtualDesktopsPath -ErrorAction SilentlyContinue | ForEach-Object {
+      Set-ItemProperty -LiteralPath $_.PSPath -Name Wallpaper -Value ([string]$state.wallpaper) -Type String
+    }
     Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
 public static class RestoredUserWallpaper {

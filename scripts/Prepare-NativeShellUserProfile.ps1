@@ -22,6 +22,8 @@ $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $advancedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
 $searchKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search'
 $stuckRectsPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'
+$desktopPolicyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
+$virtualDesktopsPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops'
 
 function Get-RegistryValueSnapshot([string]$Path, [string]$Name) {
   $key = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
@@ -44,10 +46,26 @@ function Set-NativeTaskbarVisible {
 
 function Set-MacWallpaper {
   $source = Join-Path $repoRoot 'assets\wallpapers\mac-wallpaper.jpg'
+  $expectedHash = 'D228004F1A1DD90FA49EF04C7799AD80D98E6B19CC1C7CF28C7D484B86A8759D'
+  $actualHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+  if ($actualHash -ne $expectedHash) {
+    throw 'The managed Big Sur (Day) wallpaper does not match the archived Seelen asset.'
+  }
   $targetRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\wallpapers'
   $target = Join-Path $targetRoot 'mac-wallpaper.jpg'
   New-Item -ItemType Directory -Force -Path $targetRoot | Out-Null
   Copy-Item -LiteralPath $source -Destination $target -Force
+  try {
+    foreach ($name in 'Wallpaper', 'WallpaperStyle') {
+      Remove-ItemProperty -LiteralPath $desktopPolicyPath -Name $name -ErrorAction Stop
+    }
+  } catch {
+    if ($_.Exception.Message -notmatch 'registry access is not allowed|access.*denied') { throw }
+    Write-Warning 'The SYSTEM-owned wallpaper policy will be cleared by the privileged promotion phase.'
+  }
+  Get-ChildItem -LiteralPath $virtualDesktopsPath -ErrorAction SilentlyContinue | ForEach-Object {
+    Set-ItemProperty -LiteralPath $_.PSPath -Name Wallpaper -Value $target -Type String
+  }
   Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10'
   Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper -Value '0'
 
@@ -70,6 +88,10 @@ if (-not (Test-Path -LiteralPath $statePath)) {
     capturedAt = (Get-Date).ToString('o')
     taskbarAutoHide = [bool]($stuckRects -and $stuckRects.Length -gt 8 -and (($stuckRects[8] -band 1) -eq 1))
     wallpaper = (Get-ItemProperty 'HKCU:\Control Panel\Desktop' -Name Wallpaper -ErrorAction SilentlyContinue).Wallpaper
+    wallpaperPolicy = [ordered]@{
+      Wallpaper = Get-RegistryValueSnapshot $desktopPolicyPath 'Wallpaper'
+      WallpaperStyle = Get-RegistryValueSnapshot $desktopPolicyPath 'WallpaperStyle'
+    }
     advanced = [ordered]@{}
     search = [ordered]@{}
     run = [ordered]@{}
@@ -105,6 +127,16 @@ if (-not $savedState.Contains('search')) {
 if (-not $savedState.Contains('run')) { $savedState.run = [ordered]@{} }
 if (-not $savedState.run.Contains('MacMakeoverDock')) {
   $savedState.run.MacMakeoverDock = Get-RegistryValueSnapshot $runKey 'MacMakeoverDock'
+  [System.IO.File]::WriteAllText(
+    $statePath,
+    ($savedState | ConvertTo-Json -Depth 8),
+    (New-Object System.Text.UTF8Encoding($false)))
+}
+if (-not $savedState.Contains('wallpaperPolicy')) {
+  $savedState.wallpaperPolicy = [ordered]@{
+    Wallpaper = Get-RegistryValueSnapshot $desktopPolicyPath 'Wallpaper'
+    WallpaperStyle = Get-RegistryValueSnapshot $desktopPolicyPath 'WallpaperStyle'
+  }
   [System.IO.File]::WriteAllText(
     $statePath,
     ($savedState | ConvertTo-Json -Depth 8),

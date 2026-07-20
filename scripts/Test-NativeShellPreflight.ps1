@@ -28,6 +28,13 @@ foreach ($required in @(
   }
 }
 
+$wallpaperAsset = Join-Path $repoRoot 'assets\wallpapers\mac-wallpaper.jpg'
+$wallpaperHash = 'D228004F1A1DD90FA49EF04C7799AD80D98E6B19CC1C7CF28C7D484B86A8759D'
+if ((Test-Path -LiteralPath $wallpaperAsset) -and
+    (Get-FileHash -LiteralPath $wallpaperAsset -Algorithm SHA256).Hash -ne $wallpaperHash) {
+  $failures.Add('The managed wallpaper is not the archived Seelen Big Sur (Day) asset.')
+}
+
 $scriptNames = @(
   'Build-NativeShell.ps1',
   'Capture-Desktop.ps1',
@@ -72,10 +79,10 @@ foreach ($userScript in @('Prepare-NativeShellUserProfile.ps1', 'Complete-Native
 $menuBarSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MenuBarForm.cs') -Raw
 $menuBarProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\Program.cs') -Raw
 $systemStateSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\SystemState.cs') -Raw
+$switchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Switch-To-NativeShell.ps1') -Raw
 $menuHostSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\Program.cs') -Raw
 $buildSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Raw
 $prepareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Prepare-NativeShellUserProfile.ps1') -Raw
-$switchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Switch-To-NativeShell.ps1') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
 if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
   $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
@@ -103,6 +110,10 @@ if ($menuBarSource -match '\\u26A1' -or
 }
 if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
   $failures.Add('Profile preparation uses Hashtable-only ContainsKey on ConvertFrom-Json ordered dictionaries.')
+}
+if ($switchSource -notmatch 'Remove-ItemProperty.+desktopPolicyPath' -or
+    $prepareSource -notmatch 'virtualDesktopsPath') {
+  $failures.Add('Wallpaper deployment no longer clears policy overrides or updates virtual desktops.')
 }
 if ($switchSource -notmatch 'windhawkUiTaskWasEnabled') {
   $failures.Add('Privileged promotion no longer preserves the Windhawk UI task rollback state.')
@@ -139,6 +150,10 @@ if ($dockSource -match 'FlowLayoutPanel' -or $dockSource -match 'class DockButto
 }
 if ($dockSource -match 'AutoScaleMode = AutoScaleMode\.Dpi') {
   $failures.Add('Dock manually scaled forms must not be scaled a second time by WinForms DPI autoscaling.')
+}
+if ($dockSource -notmatch 'displayEdge = Screen\.AllScreens' -or
+    $dockSource -notmatch 'Math\.Min\(1d, displayEdge') {
+  $failures.Add('Dock wallpaper loading must retain a display-sized copy instead of decoding the full source image.')
 }
 if ($dockSource -notmatch 'NativeMethods\.HwndBottom' -or
     $dockSource -notmatch 'TopMost = false') {

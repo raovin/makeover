@@ -162,9 +162,39 @@ foreach ($protocol in $protocols) {
   }
 }
 
-$wallpaper = (Get-ItemProperty 'HKCU:\Control Panel\Desktop' -Name Wallpaper -ErrorAction SilentlyContinue).Wallpaper
+$wallpaper = $null
+$wallpaperProperty = Get-ItemProperty 'HKCU:\Control Panel\Desktop' -Name Wallpaper -ErrorAction SilentlyContinue
+if ($wallpaperProperty) {
+  $wallpaper = $wallpaperProperty.PSObject.Properties['Wallpaper'].Value
+}
 if ($wallpaper -notmatch 'MacMakeover\\wallpapers\\mac-wallpaper\.jpg$' -or -not (Test-Path -LiteralPath $wallpaper)) {
   $failures.Add('The Mac wallpaper is not applied from the managed local copy.')
+} else {
+  $wallpaperAsset = Join-Path $repoRoot 'assets\wallpapers\mac-wallpaper.jpg'
+  if ((Get-FileHash -LiteralPath $wallpaper -Algorithm SHA256).Hash -ne
+      (Get-FileHash -LiteralPath $wallpaperAsset -Algorithm SHA256).Hash) {
+    $failures.Add('The applied wallpaper differs from the repository-managed Big Sur (Day) asset.')
+  }
+}
+$wallpaperPolicy = $null
+$wallpaperPolicyProperty = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' `
+  -Name Wallpaper -ErrorAction SilentlyContinue
+if ($wallpaperPolicyProperty) {
+  $wallpaperPolicy = $wallpaperPolicyProperty.PSObject.Properties['Wallpaper'].Value
+}
+if (-not [string]::IsNullOrWhiteSpace($wallpaperPolicy)) {
+  $failures.Add("A per-user policy still overrides the managed wallpaper: $wallpaperPolicy")
+}
+$virtualDesktopWallpapers = Get-ChildItem `
+  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops' `
+  -ErrorAction SilentlyContinue | ForEach-Object {
+    $desktopWallpaperProperty = Get-ItemProperty -LiteralPath $_.PSPath -Name Wallpaper -ErrorAction SilentlyContinue
+    if ($desktopWallpaperProperty) {
+      $desktopWallpaperProperty.PSObject.Properties['Wallpaper'].Value
+    }
+  }
+if ($virtualDesktopWallpapers | Where-Object { $_ -and $_ -ne $wallpaper }) {
+  $failures.Add('One or more virtual desktops still override the managed Big Sur wallpaper.')
 }
 
 $hotCornerProcesses = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |

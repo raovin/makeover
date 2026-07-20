@@ -11,6 +11,7 @@ $systemPath = Join-Path $stateRoot 'system-profile-enabled.json'
 $seelenTaskPath = '\Seelen\'
 $seelenTaskName = 'Seelen UI Service'
 $windhawkUiTaskName = 'WindhawkRunUITask'
+$desktopPolicyPath = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Policies\System'
 
 if (-not (Test-Path -LiteralPath $preparedPath)) {
   throw 'The unelevated user-profile preparation has not completed.'
@@ -23,6 +24,21 @@ $windhawkUiTask = Get-ScheduledTask -TaskName $windhawkUiTaskName -ErrorAction S
 $windhawkUiTaskWasEnabled = [bool]($windhawkUiTask -and $windhawkUiTask.Settings.Enabled)
 
 try {
+  $desktopPolicy = Get-Item -LiteralPath $desktopPolicyPath -ErrorAction SilentlyContinue
+  foreach ($name in 'Wallpaper', 'WallpaperStyle') {
+    if ($desktopPolicy -and $desktopPolicy.GetValueNames() -contains $name) {
+      Remove-ItemProperty -LiteralPath $desktopPolicyPath -Name $name -ErrorAction Stop
+    }
+  }
+  $remainingWallpaperPolicy = $null
+  $remainingWallpaperProperty = Get-ItemProperty -LiteralPath $desktopPolicyPath `
+    -Name Wallpaper -ErrorAction SilentlyContinue
+  if ($remainingWallpaperProperty) {
+    $remainingWallpaperPolicy = $remainingWallpaperProperty.PSObject.Properties['Wallpaper'].Value
+  }
+  if (-not [string]::IsNullOrWhiteSpace($remainingWallpaperPolicy)) {
+    throw "The protected wallpaper policy remains active: $remainingWallpaperPolicy"
+  }
   & (Join-Path $PSScriptRoot 'Install-NativeDock.ps1') -Disable
   Stop-Service -Name Windhawk -Force -ErrorAction SilentlyContinue
   Set-Service -Name Windhawk -StartupType Manual -ErrorAction SilentlyContinue

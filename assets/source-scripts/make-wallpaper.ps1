@@ -1,4 +1,5 @@
-# Generates a macOS Sequoia-style dark gradient wallpaper at native resolution and applies it.
+# Legacy experiment: generates a macOS-style gradient in Pictures and applies it.
+# Production uses assets/wallpapers/mac-wallpaper.jpg (the archived Big Sur image).
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 
