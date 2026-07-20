@@ -96,6 +96,11 @@ if ($nativeSource -notmatch 'PowerGetUserConfiguredACPowerMode' -or
     $menuBarProgramSource -notmatch '--preview-power=') {
   $failures.Add('MenuBar no longer distinguishes power source, charging state, and Windows power mode.')
 }
+if ($menuBarSource -match '\\u26A1' -or
+    $menuBarSource -notmatch 'if \(snapshot\.Charging\)' -or
+    $menuBarSource -notmatch 'DrawChargingBolt') {
+  $failures.Add('MenuBar charging state has regressed to the cramped font glyph or marks plugged-in batteries as charging.')
+}
 if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
   $failures.Add('Profile preparation uses Hashtable-only ContainsKey on ConvertFrom-Json ordered dictionaries.')
 }

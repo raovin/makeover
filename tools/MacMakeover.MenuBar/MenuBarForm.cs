@@ -359,8 +359,8 @@ internal sealed class MenuBarForm : Form
     private void DrawBattery(Graphics graphics, Rectangle area, SystemSnapshot snapshot, string label)
     {
         var percent = snapshot.BatteryPercent;
-        var iconWidth = Scale(15);
-        var iconHeight = Scale(7);
+        var iconWidth = Scale(17);
+        var iconHeight = Scale(9);
         var iconX = area.Left + Scale(1);
         var iconY = area.Top + (area.Height - iconHeight) / 2;
         var batteryRect = new Rectangle(iconX, iconY, iconWidth - Scale(2), iconHeight);
@@ -375,13 +375,34 @@ internal sealed class MenuBarForm : Form
         graphics.FillRectangle(fill, batteryRect.Right + Scale(1), batteryRect.Top + Scale(2), Scale(2), Math.Max(1, batteryRect.Height - Scale(4)));
         var fillWidth = Math.Max(1, (batteryRect.Width - Scale(2)) * percent / 100);
         graphics.FillRectangle(fill, batteryRect.Left + Scale(1), batteryRect.Top + Scale(1), fillWidth, Math.Max(1, batteryRect.Height - Scale(2)));
-        if (snapshot.OnAcPower)
+        if (snapshot.Charging)
         {
-            DrawCenteredText(graphics, "\u26A1", _smallFont, batteryRect, Color.White);
+            DrawChargingBolt(graphics, batteryRect);
         }
         var labelRect = new Rectangle(batteryRect.Right + Scale(6), area.Top, area.Right - batteryRect.Right - Scale(6), area.Height);
         TextRenderer.DrawText(graphics, label, _smallFont, labelRect, color,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+    }
+
+    private void DrawChargingBolt(Graphics graphics, Rectangle batteryRect)
+    {
+        var centerX = batteryRect.Left + batteryRect.Width / 2F;
+        var centerY = batteryRect.Top + batteryRect.Height / 2F;
+        var halfWidth = Math.Max(2F, ScaleValue(2.2F));
+        var top = batteryRect.Top + Math.Max(1F, ScaleValue(1F));
+        var bottom = batteryRect.Bottom - Math.Max(1F, ScaleValue(1F));
+        var waist = Math.Max(0.8F, ScaleValue(0.8F));
+        var points = new[]
+        {
+            new PointF(centerX + waist, top),
+            new PointF(centerX - halfWidth, centerY + ScaleValue(0.35F)),
+            new PointF(centerX - ScaleValue(0.15F), centerY + ScaleValue(0.35F)),
+            new PointF(centerX - waist, bottom),
+            new PointF(centerX + halfWidth, centerY - ScaleValue(0.35F)),
+            new PointF(centerX + ScaleValue(0.15F), centerY - ScaleValue(0.35F))
+        };
+        using var bolt = new SolidBrush(Color.FromArgb(24, 27, 32));
+        graphics.FillPolygon(bolt, points);
     }
 
     private void DrawPowerMode(Graphics graphics, Rectangle area, PowerModeKind mode, string label)
