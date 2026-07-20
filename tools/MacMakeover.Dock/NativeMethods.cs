@@ -19,6 +19,7 @@ internal static class NativeMethods
     public const int SwShow = 5;
     public const int SwRestore = 9;
     public static readonly IntPtr HwndTopMost = new(-1);
+    public static readonly IntPtr HwndBottom = new(1);
     public static readonly IntPtr DpiAwarenessContextPerMonitorAwareV2 = new(-4);
     public const uint SwpNoActivate = 0x0010;
     public const uint SwpShowWindow = 0x0040;

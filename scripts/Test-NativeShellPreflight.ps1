@@ -110,18 +110,26 @@ if ($dockSource -notmatch 'WsExNoActivate' -or $dockSource -notmatch 'WsExToolWi
 if ($dockSource -notmatch 'SlotWidth = 44' -or $dockSource -notmatch 'IconSize = 28') {
   $failures.Add('Dock no longer uses the approved icon and slot geometry.')
 }
-if ($dockSource -notmatch 'screen\.Primary \? 1F : 1\.25F' -or
+if ($dockSource -notmatch 'screen\.Primary \? 1F : 1\.5F' -or
     $dockSource -notmatch 'app\.LoadIcon\(iconSize \* 3\)' -or
     $dockSource -notmatch 'if \(AppId is not null\)' -or
     $dockSource -notmatch 'CopyShellBitmap' -or
-    $dockSource -notmatch 'Format32bppPArgb') {
-  $failures.Add('Dock no longer applies external optical scaling and high-resolution packaged icons.')
+    $dockSource -notmatch 'Format32bppPArgb' -or
+    $dockSource -notmatch '--preview-all') {
+  $failures.Add('Dock no longer keeps both displays at physical parity with high-resolution packaged icons.')
 }
 if ($dockSource -match 'FillPath\(hover' -or $dockSource -match 'new SolidBrush\(Color\.FromArgb\(32, 255, 255, 255\)\)') {
   $failures.Add('Dock hover styling reintroduced an opaque-looking rectangular tile.')
 }
 if ($dockSource -match 'FlowLayoutPanel' -or $dockSource -match 'class DockButton : Control') {
   $failures.Add('Dock icons are child controls again; WinForms transparency creates black slot backgrounds.')
+}
+if ($dockSource -match 'AutoScaleMode = AutoScaleMode\.Dpi') {
+  $failures.Add('Dock manually scaled forms must not be scaled a second time by WinForms DPI autoscaling.')
+}
+if ($dockSource -notmatch 'NativeMethods\.HwndBottom' -or
+    $dockSource -notmatch 'TopMost = false') {
+  $failures.Add('The work-area reservation window can cover the enlarged external dock instead of staying behind it.')
 }
 if ($dockSource -notmatch '--export-icons' -or $dockSource -notmatch '--preview-hover') {
   $failures.Add('Dock no longer exposes the icon-export and hover-preview paths used by visual release QA.')

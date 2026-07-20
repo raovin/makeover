@@ -13,6 +13,7 @@ internal static class Program
     private static void Main(string[] args)
     {
         var preview = args.Any(value => value.Equals("--preview", StringComparison.OrdinalIgnoreCase));
+        var previewAll = args.Any(value => value.Equals("--preview-all", StringComparison.OrdinalIgnoreCase));
         if (args.Length >= 2 && args[0].Equals("--export-icons", StringComparison.OrdinalIgnoreCase))
         {
             ExportIcons(args[1]);
@@ -45,7 +46,7 @@ internal static class Program
         if (!first) return;
         using var exit = new EventWaitHandle(false, EventResetMode.AutoReset, preview ? "Local\\MacMakeover.Dock.Preview.Exit" : "Local\\MacMakeover.Dock.Exit");
         ApplicationConfiguration.Initialize();
-        Application.Run(new DockContext(preview, previewHover, exit));
+        Application.Run(new DockContext(preview, previewAll, previewHover, exit));
     }
 
     private static void ExportIcons(string directory)
@@ -65,6 +66,7 @@ internal static class Program
 internal sealed class DockContext : ApplicationContext
 {
     private readonly bool _preview;
+    private readonly bool _previewAll;
     private readonly bool _previewHover;
     private readonly List<DockForm> _forms = [];
     private readonly List<WorkAreaGapForm> _gapForms = [];
@@ -76,9 +78,10 @@ internal sealed class DockContext : ApplicationContext
     private int _displayRebuildPending;
     private bool _exiting;
 
-    public DockContext(bool preview, bool previewHover, EventWaitHandle exit)
+    public DockContext(bool preview, bool previewAll, bool previewHover, EventWaitHandle exit)
     {
         _preview = preview;
+        _previewAll = previewAll;
         _previewHover = previewHover;
         if (!preview)
         {
@@ -98,7 +101,10 @@ internal sealed class DockContext : ApplicationContext
     private void BuildForms()
     {
         var apps = PinnedApp.Load();
-        foreach (var screen in _preview ? Screen.AllScreens.Where(s => s.Primary) : Screen.AllScreens)
+        var screens = _preview && !_previewAll
+            ? Screen.AllScreens.Where(screen => screen.Primary)
+            : Screen.AllScreens.AsEnumerable();
+        foreach (var screen in screens)
         {
             if (!_preview)
             {
@@ -201,11 +207,11 @@ internal sealed class WorkAreaGapForm : Form
         _screen = screen;
         _callbackMessage = NativeMethods.RegisterWindowMessage($"MacMakeover.Dock.WorkAreaGap.{Environment.ProcessId}.{screen.DeviceName}");
         _taskbarCreatedMessage = NativeMethods.RegisterWindowMessage("TaskbarCreated");
-        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
-        TopMost = true;
+        TopMost = false;
         Enabled = false;
         Opacity = 0.999;
         BackColor = Color.FromArgb(16, 18, 28);
@@ -277,7 +283,7 @@ internal sealed class WorkAreaGapForm : Form
             NativeMethods.SHAppBarMessage(NativeMethods.AbmSetPos, ref data);
             NativeMethods.SetWindowPos(
                 Handle,
-                NativeMethods.HwndTopMost,
+                NativeMethods.HwndBottom,
                 data.Bounds.Left,
                 data.Bounds.Top,
                 data.Bounds.Right - data.Bounds.Left,
@@ -427,7 +433,7 @@ internal sealed class DockBackdropForm : Form
     public DockBackdropForm(Screen screen)
     {
         _screen = screen;
-        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -495,7 +501,7 @@ internal sealed class DockForm : Form
     {
         _screen = screen;
         _preview = preview;
-        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -711,7 +717,7 @@ internal static class DisplayScale
     }
 
     public static float For(Screen screen, int dpi) =>
-        Math.Max(Math.Max(1F, dpi / 96F), screen.Primary ? 1F : 1.25F);
+        Math.Max(Math.Max(1F, dpi / 96F), screen.Primary ? 1F : 1.5F);
 }
 
 internal sealed class DockItem : IDisposable

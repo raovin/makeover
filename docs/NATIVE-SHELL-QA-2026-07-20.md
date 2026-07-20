@@ -10,10 +10,15 @@ and remains local by repository policy.
 
 - The laptop keeps a 30 px menu bar and 72 px dock surface. Its work area reserves
   30 px above and 84 px below, leaving a 12 px physical gap above the dock.
-- The external display uses a 30 px menu bar and 60 px dock surface. Its work area
-  reserves 30 px above and 70 px below, leaving a 10 px physical gap above the dock.
+- The external display uses the same 30 px menu bar and 72 px dock surface as the
+  laptop. Its work area reserves 30 px above and 84 px below, leaving the same 12 px
+  physical gap above the dock.
 - Menu-bar typography, icon geometry, hit targets, and horizontal rhythm now match
   the laptop at physical size instead of shrinking to the former 25 px treatment.
+- Dock frame, 42 px icons, 66 px slots, padding, curves, and running dots also match
+  physically instead of using the cramped former 1.25x external-monitor exception.
+- The production-only work-area AppBar stays behind the dock, preventing its 24 px
+  external overlap from painting wallpaper across the tops of the icons.
 - Both telemetry groups and dock frames are centered at physical x=960. Dock frame
   top/bottom margins have matching parity on both displays.
 - Segoe UI Variable Text replaces the uneven private-font mix at 96 DPI. Labels,
@@ -33,6 +38,9 @@ and remains local by repository policy.
 - A second three-cycle dock-compositing pass kept all processes responsive, retained
   all 21 pins on both displays, matched the staged and deployed binaries, and logged
   no MacMakeover application errors.
+- Twenty-four rapid external-display samples had identical complete icon coverage.
+  A cold-start comparison reached the stable 21-icon reference by 2.0 seconds and
+  remained stable through the following 16 seconds of refresh cycles.
 - Eight rapid `WM_DISPLAYCHANGE` broadcasts preserved process identities and all
   processes stayed responsive. The bounded AppBar settling logic restored both work
   areas after Explorer's secondary taskbar completed registration.

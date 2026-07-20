@@ -81,7 +81,10 @@ visually hidden while the dock runs. A transparent `WorkAreaGapForm` AppBar rese
 only the additional optical-scale height and breathing room required by the custom
 dock. It reacts to AppBar position changes, re-registers after Explorer starts, and
 uses bounded startup settling plus the existing taskbar guard to repair a dropped
-reservation. Graceful shutdown removes the gap and restores every native taskbar.
+reservation. The reservation window is pinned to the bottom of z-order: on a 96-DPI
+display its 36 px reservation overlaps the enlarged dock by 24 px geometrically and
+must never paint above the dock surface. Graceful shutdown removes the gap and
+restores every native taskbar.
 The dock has no custom task switcher, window mover, or Explorer injection. Windhawk's
 taskbar styler remains installed as rollback material, disabled with its service manual.
 
