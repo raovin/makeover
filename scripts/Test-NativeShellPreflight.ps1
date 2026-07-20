@@ -83,8 +83,10 @@ if ($menuBarSource -match 'EnsureNativeDockZOrder|MonitorNativeDockAsync' -or
     $nativeSource -match 'IsBorderlessFullscreen|FindTaskbarFor') {
   $failures.Add('A taskbar z-order monitor is present; Explorer must own dock z-order.')
 }
-if ($menuBarSource -notmatch '_screen\.Primary \? 1F : 1\.25F') {
-  $failures.Add('MenuBar no longer applies the approved external-monitor optical scale floor.')
+if ($menuBarSource -notmatch '_screen\.Primary \? 1F : 1\.5F' -or
+    $menuBarSource -notmatch 'opticalScale = 1F \+ \(\(VisualScale / DpiScale\) - 1F\) \* 0\.3F' -or
+    $menuBarProgramSource -notmatch '--preview-all') {
+  $failures.Add('MenuBar no longer keeps external-monitor geometry and typography at physical parity with the laptop.')
 }
 if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
   $failures.Add('Profile preparation uses Hashtable-only ContainsKey on ConvertFrom-Json ordered dictionaries.')

@@ -10,8 +10,10 @@ and remains local by repository policy.
 
 - The laptop keeps a 30 px menu bar and 72 px dock surface. Its work area reserves
   30 px above and 84 px below, leaving a 12 px physical gap above the dock.
-- The external display uses a 25 px menu bar and 60 px dock surface. Its work area
-  reserves 25 px above and 70 px below, leaving a 10 px physical gap above the dock.
+- The external display uses a 30 px menu bar and 60 px dock surface. Its work area
+  reserves 30 px above and 70 px below, leaving a 10 px physical gap above the dock.
+- Menu-bar typography, icon geometry, hit targets, and horizontal rhythm now match
+  the laptop at physical size instead of shrinking to the former 25 px treatment.
 - Both telemetry groups and dock frames are centered at physical x=960. Dock frame
   top/bottom margins have matching parity on both displays.
 - Segoe UI Variable Text replaces the uneven private-font mix at 96 DPI. Labels,

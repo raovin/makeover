@@ -10,6 +10,7 @@ internal static class Program
     private static void Main(string[] args)
     {
         var preview = args.Any(arg => arg.Equals("--preview", StringComparison.OrdinalIgnoreCase));
+        var previewAll = args.Any(arg => arg.Equals("--preview-all", StringComparison.OrdinalIgnoreCase));
         var mutexName = preview ? MutexName + ".Preview" : MutexName;
         using var mutex = new Mutex(initiallyOwned: true, mutexName, out var createdNew);
         if (!createdNew) return;
@@ -17,7 +18,7 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         Application.ThreadException += (_, e) => AppLog.Write("Thread exception: " + e.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => AppLog.Write("Unhandled exception: " + e.ExceptionObject);
-        using var context = new MenuBarContext(preview);
+        using var context = new MenuBarContext(preview, previewAll);
         Application.Run(context);
     }
 }
@@ -25,13 +26,15 @@ internal static class Program
 internal sealed class MenuBarContext : ApplicationContext
 {
     private readonly bool _preview;
+    private readonly bool _previewAll;
     private readonly SystemStateProvider _state = new();
     private readonly List<MenuBarForm> _bars = [];
     private bool _disposed;
 
-    public MenuBarContext(bool preview)
+    public MenuBarContext(bool preview, bool previewAll)
     {
         _preview = preview;
+        _previewAll = previewAll;
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         RebuildBars();
         _state.Start();
@@ -54,7 +57,7 @@ internal sealed class MenuBarContext : ApplicationContext
 
     private void RebuildBars()
     {
-        var screens = _preview
+        var screens = _preview && !_previewAll
             ? Screen.AllScreens.Where(screen => screen.Primary).Take(1)
             : Screen.AllScreens.AsEnumerable();
 

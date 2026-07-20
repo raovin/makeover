@@ -487,14 +487,14 @@ internal sealed class MenuBarForm : Form
     }
 
     private float DpiScale => Math.Max(1F, DeviceDpi / 96F);
-    private float VisualScale => Math.Max(DpiScale, _screen.Primary ? 1F : 1.25F);
+    private float VisualScale => Math.Max(DpiScale, _screen.Primary ? 1F : 1.5F);
     private int Scale(int logical) => Math.Max(1, (int)Math.Round(logical * VisualScale));
     private float ScaleValue(float logical) => Math.Max(1F, logical * VisualScale);
 
     private void ConfigureTypography()
     {
         _typography?.Dispose();
-        var opticalScale = 1F + ((VisualScale / DpiScale) - 1F) * 0.6F;
+        var opticalScale = 1F + ((VisualScale / DpiScale) - 1F) * 0.3F;
         _typography = new Typography(opticalScale);
         _textFont = _typography.Text;
         _semiboldFont = _typography.Emphasis;
