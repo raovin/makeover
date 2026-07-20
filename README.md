@@ -9,7 +9,7 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 ## What You Get
 
 - Apple mark and focused app at the left of a 20 px logical menu bar.
-- Privately loaded Manrope labels and JetBrains Mono telemetry, bundled under OFL.
+- Crisp Segoe UI Variable Text typography, optically scaled for mixed-DPI displays.
 - CPU, RAM, network throughput, and combined battery/charging state in the center.
 - Separate Wi-Fi, Bluetooth, volume, Control Center, date, and notification controls.
 - Apple-style power and session commands without the old full-screen launcher.
@@ -42,6 +42,8 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 See [Native Shell Architecture](docs/NATIVE-SHELL-ARCHITECTURE.md) for ownership,
 security boundaries, and release gates. The measured native-versus-Seelen resource
 comparison is in [Performance Comparison](docs/PERFORMANCE-COMPARISON-2026-07-17.md).
+The latest two-display signoff is in
+[Mixed-DPI QA](docs/NATIVE-SHELL-QA-2026-07-20.md).
 
 ## Install Or Upgrade
 
@@ -101,8 +103,8 @@ qa/                             Local visual evidence (normally uncommitted)
   intentionally stored.
 - Restart, shutdown, sleep, and log out require confirmation.
 - Windhawk remains installed for rollback, with its styler disabled and service set to manual.
-- Bundled Manrope and JetBrains Mono files include their OFL license texts and do
-  not require a machine-wide font installation.
+- The active shell uses Windows' native variable text faces; bundled OFL fonts are
+  retained as portable legacy/rollback material and need no machine-wide install.
 - The external display must be physically connected before mixed-DPI signoff.
 - Review registry exports and local paths before publishing a fork.
 

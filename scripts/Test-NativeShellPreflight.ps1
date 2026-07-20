@@ -73,6 +73,8 @@ $menuBarSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeove
 $menuBarProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\Program.cs') -Raw
 $menuHostSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\Program.cs') -Raw
 $buildSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Raw
+$prepareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Prepare-NativeShellUserProfile.ps1') -Raw
+$switchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Switch-To-NativeShell.ps1') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
 if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
   $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
@@ -80,6 +82,15 @@ if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
 if ($menuBarSource -match 'EnsureNativeDockZOrder|MonitorNativeDockAsync' -or
     $nativeSource -match 'IsBorderlessFullscreen|FindTaskbarFor') {
   $failures.Add('A taskbar z-order monitor is present; Explorer must own dock z-order.')
+}
+if ($menuBarSource -notmatch '_screen\.Primary \? 1F : 1\.25F') {
+  $failures.Add('MenuBar no longer applies the approved external-monitor optical scale floor.')
+}
+if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
+  $failures.Add('Profile preparation uses Hashtable-only ContainsKey on ConvertFrom-Json ordered dictionaries.')
+}
+if ($switchSource -notmatch 'windhawkUiTaskWasEnabled') {
+  $failures.Add('Privileged promotion no longer preserves the Windhawk UI task rollback state.')
 }
 $displaySubscription = $menuBarProgramSource.IndexOf('SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;', [StringComparison]::Ordinal)
 $initialBarBuild = $menuBarProgramSource.IndexOf('RebuildBars();', [StringComparison]::Ordinal)
@@ -97,9 +108,19 @@ if ($dockSource -notmatch 'WsExNoActivate' -or $dockSource -notmatch 'WsExToolWi
 if ($dockSource -notmatch 'SlotWidth = 44' -or $dockSource -notmatch 'IconSize = 28') {
   $failures.Add('Dock no longer uses the approved icon and slot geometry.')
 }
+if ($dockSource -notmatch 'screen\.Primary \? 1F : 1\.25F' -or
+    $dockSource -notmatch 'app\.LoadIcon\(iconSize \* 3\)' -or
+    $dockSource -notmatch 'if \(AppId is not null\)') {
+  $failures.Add('Dock no longer applies external optical scaling and high-resolution packaged icons.')
+}
 if ($dockSource -notmatch 'LogicalGap = 8' -or
     $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmNew' -or
-    $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmRemove') {
+    $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmRemove' -or
+    $dockSource -notmatch 'NativeMethods\.AbnPosChanged' -or
+    $dockSource -notmatch 'RegisterWindowMessage\("TaskbarCreated"\)' -or
+    $dockSource -notmatch 'expectedReservation' -or
+    $dockSource -notmatch '_remainingSettleAttempts = 20' -or
+    $dockSource -notmatch 'gapForm\.EnsureReserved\(\)') {
   $failures.Add('Dock no longer owns the approved reversible 8 px work-area gap reservation.')
 }
 if ($dockSource -notmatch 'dispatcher\.InvokeRequired' -or

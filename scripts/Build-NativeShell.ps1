@@ -42,6 +42,18 @@ foreach ($project in $projects) {
   Copy-Item -Path (Join-Path $projectOutput '*') -Destination $Destination -Recurse -Force
 }
 
+$claudePackage = Get-AppxPackage -Name Claude -ErrorAction SilentlyContinue |
+  Sort-Object Version -Descending |
+  Select-Object -First 1
+if ($claudePackage) {
+  $claudeLogo = Join-Path $claudePackage.InstallLocation 'assets\Square150x150Logo.png'
+  if (Test-Path -LiteralPath $claudeLogo) {
+    $dockAssets = Join-Path $Destination 'Assets\Dock'
+    New-Item -ItemType Directory -Force -Path $dockAssets | Out-Null
+    Copy-Item -LiteralPath $claudeLogo -Destination (Join-Path $dockAssets 'Claude.png') -Force
+  }
+}
+
 $required = @(
   'MacMakeover.MenuBar.exe',
   'MacMakeover.MenuHost.exe',

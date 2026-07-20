@@ -23,11 +23,11 @@ internal sealed class MenuBarForm : Form
     private readonly SystemStateProvider _state;
     private readonly bool _preview;
     private readonly List<(Rectangle Bounds, BarAction Action)> _hits = [];
-    private readonly Typography _typography;
-    private readonly Font _textFont;
-    private readonly Font _semiboldFont;
-    private readonly Font _smallFont;
-    private readonly Font _iconFont;
+    private Typography? _typography;
+    private Font _textFont = null!;
+    private Font _semiboldFont = null!;
+    private Font _smallFont = null!;
+    private Font _iconFont = null!;
     private Image? _appleMark;
     private uint _appBarCallback;
     private readonly uint _taskbarCreatedMessage;
@@ -39,12 +39,6 @@ internal sealed class MenuBarForm : Form
         _screen = screen;
         _state = state;
         _preview = preview;
-        _typography = new Typography();
-        _textFont = _typography.Text;
-        _semiboldFont = _typography.Emphasis;
-        _smallFont = _typography.Telemetry;
-        _iconFont = _typography.Icon;
-        AppLog.Write($"Typography text={_textFont.Name}; emphasis={_semiboldFont.Name}; telemetry={_smallFont.Name}");
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -74,6 +68,7 @@ internal sealed class MenuBarForm : Form
         MouseWheel += OnMouseWheel;
         Shown += (_, _) =>
         {
+            ConfigureTypography();
             if (_preview)
             {
                 ApplyNativeBounds(new Rectangle(
@@ -84,7 +79,7 @@ internal sealed class MenuBarForm : Form
             }
             else
             {
-                PositionAppBar();
+                RegisterAppBar();
             }
             EnsureTopmost();
             AppLog.Write($"Shown {_screen.DeviceName} preview={_preview} bounds={Bounds} dpi={DeviceDpi}");
@@ -117,7 +112,6 @@ internal sealed class MenuBarForm : Form
                 height));
             return;
         }
-        RegisterAppBar();
     }
 
     protected override void OnHandleDestroyed(EventArgs e)
@@ -224,6 +218,8 @@ internal sealed class MenuBarForm : Form
         {
             e.Graphics.DrawLine(bottomLine, 0, Height - 1, Width, Height - 1);
         }
+
+        if (_typography is null) return;
 
         _hits.Clear();
         var snapshot = _state.Snapshot;
@@ -490,8 +486,22 @@ internal sealed class MenuBarForm : Form
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
     }
 
-    private int Scale(int logical) => Math.Max(1, (int)Math.Round(logical * DeviceDpi / 96d));
-    private float ScaleValue(float logical) => Math.Max(1F, logical * DeviceDpi / 96F);
+    private float DpiScale => Math.Max(1F, DeviceDpi / 96F);
+    private float VisualScale => Math.Max(DpiScale, _screen.Primary ? 1F : 1.25F);
+    private int Scale(int logical) => Math.Max(1, (int)Math.Round(logical * VisualScale));
+    private float ScaleValue(float logical) => Math.Max(1F, logical * VisualScale);
+
+    private void ConfigureTypography()
+    {
+        _typography?.Dispose();
+        var opticalScale = 1F + ((VisualScale / DpiScale) - 1F) * 0.6F;
+        _typography = new Typography(opticalScale);
+        _textFont = _typography.Text;
+        _semiboldFont = _typography.Emphasis;
+        _smallFont = _typography.Telemetry;
+        _iconFont = _typography.Icon;
+        AppLog.Write($"Typography {_screen.DeviceName} text={_textFont.Name}; emphasis={_semiboldFont.Name}; telemetry={_smallFont.Name}; dpi={DeviceDpi}; visualScale={VisualScale:0.##}");
+    }
 
     protected override void Dispose(bool disposing)
     {
@@ -499,7 +509,7 @@ internal sealed class MenuBarForm : Form
         {
             _state.Changed -= OnStateChanged;
             _appleMark?.Dispose();
-            _typography.Dispose();
+            _typography?.Dispose();
         }
         base.Dispose(disposing);
     }

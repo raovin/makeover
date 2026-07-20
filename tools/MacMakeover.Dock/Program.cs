@@ -140,6 +140,7 @@ internal sealed class DockContext : ApplicationContext
             }
             return true;
         }, IntPtr.Zero);
+        foreach (var gapForm in _gapForms) gapForm.EnsureReserved();
     }
 
     protected override void ExitThreadCore()
@@ -165,12 +166,18 @@ internal sealed class WorkAreaGapForm : Form
     private static readonly IntPtr HtTransparent = new(-1);
     private readonly Screen _screen;
     private readonly uint _callbackMessage;
+    private readonly uint _taskbarCreatedMessage;
+    private readonly System.Windows.Forms.Timer _settleTimer = new() { Interval = 500 };
     private bool _registered;
+    private bool _positionPending;
+    private int _remainingSettleAttempts;
+    private int _stableSettleSamples;
 
     public WorkAreaGapForm(Screen screen)
     {
         _screen = screen;
         _callbackMessage = NativeMethods.RegisterWindowMessage($"MacMakeover.Dock.WorkAreaGap.{Environment.ProcessId}.{screen.DeviceName}");
+        _taskbarCreatedMessage = NativeMethods.RegisterWindowMessage("TaskbarCreated");
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
@@ -182,7 +189,12 @@ internal sealed class WorkAreaGapForm : Form
         DoubleBuffered = true;
         Location = new Point(screen.Bounds.Left, screen.Bounds.Bottom - 1);
         Size = new Size(1, 1);
-        Shown += (_, _) => RegisterAndPosition();
+        _settleTimer.Tick += (_, _) => SettlePosition();
+        Shown += (_, _) =>
+        {
+            RegisterAndPosition();
+            BeginSettle();
+        };
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -207,23 +219,56 @@ internal sealed class WorkAreaGapForm : Form
 
     private void RegisterAndPosition()
     {
-        var data = CreateAppBarData();
-        _registered = NativeMethods.SHAppBarMessage(NativeMethods.AbmNew, ref data) != UIntPtr.Zero;
-        if (!_registered) return;
-
-        var gap = (int)Math.Round(LogicalGap * DeviceDpi / 96f);
-        data.Bounds = new NativeMethods.Rect
+        if (!_registered)
         {
-            Left = _screen.Bounds.Left,
-            Top = _screen.Bounds.Top,
-            Right = _screen.Bounds.Right,
-            Bottom = _screen.Bounds.Bottom
-        };
-        NativeMethods.SHAppBarMessage(NativeMethods.AbmQueryPos, ref data);
-        data.Bounds.Top = data.Bounds.Bottom - gap;
-        NativeMethods.SHAppBarMessage(NativeMethods.AbmSetPos, ref data);
-        Bounds = Rectangle.FromLTRB(data.Bounds.Left, data.Bounds.Top, data.Bounds.Right, data.Bounds.Bottom);
-        Invalidate();
+            var registration = CreateAppBarData();
+            _registered = NativeMethods.SHAppBarMessage(NativeMethods.AbmNew, ref registration) != UIntPtr.Zero;
+            if (!_registered) return;
+        }
+        PositionAppBar();
+    }
+
+    private void PositionAppBar()
+    {
+        if (!_registered || IsDisposed || !IsHandleCreated) return;
+        var previousDpiContext = NativeMethods.SetThreadDpiAwarenessContext(
+            NativeMethods.DpiAwarenessContextPerMonitorAwareV2);
+        try
+        {
+            var data = CreateAppBarData();
+            var targetDpi = DisplayScale.DpiFor(_screen, DeviceDpi);
+            var dpiScale = Math.Max(1F, targetDpi / 96F);
+            var visualScale = DisplayScale.For(_screen, targetDpi);
+            var visualDockHeight = (int)Math.Round(48 * visualScale);
+            var nativeDockHeight = (int)Math.Round(48 * dpiScale);
+            var gap = (visualDockHeight - nativeDockHeight) + (int)Math.Round(LogicalGap * visualScale);
+            data.Bounds = new NativeMethods.Rect
+            {
+                Left = _screen.Bounds.Left,
+                Top = _screen.Bounds.Top,
+                Right = _screen.Bounds.Right,
+                Bottom = _screen.Bounds.Bottom
+            };
+            NativeMethods.SHAppBarMessage(NativeMethods.AbmQueryPos, ref data);
+            data.Bounds.Top = data.Bounds.Bottom - gap;
+            NativeMethods.SHAppBarMessage(NativeMethods.AbmSetPos, ref data);
+            NativeMethods.SetWindowPos(
+                Handle,
+                NativeMethods.HwndTopMost,
+                data.Bounds.Left,
+                data.Bounds.Top,
+                data.Bounds.Right - data.Bounds.Left,
+                data.Bounds.Bottom - data.Bounds.Top,
+                NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+            Invalidate();
+        }
+        finally
+        {
+            if (previousDpiContext != IntPtr.Zero)
+            {
+                NativeMethods.SetThreadDpiAwarenessContext(previousDpiContext);
+            }
+        }
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -233,6 +278,16 @@ internal sealed class WorkAreaGapForm : Form
 
     protected override void WndProc(ref Message message)
     {
+        if (_taskbarCreatedMessage != 0 && message.Msg == _taskbarCreatedMessage)
+        {
+            _registered = false;
+            QueuePosition(register: true);
+        }
+        else if (_callbackMessage != 0 && message.Msg == _callbackMessage &&
+                 message.WParam.ToInt32() == NativeMethods.AbnPosChanged)
+        {
+            QueuePosition(register: false);
+        }
         if (message.Msg == WmNcHitTest)
         {
             message.Result = HtTransparent;
@@ -241,8 +296,94 @@ internal sealed class WorkAreaGapForm : Form
         base.WndProc(ref message);
     }
 
+    private void QueuePosition(bool register)
+    {
+        if (_positionPending || IsDisposed) return;
+        _positionPending = true;
+        try
+        {
+            BeginInvoke(new Action(() =>
+            {
+                _positionPending = false;
+                if (register)
+                {
+                    RegisterAndPosition();
+                    BeginSettle();
+                }
+                else
+                {
+                    PositionAppBar();
+                }
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            _positionPending = false;
+        }
+    }
+
+    private void BeginSettle()
+    {
+        _remainingSettleAttempts = 20;
+        _stableSettleSamples = 0;
+        _settleTimer.Start();
+    }
+
+    private void SettlePosition()
+    {
+        if (IsDisposed || !_registered)
+        {
+            _settleTimer.Stop();
+            return;
+        }
+
+        var expectedReservation = ExpectedReservation();
+        var actualReservation = _screen.Bounds.Bottom - _screen.WorkingArea.Bottom;
+        if (actualReservation == expectedReservation)
+        {
+            if (++_stableSettleSamples >= 2) _settleTimer.Stop();
+            return;
+        }
+
+        _stableSettleSamples = 0;
+        if (_remainingSettleAttempts % 2 == 0) ReRegisterAppBar();
+        else PositionAppBar();
+        if (--_remainingSettleAttempts <= 0) _settleTimer.Stop();
+    }
+
+    public void EnsureReserved()
+    {
+        if (!_registered || _settleTimer.Enabled || IsDisposed) return;
+        var actualReservation = _screen.Bounds.Bottom - _screen.WorkingArea.Bottom;
+        if (actualReservation != ExpectedReservation()) BeginSettle();
+    }
+
+    private int ExpectedReservation()
+    {
+        var targetDpi = DisplayScale.DpiFor(_screen, DeviceDpi);
+        var visualScale = DisplayScale.For(_screen, targetDpi);
+        return (int)Math.Round(48 * visualScale) +
+               (int)Math.Round(LogicalGap * visualScale);
+    }
+
+    private void ReRegisterAppBar()
+    {
+        if (_registered && IsHandleCreated)
+        {
+            var removal = CreateAppBarData();
+            NativeMethods.SHAppBarMessage(NativeMethods.AbmRemove, ref removal);
+            _registered = false;
+        }
+        RegisterAndPosition();
+    }
+
     protected override void Dispose(bool disposing)
     {
+        if (disposing)
+        {
+            _settleTimer.Stop();
+            _settleTimer.Dispose();
+        }
         if (_registered && IsHandleCreated)
         {
             var data = CreateAppBarData();
@@ -290,7 +431,8 @@ internal sealed class DockBackdropForm : Form
 
     private void PositionBackdrop()
     {
-        var height = (int)Math.Round(LogicalHeight * DeviceDpi / 96f);
+        var targetDpi = DisplayScale.DpiFor(_screen, DeviceDpi);
+        var height = (int)Math.Round(LogicalHeight * DisplayScale.For(_screen, targetDpi));
         Bounds = new Rectangle(_screen.Bounds.Left, _screen.Bounds.Bottom - height, _screen.Bounds.Width, height);
         Invalidate();
     }
@@ -322,6 +464,7 @@ internal sealed class DockForm : Form
     private readonly FlowLayoutPanel _items;
     private readonly System.Windows.Forms.Timer _stateTimer = new() { Interval = 3000 };
     private Rectangle _frame;
+    private float _visualScale = 1F;
 
     public DockForm(Screen screen, IReadOnlyList<PinnedApp> apps, bool preview)
     {
@@ -370,16 +513,20 @@ internal sealed class DockForm : Form
 
     private void PositionDock()
     {
-        var scale = DeviceDpi / 96f;
+        var targetDpi = DisplayScale.DpiFor(_screen, DeviceDpi);
+        var scale = DisplayScale.For(_screen, targetDpi);
+        _visualScale = scale;
         var height = (int)Math.Round(LogicalHeight * scale);
         Location = new Point(_screen.Bounds.Left, _screen.Bounds.Bottom - height);
         Size = new Size(_screen.Bounds.Width, height);
         var contentWidth = _items.Controls.Count * (int)Math.Round(SlotWidth * scale);
         var frameWidth = contentWidth + (int)Math.Round(HorizontalPadding * 2 * scale);
         var frameHeight = (int)Math.Round(42 * scale);
+        if ((height - frameHeight) % 2 != 0) frameHeight--;
         _frame = new Rectangle((Width - frameWidth) / 2, (Height - frameHeight) / 2, frameWidth, frameHeight);
         foreach (DockButton button in _items.Controls)
         {
+            button.SetVisualScale(scale);
             button.Width = (int)Math.Round(SlotWidth * scale);
             button.Height = frameHeight - (int)Math.Round(4 * scale);
         }
@@ -394,12 +541,13 @@ internal sealed class DockForm : Form
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         WallpaperSlice.Draw(e.Graphics, ClientRectangle, _screen.Bounds, Bounds.Top);
         if (_frame.Width <= 0 || _frame.Height <= 0) return;
-        using var framePath = Rounded(_frame, (int)Math.Round(14 * DeviceDpi / 96f));
+        using var framePath = Rounded(_frame, (int)Math.Round(14 * _visualScale));
         using var brush = new LinearGradientBrush(_frame, Color.FromArgb(250, 38, 44, 52), Color.FromArgb(252, 15, 18, 23), LinearGradientMode.Vertical);
         e.Graphics.FillPath(brush, framePath);
-        using var top = new Pen(Color.FromArgb(150, 137, 151, 166), Math.Max(1, DeviceDpi / 96f));
-        e.Graphics.DrawLine(top, _frame.Left + 15, _frame.Top + 1, _frame.Right - 15, _frame.Top + 1);
-        using var edge = new Pen(Color.FromArgb(110, 83, 96, 110), Math.Max(1, DeviceDpi / 96f));
+        var edgeInset = (int)Math.Round(15 * _visualScale);
+        using var top = new Pen(Color.FromArgb(150, 137, 151, 166), Math.Max(1, _visualScale));
+        e.Graphics.DrawLine(top, _frame.Left + edgeInset, _frame.Top + 1, _frame.Right - edgeInset, _frame.Top + 1);
+        using var edge = new Pen(Color.FromArgb(110, 83, 96, 110), Math.Max(1, _visualScale));
         e.Graphics.DrawArc(edge, _frame.Left, _frame.Top, _frame.Height, _frame.Height, 90, 180);
         e.Graphics.DrawArc(edge, _frame.Right - _frame.Height, _frame.Top, _frame.Height, _frame.Height, 270, 180);
         e.Graphics.DrawLine(edge, _frame.Left + _frame.Height / 2, _frame.Bottom - 1, _frame.Right - _frame.Height / 2, _frame.Bottom - 1);
@@ -475,17 +623,46 @@ internal static class WallpaperSlice
     }
 }
 
+internal static class DisplayScale
+{
+    public static int DpiFor(Screen screen, int fallback)
+    {
+        try
+        {
+            var center = new NativeMethods.NativePoint
+            {
+                X = screen.Bounds.Left + screen.Bounds.Width / 2,
+                Y = screen.Bounds.Top + screen.Bounds.Height / 2
+            };
+            var monitor = NativeMethods.MonitorFromPoint(center, 2);
+            if (monitor != IntPtr.Zero &&
+                NativeMethods.GetDpiForMonitor(monitor, 0, out var dpiX, out _) == 0 &&
+                dpiX >= 96)
+            {
+                return (int)dpiX;
+            }
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+        return Math.Max(96, fallback);
+    }
+
+    public static float For(Screen screen, int dpi) =>
+        Math.Max(Math.Max(1F, dpi / 96F), screen.Primary ? 1F : 1.25F);
+}
+
 internal sealed class DockButton : Control
 {
     private readonly PinnedApp _app;
     private readonly Image? _icon;
+    private float _visualScale = 1F;
     private bool _running;
     private bool _hover;
 
     public DockButton(PinnedApp app, int iconSize)
     {
         _app = app;
-        _icon = app.LoadIcon(iconSize * 2);
+        _icon = app.LoadIcon(iconSize * 3);
         SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         BackColor = Color.Transparent;
         Cursor = Cursors.Hand;
@@ -498,10 +675,19 @@ internal sealed class DockButton : Control
 
     public void RefreshState(IReadOnlySet<string> processes) { var running = _app.IsRunning(processes); if (running != _running) { _running = running; Invalidate(); } }
 
+    public void SetVisualScale(float value)
+    {
+        if (Math.Abs(_visualScale - value) < 0.01F) return;
+        _visualScale = value;
+        Invalidate();
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        var scale = DeviceDpi / 96f;
+        e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        var scale = _visualScale;
         if (_hover)
         {
             using var hover = new SolidBrush(Color.FromArgb(32, 255, 255, 255));
@@ -586,12 +772,22 @@ internal sealed class PinnedApp
 
     public Image? LoadIcon(int size)
     {
+        var overridePath = Path.Combine(AppContext.BaseDirectory, "Assets", "Dock", $"{Name}.png");
+        if (File.Exists(overridePath))
+        {
+            try
+            {
+                using var overrideImage = Image.FromFile(overridePath);
+                return new Bitmap(overrideImage);
+            }
+            catch (ArgumentException) { }
+        }
         if (Name.Equals("File Explorer", StringComparison.OrdinalIgnoreCase))
         {
             var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
             return LoadFileIcon(explorer, size);
         }
-        if (AppId is not null && Shortcut is null)
+        if (AppId is not null)
         {
             var packaged = LoadShellItemIcon($"shell:AppsFolder\\{AppId}", size);
             if (packaged is not null) return packaged;
@@ -600,7 +796,7 @@ internal sealed class PinnedApp
         source ??= Shortcut;
         source ??= AppId is null ? null : $"shell:AppsFolder\\{AppId}";
         if (source is null) return null;
-        return LoadFileIcon(source, size);
+        return LoadShellItemIcon(source, size) ?? LoadFileIcon(source, size);
     }
 
     private static Image? LoadFileIcon(string source, int size)

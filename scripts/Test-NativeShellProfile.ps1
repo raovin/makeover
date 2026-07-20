@@ -79,6 +79,10 @@ $windhawkService = Get-Service -Name Windhawk -ErrorAction SilentlyContinue
 if ($windhawkService -and ($windhawkService.Status -eq 'Running' -or $windhawkService.StartType -eq 'Automatic')) {
   $failures.Add('Windhawk service must remain stopped and non-automatic in the production profile.')
 }
+$windhawkUiTask = Get-ScheduledTask -TaskName 'WindhawkRunUITask' -ErrorAction SilentlyContinue
+if ($windhawkUiTask -and $windhawkUiTask.State -ne 'Disabled') {
+  $failures.Add('Windhawk UI recovery task must remain disabled in the production profile.')
+}
 $advancedSearch = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name SearchboxTaskbarMode -ErrorAction SilentlyContinue).SearchboxTaskbarMode
 $searchSettings = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -ErrorAction SilentlyContinue
 if ($advancedSearch -ne 0 -or

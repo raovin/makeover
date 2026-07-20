@@ -13,10 +13,15 @@ internal static class NativeMethods
     public const int AbmRemove = 1;
     public const int AbmQueryPos = 2;
     public const int AbmSetPos = 3;
+    public const int AbnPosChanged = 1;
     public const int AbeBottom = 3;
     public const int SwHide = 0;
     public const int SwShow = 5;
     public const int SwRestore = 9;
+    public static readonly IntPtr HwndTopMost = new(-1);
+    public static readonly IntPtr DpiAwarenessContextPerMonitorAwareV2 = new(-4);
+    public const uint SwpNoActivate = 0x0010;
+    public const uint SwpShowWindow = 0x0040;
     public const uint ShgfiIcon = 0x100;
     public const uint ShgfiLargeIcon = 0;
 
@@ -33,6 +38,8 @@ internal static class NativeMethods
     public struct AppBarData { public int Size; public IntPtr Window; public uint CallbackMessage; public uint Edge; public Rect Bounds; public IntPtr Parameter; }
     [StructLayout(LayoutKind.Sequential)]
     public struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativePoint { public int X; public int Y; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct ShFileInfo { public IntPtr Icon; public int IconIndex; public uint Attributes; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string DisplayName; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string TypeName; }
 
@@ -48,6 +55,10 @@ internal static class NativeMethods
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(NativePoint point, uint flags);
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr icon);
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr handle);

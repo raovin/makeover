@@ -92,7 +92,7 @@ if (-not (Test-Path -LiteralPath $statePath)) {
 # Older native-profile snapshots predate the second Search registry location.
 # Backfill it before changing live state so rollback remains lossless.
 $savedState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json -AsHashtable
-if (-not $savedState.ContainsKey('search')) {
+if (-not $savedState.Contains('search')) {
   $savedState.search = [ordered]@{}
   foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
     $savedState.search[$name] = Get-RegistryValueSnapshot $searchKey $name
@@ -102,8 +102,8 @@ if (-not $savedState.ContainsKey('search')) {
     ($savedState | ConvertTo-Json -Depth 8),
     (New-Object System.Text.UTF8Encoding($false)))
 }
-if (-not $savedState.ContainsKey('run')) { $savedState.run = [ordered]@{} }
-if (-not $savedState.run.ContainsKey('MacMakeoverDock')) {
+if (-not $savedState.Contains('run')) { $savedState.run = [ordered]@{} }
+if (-not $savedState.run.Contains('MacMakeoverDock')) {
   $savedState.run.MacMakeoverDock = Get-RegistryValueSnapshot $runKey 'MacMakeoverDock'
   [System.IO.File]::WriteAllText(
     $statePath,

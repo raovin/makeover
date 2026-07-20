@@ -10,6 +10,7 @@ $preparedPath = Join-Path $stateRoot 'user-profile-prepared.json'
 $systemPath = Join-Path $stateRoot 'system-profile-enabled.json'
 $seelenTaskPath = '\Seelen\'
 $seelenTaskName = 'Seelen UI Service'
+$windhawkUiTaskName = 'WindhawkRunUITask'
 
 if (-not (Test-Path -LiteralPath $preparedPath)) {
   throw 'The unelevated user-profile preparation has not completed.'
@@ -18,11 +19,17 @@ if (-not (Test-Path -LiteralPath $preparedPath)) {
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 Remove-Item -LiteralPath $systemPath -Force -ErrorAction SilentlyContinue
 $seelenTask = Get-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction SilentlyContinue
+$windhawkUiTask = Get-ScheduledTask -TaskName $windhawkUiTaskName -ErrorAction SilentlyContinue
+$windhawkUiTaskWasEnabled = [bool]($windhawkUiTask -and $windhawkUiTask.Settings.Enabled)
 
 try {
   & (Join-Path $PSScriptRoot 'Install-NativeDock.ps1') -Disable
   Stop-Service -Name Windhawk -Force -ErrorAction SilentlyContinue
   Set-Service -Name Windhawk -StartupType Manual -ErrorAction SilentlyContinue
+  if ($windhawkUiTask) {
+    Stop-ScheduledTask -TaskName $windhawkUiTaskName -ErrorAction SilentlyContinue
+    Disable-ScheduledTask -TaskName $windhawkUiTaskName | Out-Null
+  }
 
   if ($seelenTask) {
     Stop-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction SilentlyContinue
@@ -36,6 +43,8 @@ try {
   $result = [ordered]@{
     enabledAt = (Get-Date).ToString('o')
     seelenTaskExisted = [bool]$seelenTask
+    windhawkUiTaskExisted = [bool]$windhawkUiTask
+    windhawkUiTaskWasEnabled = $windhawkUiTaskWasEnabled
   } | ConvertTo-Json
   [System.IO.File]::WriteAllText($systemPath, $result, (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -45,6 +54,9 @@ catch {
   if ($seelenTask) {
     Enable-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction SilentlyContinue | Out-Null
     Start-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName -ErrorAction SilentlyContinue
+  }
+  if ($windhawkUiTaskWasEnabled) {
+    Enable-ScheduledTask -TaskName $windhawkUiTaskName -ErrorAction SilentlyContinue | Out-Null
   }
   throw
 }

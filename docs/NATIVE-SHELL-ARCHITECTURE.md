@@ -31,8 +31,9 @@ The current visual target is captured in
 - Left: Apple mark and focused application.
 - Center: CPU, RAM, best-route network throughput, and combined battery state.
 - Right: actual connection type, Bluetooth, volume, Control Center, date, and bell.
-- Manrope is loaded privately for labels and JetBrains Mono for telemetry; both
-  ship with their OFL texts and fall back to Segoe/Cascadia if an asset is damaged.
+- Segoe UI Variable Text and its native semibold face render every text cluster on
+  one baseline. Native hinting keeps the 100% external display as crisp as the
+  150% laptop panel; geometry and type receive separate optical scaling.
 - Exact top-left and top-right corners toggle Show Desktop.
 - The bar remains visible for ordinary and fullscreen windows; hiding it proved too
   easy to misclassify and was removed as a reliability risk.
@@ -73,9 +74,12 @@ logical icons in deterministic 44 px slots, and paints live running dots from a
 single process snapshot every three seconds. Clicking an item focuses a matching
 window or asks the shell to launch the pinned app.
 
-Windows' native taskbar remains the owner of the reserved 48 px bottom work area but
-is visually hidden while the dock runs. This keeps maximized windows above the dock
-without a second AppBar reservation. Graceful shutdown restores every native taskbar.
+Windows' native taskbar remains the owner of its 48 px bottom work area and is
+visually hidden while the dock runs. A transparent `WorkAreaGapForm` AppBar reserves
+only the additional optical-scale height and breathing room required by the custom
+dock. It reacts to AppBar position changes, re-registers after Explorer starts, and
+uses bounded startup settling plus the existing taskbar guard to repair a dropped
+reservation. Graceful shutdown removes the gap and restores every native taskbar.
 The dock has no custom task switcher, window mover, or Explorer injection. Windhawk's
 taskbar styler remains installed as rollback material, disabled with its service manual.
 
