@@ -49,7 +49,11 @@ internal static class Program
                MenuBarForm.PowerSourceLabel(charging) == "Charging 42%" &&
                MenuBarForm.PowerModeLabel(charging.PowerMode) == "High performance" &&
                MenuBarForm.PowerSourceLabel(pluggedIn) == "Plugged in 100%" &&
-               MenuBarForm.PowerModeLabel(pluggedIn.PowerMode) == "Balanced";
+               MenuBarForm.PowerModeLabel(pluggedIn.PowerMode) == "Balanced" &&
+               MenuBarForm.IsShowDesktopCorner(new Point(0, 0), new Size(1280, 20), 8) &&
+               MenuBarForm.IsShowDesktopCorner(new Point(1279, 0), new Size(1280, 20), 8) &&
+               !MenuBarForm.IsShowDesktopCorner(new Point(8, 0), new Size(1280, 20), 8) &&
+               !MenuBarForm.IsShowDesktopCorner(new Point(1271, 8), new Size(1280, 20), 8);
     }
 }
 

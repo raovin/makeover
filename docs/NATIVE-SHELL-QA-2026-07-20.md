@@ -30,11 +30,13 @@ and remains local by repository policy.
   icon without painting the former grey rollover tile.
 - Apple, Network, Bluetooth, and Control Center each rendered their independent
   panel without a console window, stale panel, or duplicate MenuHost process.
+- The native menu bar owns an eight-logical-pixel Show Desktop target at both top
+  corners, matching the former Seelen interaction without a polling helper.
 - The minimized-desktop pass uses the exact 6016 px `Big Sur (Day)` image recovered
   from the archived Seelen collection. Installer and live-profile checks compare its
   SHA-256 hash so the former generated gradient cannot replace it during upgrades.
-  The installer also clears the stale `DesktopPreto.png` user-policy override and
-  assigns the managed image to every Windows virtual desktop.
+  The installer also backs up and reconciles the MDM-mandated `DesktopPreto.png`
+  target, then assigns the managed image to every Windows virtual desktop.
 - Power telemetry now distinguishes `Battery`, `Charging`, and `Plugged in` from
   the real Windows power-line state. A separate label distinguishes `Power saver`,
   `Balanced`, and `High performance`; all three deterministic fixtures rendered
@@ -74,7 +76,9 @@ and remains local by repository policy.
 
 ## Privileged Promotion
 
-The elevated promotion completed successfully. It removed the protected
-`DesktopPreto.png` wallpaper policy, disabled the administrator-owned Windhawk and
-hot-corner startup paths, and left no Seelen, Windhawk, or YASB process active. Two
-subsequent normal-token shell promotions and the final live-profile test passed.
+The elevated promotion completed successfully. It preserves the protected MDM
+policy while replacing its local `DesktopPreto.png` target with a managed Big Sur
+derivative and changing that provider's local style to edge-to-edge Fill; rollback
+restores both the backed-up image and provider value. It also disables the
+administrator-owned Windhawk and hot-corner startup paths and leaves no Seelen,
+Windhawk, or YASB process active.

@@ -53,15 +53,38 @@ function Set-MacWallpaper {
   }
   $targetRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\wallpapers'
   $target = Join-Path $targetRoot 'mac-wallpaper.jpg'
+  $policyTarget = Join-Path $targetRoot 'mac-wallpaper-policy.png'
   New-Item -ItemType Directory -Force -Path $targetRoot | Out-Null
   Copy-Item -LiteralPath $source -Destination $target -Force
+
+  Add-Type -AssemblyName System.Drawing.Common
+  $sourceImage = [Drawing.Image]::FromFile($source)
   try {
-    foreach ($name in 'Wallpaper', 'WallpaperStyle') {
-      Remove-ItemProperty -LiteralPath $desktopPolicyPath -Name $name -ErrorAction Stop
+    $scale = [Math]::Min(1.0, 2560.0 / [Math]::Max($sourceImage.Width, $sourceImage.Height))
+    $width = [Math]::Max(1, [int][Math]::Round($sourceImage.Width * $scale))
+    $height = [Math]::Max(1, [int][Math]::Round($sourceImage.Height * $scale))
+    $policyImage = [Drawing.Bitmap]::new($width, $height, [Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    try {
+      $graphics = [Drawing.Graphics]::FromImage($policyImage)
+      try {
+        $graphics.CompositingQuality = [Drawing.Drawing2D.CompositingQuality]::HighQuality
+        $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $graphics.DrawImage($sourceImage, [Drawing.Rectangle]::new(0, 0, $width, $height))
+      } finally {
+        $graphics.Dispose()
+      }
+      $policyImage.Save($policyTarget, [Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+      $policyImage.Dispose()
     }
-  } catch {
-    if ($_.Exception.Message -notmatch 'registry access is not allowed|access.*denied') { throw }
-    Write-Warning 'The SYSTEM-owned wallpaper policy will be cleared by the privileged promotion phase.'
+  } finally {
+    $sourceImage.Dispose()
+  }
+
+  $policyProperty = Get-ItemProperty -LiteralPath $desktopPolicyPath -Name Wallpaper -ErrorAction SilentlyContinue
+  if ($policyProperty -and $policyProperty.PSObject.Properties['Wallpaper'].Value) {
+    Write-Warning 'The active MDM wallpaper image will be reconciled by the privileged promotion phase.'
   }
   Get-ChildItem -LiteralPath $virtualDesktopsPath -ErrorAction SilentlyContinue | ForEach-Object {
     Set-ItemProperty -LiteralPath $_.PSPath -Name Wallpaper -Value $target -Type String
@@ -216,6 +239,10 @@ New-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuHost -Value ('"{0}"' 
 New-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar -Value ('"{0}"' -f $menuBar) -PropertyType String -Force | Out-Null
 New-ItemProperty -LiteralPath $runKey -Name MacMakeoverDock -Value ('"{0}"' -f $dock) -PropertyType String -Force | Out-Null
 
-$prepared = [ordered]@{ preparedAt = (Get-Date).ToString('o'); deploymentRoot = $deploymentRoot } | ConvertTo-Json
+$prepared = [ordered]@{
+  preparedAt = (Get-Date).ToString('o')
+  deploymentRoot = $deploymentRoot
+  policyWallpaper = (Join-Path $env:LOCALAPPDATA 'MacMakeover\wallpapers\mac-wallpaper-policy.png')
+} | ConvertTo-Json
 [System.IO.File]::WriteAllText($preparedPath, $prepared, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host 'Unelevated native-shell user profile prepared.'

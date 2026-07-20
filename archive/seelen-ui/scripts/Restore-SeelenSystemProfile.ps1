@@ -32,6 +32,20 @@ if (Test-Path -LiteralPath $systemStatePath) {
   if ($systemState.windhawkUiTaskExisted -and $systemState.windhawkUiTaskWasEnabled) {
     Enable-ScheduledTask -TaskName 'WindhawkRunUITask' -ErrorAction SilentlyContinue | Out-Null
   }
+  if ($systemState.PSObject.Properties.Name -contains 'policyWallpaperPath' -and
+      $systemState.PSObject.Properties.Name -contains 'policyWallpaperBackup' -and
+      (Test-Path -LiteralPath ([string]$systemState.policyWallpaperBackup))) {
+    Copy-Item -LiteralPath ([string]$systemState.policyWallpaperBackup) `
+      -Destination ([string]$systemState.policyWallpaperPath) -Force
+  }
+  if ($systemState.PSObject.Properties.Name -contains 'policyManagerProviderPath' -and
+      $systemState.PSObject.Properties.Name -contains 'policyManagerProviderBackup' -and
+      $systemState.policyManagerProviderPath -and
+      (Test-Path -LiteralPath ([string]$systemState.policyManagerProviderBackup))) {
+    $providerWallpaper = Get-Content -LiteralPath ([string]$systemState.policyManagerProviderBackup) -Raw
+    Set-ItemProperty -LiteralPath ([string]$systemState.policyManagerProviderPath) `
+      -Name Wallpaper -Value $providerWallpaper -Type String
+  }
 }
 if (Test-Path -LiteralPath $userStatePath) {
   $userState = Get-Content -LiteralPath $userStatePath -Raw | ConvertFrom-Json

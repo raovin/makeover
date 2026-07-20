@@ -83,6 +83,7 @@ $switchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Switch-To-Nat
 $menuHostSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\Program.cs') -Raw
 $buildSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Raw
 $prepareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Prepare-NativeShellUserProfile.ps1') -Raw
+$completeSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Complete-NativeShellPromotion.ps1') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
 if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
   $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
@@ -108,12 +109,22 @@ if ($menuBarSource -match '\\u26A1' -or
     $menuBarSource -notmatch 'DrawChargingBolt') {
   $failures.Add('MenuBar charging state has regressed to the cramped font glyph or marks plugged-in batteries as charging.')
 }
+if ($menuBarSource -notmatch 'LogicalCornerHitSize = 8' -or
+    $menuBarSource -notmatch 'IsShowDesktopCorner\(e\.Location') {
+  $failures.Add('MenuBar no longer preserves the Seelen-sized Show Desktop corner hit target.')
+}
 if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
   $failures.Add('Profile preparation uses Hashtable-only ContainsKey on ConvertFrom-Json ordered dictionaries.')
 }
-if ($switchSource -notmatch 'Remove-ItemProperty.+desktopPolicyPath' -or
+if ($completeSource -notmatch '\$LASTEXITCODE -ne 0') {
+  $failures.Add('Native-shell completion can report acceptance after a failed live-profile check.')
+}
+if ($switchSource -notmatch 'policyWallpaperManagedHash' -or
+    $switchSource -notmatch 'WallpaperStyle.*value=.*10' -or
+    $switchSource -notmatch 'policyManagerProviderPath' -or
+    $prepareSource -notmatch 'mac-wallpaper-policy\.png' -or
     $prepareSource -notmatch 'virtualDesktopsPath') {
-  $failures.Add('Wallpaper deployment no longer clears policy overrides or updates virtual desktops.')
+  $failures.Add('Wallpaper deployment no longer reconciles the MDM target/provider or updates virtual desktops.')
 }
 if ($switchSource -notmatch 'windhawkUiTaskWasEnabled') {
   $failures.Add('Privileged promotion no longer preserves the Windhawk UI task rollback state.')

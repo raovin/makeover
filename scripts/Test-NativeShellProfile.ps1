@@ -177,13 +177,44 @@ if ($wallpaper -notmatch 'MacMakeover\\wallpapers\\mac-wallpaper\.jpg$' -or -not
   }
 }
 $wallpaperPolicy = $null
+$wallpaperPolicyStyle = $null
+$validWallpaperPaths = [System.Collections.Generic.List[string]]::new()
+if ($wallpaper) { $validWallpaperPaths.Add([IO.Path]::GetFullPath($wallpaper)) }
 $wallpaperPolicyProperty = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System' `
-  -Name Wallpaper -ErrorAction SilentlyContinue
+  -Name Wallpaper, WallpaperStyle -ErrorAction SilentlyContinue
 if ($wallpaperPolicyProperty) {
   $wallpaperPolicy = $wallpaperPolicyProperty.PSObject.Properties['Wallpaper'].Value
+  $wallpaperPolicyStyleProperty = $wallpaperPolicyProperty.PSObject.Properties['WallpaperStyle']
+  if ($wallpaperPolicyStyleProperty) { $wallpaperPolicyStyle = [string]$wallpaperPolicyStyleProperty.Value }
 }
 if (-not [string]::IsNullOrWhiteSpace($wallpaperPolicy)) {
-  $failures.Add("A per-user policy still overrides the managed wallpaper: $wallpaperPolicy")
+  $managedPolicyWallpaper = Join-Path $env:LOCALAPPDATA 'MacMakeover\wallpapers\mac-wallpaper-policy.png'
+  if (-not (Test-Path -LiteralPath $wallpaperPolicy) -or
+      -not (Test-Path -LiteralPath $managedPolicyWallpaper) -or
+      (Get-FileHash -LiteralPath $wallpaperPolicy -Algorithm SHA256).Hash -ne
+      (Get-FileHash -LiteralPath $managedPolicyWallpaper -Algorithm SHA256).Hash) {
+    $failures.Add("The active MDM policy does not resolve to the managed Big Sur wallpaper: $wallpaperPolicy")
+  } else {
+    $validWallpaperPaths.Add([IO.Path]::GetFullPath($wallpaperPolicy))
+  }
+  if ($wallpaperPolicyStyle -ne '10') {
+    $failures.Add("The active MDM wallpaper is not configured for edge-to-edge Fill: $wallpaperPolicyStyle")
+  }
+
+  $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $policyManagerCurrentPath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PolicyManager\current\$userSid\ADMX_Desktop"
+  $policyManagerCurrent = Get-ItemProperty -LiteralPath $policyManagerCurrentPath -ErrorAction SilentlyContinue
+  $instanceDataProperty = if ($policyManagerCurrent) {
+    $policyManagerCurrent.PSObject.Properties['Wallpaper_ADMXInstanceData']
+  } else { $null }
+  if ($instanceDataProperty) {
+    $providerPath = "Registry::HKEY_LOCAL_MACHINE\$($instanceDataProperty.Value)"
+    $provider = Get-ItemProperty -LiteralPath $providerPath -ErrorAction SilentlyContinue
+    $providerWallpaperProperty = if ($provider) { $provider.PSObject.Properties['Wallpaper'] } else { $null }
+    if (-not $providerWallpaperProperty -or [string]$providerWallpaperProperty.Value -notmatch 'WallpaperStyle" value="10"') {
+      $failures.Add('The MDM provider source can reapply a non-Fill wallpaper style.')
+    }
+  }
 }
 $virtualDesktopWallpapers = Get-ChildItem `
   'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops' `
@@ -193,7 +224,9 @@ $virtualDesktopWallpapers = Get-ChildItem `
       $desktopWallpaperProperty.PSObject.Properties['Wallpaper'].Value
     }
   }
-if ($virtualDesktopWallpapers | Where-Object { $_ -and $_ -ne $wallpaper }) {
+if ($virtualDesktopWallpapers | Where-Object {
+    $_ -and -not $validWallpaperPaths.Contains([IO.Path]::GetFullPath([string]$_))
+  }) {
   $failures.Add('One or more virtual desktops still override the managed Big Sur wallpaper.')
 }
 

@@ -41,5 +41,8 @@ Start-Process -FilePath $dock -WindowStyle Hidden
 Start-Sleep -Seconds 6
 
 & (Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1')
+if ($LASTEXITCODE -ne 0 -or -not $?) {
+  throw 'Native-shell profile verification failed after promotion.'
+}
 
 Write-Host 'Native replacement promoted and accepted.'

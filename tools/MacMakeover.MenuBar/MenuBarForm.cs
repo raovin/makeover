@@ -19,6 +19,7 @@ internal enum BarAction
 internal sealed class MenuBarForm : Form
 {
     private const int LogicalHeight = 20;
+    private const int LogicalCornerHitSize = 8;
     private readonly Screen _screen;
     private readonly SystemStateProvider _state;
     private readonly bool _preview;
@@ -516,8 +517,9 @@ internal sealed class MenuBarForm : Form
     private void OnMouseUp(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
-        if (e.X <= Scale(2) || e.X >= Width - Scale(2))
+        if (IsShowDesktopCorner(e.Location, ClientSize, Scale(LogicalCornerHitSize)))
         {
+            AppLog.Write($"Show Desktop corner clicked on {_screen.DeviceName}: x={e.X} width={Width}");
             MenuRouter.Send("desktop");
             return;
         }
@@ -546,6 +548,11 @@ internal sealed class MenuBarForm : Form
                 break;
         }
     }
+
+    internal static bool IsShowDesktopCorner(Point location, Size clientSize, int hitSize) =>
+        location.Y >= 0 && location.Y < hitSize &&
+        (location.X >= 0 && location.X < hitSize ||
+         location.X >= clientSize.Width - hitSize && location.X < clientSize.Width);
 
     private void OnMouseWheel(object? sender, MouseEventArgs e)
     {
