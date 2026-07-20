@@ -267,7 +267,7 @@ internal sealed class SystemStateProvider : IDisposable
                 return _lastActiveApp;
             }
 
-            _lastActiveApp = FriendlyAppName(processName, process.MainWindowTitle);
+            _lastActiveApp = FriendlyAppName(processName, process.MainWindowTitle, ReadExecutableDescription(process));
         }
         catch
         {
@@ -276,12 +276,26 @@ internal sealed class SystemStateProvider : IDisposable
         return _lastActiveApp;
     }
 
-    private static string FriendlyAppName(string processName, string title)
+    private static string ReadExecutableDescription(Process process)
+    {
+        try
+        {
+            return process.MainModule?.FileVersionInfo.FileDescription?.Trim() ?? string.Empty;
+        }
+        catch
+        {
+            // Protected and packaged processes can deny MainModule access.
+            return string.Empty;
+        }
+    }
+
+    internal static string FriendlyAppName(string processName, string title, string executableDescription = "")
     {
         var mapped = processName.ToLowerInvariant() switch
         {
             "explorer" => "Finder",
             "applicationframehost" => FirstTitleSegment(title),
+            "notepad" => "Notepad",
             "msedge" => "Microsoft Edge",
             "chrome" => "Google Chrome",
             "firefox" => "Firefox",
@@ -295,7 +309,7 @@ internal sealed class SystemStateProvider : IDisposable
             "outlook" or "olk" => "Outlook",
             "claude" => "Claude",
             "codex" => "Codex",
-            _ => FirstTitleSegment(title)
+            _ => executableDescription
         };
         if (string.IsNullOrWhiteSpace(mapped)) mapped = processName;
         return mapped.Length > 32 ? mapped[..29] + "..." : mapped;

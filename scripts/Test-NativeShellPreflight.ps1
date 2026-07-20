@@ -114,6 +114,11 @@ if ($menuBarSource -notmatch 'LogicalCornerHitSize = 8' -or
     $menuBarSource -notmatch 'IsShowDesktopCorner\(e\.Location') {
   $failures.Add('MenuBar no longer preserves the Seelen-sized Show Desktop corner hit target.')
 }
+if ($systemStateSource -notmatch '"notepad" => "Notepad"' -or
+    $systemStateSource -notmatch '_ => executableDescription' -or
+    $systemStateSource -notmatch 'ReadExecutableDescription\(process\)') {
+  $failures.Add('MenuBar active-app identity has regressed to document-window titles instead of executable application names.')
+}
 if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
   $failures.Add('Profile preparation uses Hashtable-only ContainsKey on ConvertFrom-Json ordered dictionaries.')
 }

@@ -53,6 +53,10 @@ internal static class Program
                MenuBarForm.ShowsExternalPowerIndicator(pluggedIn) &&
                !MenuBarForm.ShowsExternalPowerIndicator(battery) &&
                MenuBarForm.PowerModeLabel(pluggedIn.PowerMode) == "Balanced" &&
+               SystemStateProvider.FriendlyAppName("notepad", "handover.txt - Notepad", "Notepad") == "Notepad" &&
+               SystemStateProvider.FriendlyAppName("acmeeditor", "Quarterly Plan.txt - Acme Editor", "Acme Editor") == "Acme Editor" &&
+               SystemStateProvider.FriendlyAppName("acmeeditor", "Quarterly Plan.txt - Acme Editor") == "acmeeditor" &&
+               SystemStateProvider.FriendlyAppName("ApplicationFrameHost", "Settings", "Application Frame Host") == "Settings" &&
                MenuBarForm.IsShowDesktopCorner(new Point(0, 0), new Size(1280, 20), 8) &&
                MenuBarForm.IsShowDesktopCorner(new Point(1279, 0), new Size(1280, 20), 8) &&
                !MenuBarForm.IsShowDesktopCorner(new Point(8, 0), new Size(1280, 20), 8) &&
