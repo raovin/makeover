@@ -197,7 +197,7 @@ if (-not [string]::IsNullOrWhiteSpace($wallpaperPolicy)) {
   } else {
     $validWallpaperPaths.Add([IO.Path]::GetFullPath($wallpaperPolicy))
   }
-  if ($wallpaperPolicyStyle -ne '10') {
+  if ($wallpaperPolicyStyle -ne '4') {
     $failures.Add("The active MDM wallpaper is not configured for edge-to-edge Fill: $wallpaperPolicyStyle")
   }
 
@@ -211,7 +211,7 @@ if (-not [string]::IsNullOrWhiteSpace($wallpaperPolicy)) {
     $providerPath = "Registry::HKEY_LOCAL_MACHINE\$($instanceDataProperty.Value)"
     $provider = Get-ItemProperty -LiteralPath $providerPath -ErrorAction SilentlyContinue
     $providerWallpaperProperty = if ($provider) { $provider.PSObject.Properties['Wallpaper'] } else { $null }
-    if (-not $providerWallpaperProperty -or [string]$providerWallpaperProperty.Value -notmatch 'WallpaperStyle" value="10"') {
+    if (-not $providerWallpaperProperty -or [string]$providerWallpaperProperty.Value -notmatch 'WallpaperStyle" value="4"') {
       $failures.Add('The MDM provider source can reapply a non-Fill wallpaper style.')
     }
   }
@@ -231,9 +231,18 @@ if ($virtualDesktopWallpapers | Where-Object {
 }
 
 $hotCornerProcesses = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
-  Where-Object { $_.CommandLine -match 'hot-corners\.ps1' }
+  Where-Object { $_.CommandLine -match '(?i)(?:^|\s)-File\s+["'']?[^"'']*start-hot-corners\.ps1(?:["'']|\s|$)' }
 if ($hotCornerProcesses) {
   $failures.Add('The polling hot-corner helper is still running.')
+}
+$hotCornerStartup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk'
+if (Test-Path -LiteralPath $hotCornerStartup) {
+  $failures.Add('The retired global hot-corner hook is still registered in the Startup folder.')
+}
+$wallpaperGuard = Get-ScheduledTask -TaskName 'MacMakeover Wallpaper Guard' -ErrorAction SilentlyContinue
+if (-not $wallpaperGuard -or -not $wallpaperGuard.Settings.Enabled -or
+    ($wallpaperGuard.Actions.Arguments -join ' ') -notmatch 'Repair-NativeWallpaperPolicy\.ps1') {
+  $failures.Add('The MDM wallpaper repair guard is not installed and enabled.')
 }
 
 $pinManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'config\native-taskbar-pins.json') -Raw |

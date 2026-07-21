@@ -83,6 +83,7 @@ internal sealed class MenuBarForm : Form
             else
             {
                 RegisterAppBar();
+                _ = ReassertAppBarAfterStartupAsync();
             }
             EnsureTopmost();
             AppLog.Write($"Shown {_screen.DeviceName} preview={_preview} bounds={Bounds} dpi={DeviceDpi}");
@@ -583,6 +584,18 @@ internal sealed class MenuBarForm : Form
             0,
             NativeMethods.SwpNoMove | NativeMethods.SwpNoSize |
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+    }
+
+    private async Task ReassertAppBarAfterStartupAsync()
+    {
+        foreach (var delay in new[] { 1000, 4000 })
+        {
+            await Task.Delay(delay);
+            if (IsDisposed || !IsHandleCreated || !_appBarRegistered) return;
+            PositionAppBar();
+            EnsureTopmost();
+            AppLog.Write($"Reasserted appbar {_screen.DeviceName} bounds={Bounds}");
+        }
     }
 
     private float DpiScale => Math.Max(1F, DeviceDpi / 96F);

@@ -29,6 +29,21 @@ $hotCorners = Get-ScheduledTask -TaskName 'MacMakeover Hot Corners Keepalive' -E
 if ($hotCorners) { Enable-ScheduledTask -TaskName 'MacMakeover Hot Corners Keepalive' -ErrorAction SilentlyContinue | Out-Null }
 if (Test-Path -LiteralPath $systemStatePath) {
   $systemState = Get-Content -LiteralPath $systemStatePath -Raw | ConvertFrom-Json
+  $wallpaperGuardTaskName = if ($systemState.PSObject.Properties.Name -contains 'wallpaperGuardTaskName') {
+    [string]$systemState.wallpaperGuardTaskName
+  } else { 'MacMakeover Wallpaper Guard' }
+  Unregister-ScheduledTask -TaskName $wallpaperGuardTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  if ($systemState.PSObject.Properties.Name -contains 'wallpaperGuardScript' -and
+      $systemState.wallpaperGuardScript -and
+      (Test-Path -LiteralPath ([string]$systemState.wallpaperGuardScript))) {
+    Remove-Item -LiteralPath ([string]$systemState.wallpaperGuardScript) -Force
+  }
+  if ($systemState.PSObject.Properties.Name -contains 'hotCornersStartupExisted' -and
+      $systemState.hotCornersStartupExisted -and
+      (Test-Path -LiteralPath ([string]$systemState.hotCornersStartupBackup))) {
+    Copy-Item -LiteralPath ([string]$systemState.hotCornersStartupBackup) `
+      -Destination ([string]$systemState.hotCornersStartupPath) -Force
+  }
   if ($systemState.windhawkUiTaskExisted -and $systemState.windhawkUiTaskWasEnabled) {
     Enable-ScheduledTask -TaskName 'WindhawkRunUITask' -ErrorAction SilentlyContinue | Out-Null
   }

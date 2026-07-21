@@ -46,6 +46,7 @@ $scriptNames = @(
   'Switch-To-NativeShell.ps1',
   'Invoke-NativeShellPromotion.ps1',
   'Complete-NativeShellPromotion.ps1',
+  'Repair-NativeWallpaperPolicy.ps1',
   'Test-NativeShellProfile.ps1',
   'verify.ps1'
 )
@@ -114,6 +115,10 @@ if ($menuBarSource -notmatch 'LogicalCornerHitSize = 8' -or
     $menuBarSource -notmatch 'IsShowDesktopCorner\(e\.Location') {
   $failures.Add('MenuBar no longer preserves the Seelen-sized Show Desktop corner hit target.')
 }
+if ($menuBarSource -notmatch 'ReassertAppBarAfterStartupAsync' -or
+    $menuBarSource -notmatch 'foreach \(var delay in new\[\] \{ 1000, 4000 \}\)') {
+  $failures.Add('MenuBar no longer reasserts its AppBar work area after restored windows settle at login.')
+}
 if ($systemStateSource -notmatch '"notepad" => "Notepad"' -or
     $systemStateSource -notmatch '_ => executableDescription' -or
     $systemStateSource -notmatch 'ReadExecutableDescription\(process\)') {
@@ -126,8 +131,10 @@ if ($completeSource -notmatch '\$LASTEXITCODE -ne 0') {
   $failures.Add('Native-shell completion can report acceptance after a failed live-profile check.')
 }
 if ($switchSource -notmatch 'policyWallpaperManagedHash' -or
-    $switchSource -notmatch 'WallpaperStyle.*value=.*10' -or
+    $switchSource -notmatch 'WallpaperStyle.*value=.*4' -or
     $switchSource -notmatch 'policyManagerProviderPath' -or
+    $switchSource -notmatch 'MacMakeover Wallpaper Guard' -or
+    $switchSource -notmatch 'hot-corners-startup\.lnk' -or
     $prepareSource -notmatch 'mac-wallpaper-policy\.png' -or
     $prepareSource -notmatch 'virtualDesktopsPath') {
   $failures.Add('Wallpaper deployment no longer reconciles the MDM target/provider or updates virtual desktops.')

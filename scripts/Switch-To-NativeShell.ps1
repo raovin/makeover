@@ -11,7 +11,12 @@ $systemPath = Join-Path $stateRoot 'system-profile-enabled.json'
 $seelenTaskPath = '\Seelen\'
 $seelenTaskName = 'Seelen UI Service'
 $windhawkUiTaskName = 'WindhawkRunUITask'
+$wallpaperGuardTaskName = 'MacMakeover Wallpaper Guard'
 $desktopPolicyPath = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Policies\System'
+$hotCornersStartup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk'
+$hotCornersStartupBackup = Join-Path $stateRoot 'hot-corners-startup.lnk'
+$wallpaperGuardRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\maintenance'
+$wallpaperGuardScript = Join-Path $wallpaperGuardRoot 'Repair-NativeWallpaperPolicy.ps1'
 
 if (-not (Test-Path -LiteralPath $preparedPath)) {
   throw 'The unelevated user-profile preparation has not completed.'
@@ -63,11 +68,30 @@ try {
     if (-not (Test-Path -LiteralPath $policyManagerProviderBackup)) {
       [IO.File]::WriteAllText($policyManagerProviderBackup, $providerWallpaper, [Text.UTF8Encoding]::new($false))
     }
-    $managedProviderWallpaper = '<enabled/><data id="WallpaperName" value="{0}" /><data id="WallpaperStyle" value="10" />' -f $policyWallpaperPath
+    $managedProviderWallpaper = '<enabled/><data id="WallpaperName" value="{0}" /><data id="WallpaperStyle" value="4" />' -f $policyWallpaperPath
     Set-ItemProperty -LiteralPath $policyManagerProviderPath -Name Wallpaper -Value $managedProviderWallpaper -Type String
   }
   New-ItemProperty -LiteralPath $desktopPolicyPath -Name Wallpaper -Value $policyWallpaperPath -PropertyType String -Force | Out-Null
-  New-ItemProperty -LiteralPath $desktopPolicyPath -Name WallpaperStyle -Value '10' -PropertyType String -Force | Out-Null
+  New-ItemProperty -LiteralPath $desktopPolicyPath -Name WallpaperStyle -Value '4' -PropertyType String -Force | Out-Null
+
+  New-Item -ItemType Directory -Force -Path $wallpaperGuardRoot | Out-Null
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Repair-NativeWallpaperPolicy.ps1') -Destination $wallpaperGuardScript -Force
+  $guardAction = New-ScheduledTaskAction `
+    -Execute (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+    -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $wallpaperGuardScript)
+  $guardLogon = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
+  $guardRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
+    -RepetitionInterval (New-TimeSpan -Minutes 15) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
+  $guardPrincipal = New-ScheduledTaskPrincipal `
+    -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+    -LogonType Interactive `
+    -RunLevel Highest
+  $guardSettings = New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+  Register-ScheduledTask -TaskName $wallpaperGuardTaskName -Action $guardAction `
+    -Trigger @($guardLogon, $guardRepeat) -Principal $guardPrincipal -Settings $guardSettings -Force | Out-Null
+  & $wallpaperGuardScript
   & (Join-Path $PSScriptRoot 'Install-NativeDock.ps1') -Disable
   Stop-Service -Name Windhawk -Force -ErrorAction SilentlyContinue
   Set-Service -Name Windhawk -StartupType Manual -ErrorAction SilentlyContinue
@@ -81,6 +105,11 @@ try {
     Disable-ScheduledTask -TaskPath $seelenTaskPath -TaskName $seelenTaskName | Out-Null
   }
 
+  $hotCornersStartupExisted = Test-Path -LiteralPath $hotCornersStartup
+  if ($hotCornersStartupExisted) {
+    Copy-Item -LiteralPath $hotCornersStartup -Destination $hotCornersStartupBackup -Force
+    Remove-Item -LiteralPath $hotCornersStartup -Force
+  }
   & (Join-Path $PSScriptRoot 'stop-hot-corners.ps1')
   Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
@@ -95,6 +124,11 @@ try {
     policyWallpaperManagedHash = $managedPolicyHash
     policyManagerProviderPath = $policyManagerProviderPath
     policyManagerProviderBackup = $policyManagerProviderBackup
+    hotCornersStartupExisted = $hotCornersStartupExisted
+    hotCornersStartupPath = $hotCornersStartup
+    hotCornersStartupBackup = $hotCornersStartupBackup
+    wallpaperGuardTaskName = $wallpaperGuardTaskName
+    wallpaperGuardScript = $wallpaperGuardScript
   } | ConvertTo-Json
   [System.IO.File]::WriteAllText($systemPath, $result, (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -107,6 +141,10 @@ catch {
   }
   if ($windhawkUiTaskWasEnabled) {
     Enable-ScheduledTask -TaskName $windhawkUiTaskName -ErrorAction SilentlyContinue | Out-Null
+  }
+  Unregister-ScheduledTask -TaskName $wallpaperGuardTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $hotCornersStartupBackup) {
+    Copy-Item -LiteralPath $hotCornersStartupBackup -Destination $hotCornersStartup -Force
   }
   throw
 }

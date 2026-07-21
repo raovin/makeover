@@ -28,6 +28,10 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 - Show Desktop must remain reversible even when mixed with `Win+D`.
 - No polling window mover, replacement task switcher, DOM toolbar, or Seelen service
   is allowed in the production profile.
+- The retired hot-corner Startup shortcut must remain absent; the native AppBar owns
+  both Show Desktop corners without a global mouse hook.
+- Managed wallpaper policy must use the ADMX `CropToFit` value (`4`) and the hidden
+  repair task must preserve it across device-management refreshes.
 - Visual polish is not accepted until screenshot QA passes on the actual desktop.
 
 ## Architecture
@@ -46,6 +50,8 @@ security boundaries, and release gates. The measured native-versus-Seelen resour
 comparison is in [Performance Comparison](docs/PERFORMANCE-COMPARISON-2026-07-17.md).
 The latest two-display signoff is in
 [Mixed-DPI QA](docs/NATIVE-SHELL-QA-2026-07-20.md).
+The post-restart regression analysis and current acceptance boundary are in
+[Restart Regression QA](docs/NATIVE-SHELL-REGRESSION-QA-2026-07-21.md).
 
 ## Install Or Upgrade
 
