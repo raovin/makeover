@@ -266,11 +266,12 @@ internal sealed class WorkAreaGapForm : Form
         {
             var data = CreateAppBarData();
             var targetDpi = DisplayScale.DpiFor(_screen, DeviceDpi);
-            var dpiScale = Math.Max(1F, targetDpi / 96F);
             var visualScale = DisplayScale.For(_screen, targetDpi);
             var visualDockHeight = (int)Math.Round(48 * visualScale);
-            var nativeDockHeight = (int)Math.Round(48 * dpiScale);
-            var gap = (visualDockHeight - nativeDockHeight) + (int)Math.Round(LogicalGap * visualScale);
+            // Hidden taskbar windows remain alive for Explorer ownership but no longer
+            // reserve work area on current Windows builds. Own the full dock height and
+            // breathing room here so maximized applications can never cover the dock.
+            var gap = visualDockHeight + (int)Math.Round(LogicalGap * visualScale);
             data.Bounds = new NativeMethods.Rect
             {
                 Left = _screen.Bounds.Left,

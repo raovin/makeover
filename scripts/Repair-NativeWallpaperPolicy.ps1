@@ -77,7 +77,7 @@ try {
 
   Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
-internal static class NativeWallpaperRefresh {
+public static class NativeWallpaperRefresh {
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern bool SystemParametersInfo(int action, int param, string value, int flags);
 }

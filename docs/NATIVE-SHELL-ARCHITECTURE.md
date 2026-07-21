@@ -77,15 +77,14 @@ has no transparent child controls: WinForms child transparency composites agains
 fallback color and creates black icon tiles. Clicking an item focuses a matching
 window or asks the shell to launch the pinned app.
 
-Windows' native taskbar remains the owner of its 48 px bottom work area and is
-visually hidden while the dock runs. A transparent `WorkAreaGapForm` AppBar reserves
-only the additional optical-scale height and breathing room required by the custom
-dock. It reacts to AppBar position changes, re-registers after Explorer starts, and
-uses bounded startup settling plus the existing taskbar guard to repair a dropped
-reservation. The reservation window is pinned to the bottom of z-order: on a 96-DPI
-display its 36 px reservation overlaps the enlarged dock by 24 px geometrically and
-must never paint above the dock surface. Graceful shutdown removes the gap and
-restores every native taskbar.
+Windows' native taskbar windows remain alive for Explorer ownership but are visually
+hidden while the dock runs. Hidden taskbars no longer retain work-area reservations
+on current Windows builds, so a transparent `WorkAreaGapForm` AppBar owns the full
+visual dock height plus its 8 px breathing room. It reacts to AppBar position changes,
+re-registers after Explorer starts, and uses bounded startup settling plus the taskbar
+guard to repair a dropped reservation. The reservation window is pinned to the bottom
+of z-order and must never paint above the dock surface. Graceful shutdown removes the
+gap and restores every native taskbar.
 The dock has no custom task switcher, window mover, or Explorer injection. Windhawk's
 taskbar styler remains installed as rollback material, disabled with its service manual.
 

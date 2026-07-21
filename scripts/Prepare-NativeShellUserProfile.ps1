@@ -36,14 +36,6 @@ function Get-RegistryValueSnapshot([string]$Path, [string]$Name) {
   }
 }
 
-function Set-NativeTaskbarVisible {
-  $settings = (Get-ItemProperty -LiteralPath $stuckRectsPath -ErrorAction SilentlyContinue).Settings
-  if ($settings -and $settings.Length -gt 8) {
-    $settings[8] = [byte]($settings[8] -band 0xFE)
-    Set-ItemProperty -LiteralPath $stuckRectsPath -Name Settings -Value $settings
-  }
-}
-
 function Set-MacWallpaper {
   $source = Join-Path $repoRoot 'assets\wallpapers\mac-wallpaper.jpg'
   $expectedHash = 'D228004F1A1DD90FA49EF04C7799AD80D98E6B19CC1C7CF28C7D484B86A8759D'
@@ -223,7 +215,6 @@ foreach ($entry in @{
     Write-Warning "Optional Explorer preference $($entry.Key) is managed by Windows and was left unchanged."
   }
 }
-Set-NativeTaskbarVisible
 Set-MacWallpaper
 
 if (-not (Test-Path -LiteralPath $searchKey)) { New-Item -Path $searchKey -Force | Out-Null }

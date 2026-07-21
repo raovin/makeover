@@ -83,8 +83,11 @@ $systemStateSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMak
 $switchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Switch-To-NativeShell.ps1') -Raw
 $menuHostSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\Program.cs') -Raw
 $buildSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Raw
+$promoteSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Promote-NativeShell.ps1') -Raw
 $prepareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Prepare-NativeShellUserProfile.ps1') -Raw
 $completeSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Complete-NativeShellPromotion.ps1') -Raw
+$profileSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1') -Raw
+$pinTestSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeTaskbarPins.ps1') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
 if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
   $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
@@ -130,6 +133,15 @@ if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
 if ($completeSource -notmatch '\$LASTEXITCODE -ne 0') {
   $failures.Add('Native-shell completion can report acceptance after a failed live-profile check.')
 }
+if ($profileSource -match '\.Verbs\(' -or $pinTestSource -match '\.Verbs\(' -or
+    $profileSource -notmatch 'User Pinned\\TaskBar' -or $pinTestSource -notmatch 'User Pinned\\TaskBar') {
+  $failures.Add('Pin verification can block on Shell verb enumeration instead of using Taskband and pinned shortcuts.')
+}
+if ($promoteSource -notmatch 'Restore-InteractiveNativeShell' -or
+    $promoteSource -notmatch 'Get-Process explorer.*Stop-Process' -or
+    $promoteSource -notmatch 'Native-shell promotion failed; restoring the interactive shell') {
+  $failures.Add('Promotion no longer restores Explorer and the native shell after cancellation or failure.')
+}
 if ($switchSource -notmatch 'policyWallpaperManagedHash' -or
     $switchSource -notmatch 'WallpaperStyle.*value=.*4' -or
     $switchSource -notmatch 'policyManagerProviderPath' -or
@@ -138,6 +150,11 @@ if ($switchSource -notmatch 'policyWallpaperManagedHash' -or
     $prepareSource -notmatch 'mac-wallpaper-policy\.png' -or
     $prepareSource -notmatch 'virtualDesktopsPath') {
   $failures.Add('Wallpaper deployment no longer reconciles the MDM target/provider or updates virtual desktops.')
+}
+$wallpaperRepairSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Repair-NativeWallpaperPolicy.ps1') -Raw
+if ($wallpaperRepairSource -notmatch 'public static class NativeWallpaperRefresh' -or
+    $wallpaperRepairSource -notmatch 'WallpaperStyle" value="4"') {
+  $failures.Add('Wallpaper repair no longer exposes its Win32 refresh type or preserves ADMX Fill mode.')
 }
 if ($switchSource -notmatch 'windhawkUiTaskWasEnabled') {
   $failures.Add('Privileged promotion no longer preserves the Windhawk UI task rollback state.')
@@ -187,6 +204,8 @@ if ($dockSource -notmatch '--export-icons' -or $dockSource -notmatch '--preview-
   $failures.Add('Dock no longer exposes the icon-export and hover-preview paths used by visual release QA.')
 }
 if ($dockSource -notmatch 'LogicalGap = 8' -or
+    $dockSource -notmatch 'var gap = visualDockHeight \+ \(int\)Math\.Round\(LogicalGap \* visualScale\)' -or
+    $dockSource -match 'visualDockHeight - nativeDockHeight' -or
     $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmNew' -or
     $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmRemove' -or
     $dockSource -notmatch 'NativeMethods\.AbnPosChanged' -or
