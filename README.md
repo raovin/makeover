@@ -52,6 +52,9 @@ The latest two-display signoff is in
 [Mixed-DPI QA](docs/NATIVE-SHELL-QA-2026-07-20.md).
 The post-restart regression analysis and current acceptance boundary are in
 [Restart Regression QA](docs/NATIVE-SHELL-REGRESSION-QA-2026-07-21.md).
+The Wi-Fi outage, memory analysis, Windows repair, rollback material, and firmware
+follow-up are recorded in
+[System Reliability Audit](docs/SYSTEM-RELIABILITY-AUDIT-2026-07-22.md).
 
 ## Install Or Upgrade
 
