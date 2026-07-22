@@ -40,8 +40,19 @@ Start-Sleep -Milliseconds 500
 Start-Process -FilePath $dock -WindowStyle Hidden
 Start-Sleep -Seconds 6
 
-& (Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1')
-if ($LASTEXITCODE -ne 0 -or -not $?) {
+$profileScript = Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1'
+$profilePassed = $false
+$profileOutput = @()
+foreach ($attempt in 1..4) {
+  $profileOutput = @(& $profileScript 2>&1)
+  if ($LASTEXITCODE -eq 0) {
+    $profilePassed = $true
+    break
+  }
+  if ($attempt -lt 4) { Start-Sleep -Seconds 3 }
+}
+$profileOutput | ForEach-Object { Write-Host ([string]$_) }
+if (-not $profilePassed) {
   throw 'Native-shell profile verification failed after promotion.'
 }
 

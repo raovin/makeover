@@ -79,7 +79,7 @@ try {
 using System.Runtime.InteropServices;
 public static class NativeWallpaperRefresh {
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern bool SystemParametersInfo(int action, int param, string value, int flags);
+    public static extern bool SystemParametersInfo(int action, int param, string value, int flags);
 }
 '@
   if (-not [NativeWallpaperRefresh]::SystemParametersInfo(20, 0, $managedWallpaper, 3)) {

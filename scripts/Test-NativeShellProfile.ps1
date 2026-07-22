@@ -286,3 +286,4 @@ $barMb = [math]::Round($menuBar[0].WorkingSet64 / 1MB, 1)
 $hostMb = [math]::Round($menuHost[0].WorkingSet64 / 1MB, 1)
 $dockMb = [math]::Round($dock[0].WorkingSet64 / 1MB, 1)
 Write-Host ('PASS: native shell is coherent. MenuBar {0} MB; MenuHost {1} MB; Dock {2} MB.' -f $barMb, $hostMb, $dockMb)
+exit 0

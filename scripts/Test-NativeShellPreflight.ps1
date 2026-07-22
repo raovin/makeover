@@ -130,12 +130,17 @@ if ($systemStateSource -notmatch '"notepad" => "Notepad"' -or
 if ($prepareSource -match '\$savedState(?:\.run)?\.ContainsKey\(') {
   $failures.Add('Profile preparation uses Hashtable-only ContainsKey on ConvertFrom-Json ordered dictionaries.')
 }
-if ($completeSource -notmatch '\$LASTEXITCODE -ne 0') {
+if ($completeSource -notmatch 'foreach \(\$attempt in 1\.\.4\)' -or
+    $completeSource -notmatch '\$profileScript 2>&1' -or
+    $completeSource -notmatch '\$profilePassed') {
   $failures.Add('Native-shell completion can report acceptance after a failed live-profile check.')
 }
 if ($profileSource -match '\.Verbs\(' -or $pinTestSource -match '\.Verbs\(' -or
     $profileSource -notmatch 'User Pinned\\TaskBar' -or $pinTestSource -notmatch 'User Pinned\\TaskBar') {
   $failures.Add('Pin verification can block on Shell verb enumeration instead of using Taskband and pinned shortcuts.')
+}
+if ($profileSource -notmatch "Write-Host \('PASS: native shell is coherent[\s\S]*?exit 0") {
+  $failures.Add('A passing live-profile check does not explicitly return exit code zero.')
 }
 if ($promoteSource -notmatch 'Restore-InteractiveNativeShell' -or
     $promoteSource -notmatch 'Get-Process explorer.*Stop-Process' -or
@@ -153,6 +158,7 @@ if ($switchSource -notmatch 'policyWallpaperManagedHash' -or
 }
 $wallpaperRepairSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Repair-NativeWallpaperPolicy.ps1') -Raw
 if ($wallpaperRepairSource -notmatch 'public static class NativeWallpaperRefresh' -or
+    $wallpaperRepairSource -notmatch 'public static extern bool SystemParametersInfo' -or
     $wallpaperRepairSource -notmatch 'WallpaperStyle" value="4"') {
   $failures.Add('Wallpaper repair no longer exposes its Win32 refresh type or preserves ADMX Fill mode.')
 }
