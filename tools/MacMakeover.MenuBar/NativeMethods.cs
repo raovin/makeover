@@ -9,6 +9,7 @@ internal static class NativeMethods
     public const int WmAppCommand = 0x0319;
     public const int AppCommandVolumeUp = 10;
     public const int AppCommandVolumeDown = 9;
+    public const int SwRestore = 9;
     public const int SwpNoMove = 0x0002;
     public const int SwpNoSize = 0x0001;
     public const int SwpNoActivate = 0x0010;
@@ -77,6 +78,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsIconic(IntPtr window);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr window);
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);

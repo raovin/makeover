@@ -20,7 +20,7 @@ function Restore-InteractiveNativeShell {
     Start-Sleep -Milliseconds 500
   }
 
-  Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock -ErrorAction SilentlyContinue |
+  Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, AwakeAndAvailable -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 
   # Explorer owns the AppBar registry. Restarting it removes reservations left by a
@@ -33,7 +33,8 @@ function Restore-InteractiveNativeShell {
   foreach ($entry in @(
       @{ Name = 'MacMakeover.MenuHost'; File = 'MacMakeover.MenuHost.exe' },
       @{ Name = 'MacMakeover.MenuBar'; File = 'MacMakeover.MenuBar.exe' },
-      @{ Name = 'MacMakeover.Dock'; File = 'MacMakeover.Dock.exe' }
+      @{ Name = 'MacMakeover.Dock'; File = 'MacMakeover.Dock.exe' },
+      @{ Name = 'AwakeAndAvailable'; File = 'AwakeAndAvailable.exe' }
     )) {
     $path = Join-Path $deploymentRoot $entry.File
     if ((Test-Path -LiteralPath $path) -and -not (Get-Process -Name $entry.Name -ErrorAction SilentlyContinue)) {

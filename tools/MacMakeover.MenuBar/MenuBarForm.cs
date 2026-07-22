@@ -12,6 +12,7 @@ internal enum BarAction
     Bluetooth,
     Volume,
     ControlCenter,
+    TrayOverflow,
     Notifications,
     Calendar
 }
@@ -25,6 +26,9 @@ internal sealed class MenuBarForm : Form
     private readonly bool _preview;
     private readonly string? _previewPower;
     private readonly List<(Rectangle Bounds, BarAction Action)> _hits = [];
+    private readonly List<(Rectangle Bounds, TrayAppSnapshot App)> _trayHits = [];
+    private readonly TrayIconCache _trayIcons = new();
+    private readonly ToolTip _toolTip = new() { InitialDelay = 400, ReshowDelay = 100, AutoPopDelay = 5000 };
     private Typography? _typography;
     private Font _textFont = null!;
     private Font _semiboldFont = null!;
@@ -35,6 +39,7 @@ internal sealed class MenuBarForm : Form
     private readonly uint _taskbarCreatedMessage;
     private bool _appBarRegistered;
     private BarAction? _hovered;
+    private string? _hoveredTrayKey;
 
     public MenuBarForm(Screen screen, SystemStateProvider state, bool preview, string? previewPower)
     {
@@ -66,7 +71,13 @@ internal sealed class MenuBarForm : Form
 
         _state.Changed += OnStateChanged;
         MouseMove += OnMouseMove;
-        MouseLeave += (_, _) => { _hovered = null; Invalidate(); };
+        MouseLeave += (_, _) =>
+        {
+            _hovered = null;
+            _hoveredTrayKey = null;
+            _toolTip.SetToolTip(this, string.Empty);
+            Invalidate();
+        };
         MouseUp += OnMouseUp;
         MouseWheel += OnMouseWheel;
         Shown += (_, _) =>
@@ -226,6 +237,7 @@ internal sealed class MenuBarForm : Form
         if (_typography is null) return;
 
         _hits.Clear();
+        _trayHits.Clear();
         var snapshot = ApplyPowerPreview(_state.Snapshot, _previewPower);
         var leftEnd = DrawLeft(e.Graphics, snapshot);
         var rightStart = DrawRight(e.Graphics, snapshot);
@@ -275,7 +287,40 @@ internal sealed class MenuBarForm : Form
         x = DrawRightItem(graphics, x, "\uE767", _iconFont, BarAction.Volume, Scale(28));
         x = DrawRightItem(graphics, x, "\uE702", _iconFont, BarAction.Bluetooth, Scale(27));
         x = DrawRightItem(graphics, x, ConnectionGlyph(snapshot.Connection), _iconFont, BarAction.Network, Scale(29));
+        foreach (var app in snapshot.TrayApps.Take(3))
+        {
+            x = DrawTrayItem(graphics, x, app);
+        }
+        if (snapshot.TrayApps.Count > 3)
+        {
+            x = DrawRightItem(graphics, x, "\uE712", _iconFont, BarAction.TrayOverflow, Scale(24));
+        }
         return x - Scale(8);
+    }
+
+    private int DrawTrayItem(Graphics graphics, int right, TrayAppSnapshot app)
+    {
+        var width = Scale(24);
+        var rect = new Rectangle(right - width, 0, width, Height);
+        if (_hoveredTrayKey?.Equals(app.Key, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var inset = Rectangle.Inflate(rect, -Scale(2), -Scale(3));
+            using var hover = new SolidBrush(Color.FromArgb(34, 255, 255, 255));
+            using var path = RoundedRectangle(inset, Scale(4));
+            graphics.FillPath(hover, path);
+        }
+        var image = _trayIcons.Get(app);
+        if (image is not null)
+        {
+            var size = Scale(14);
+            graphics.DrawImage(image, rect.Left + (rect.Width - size) / 2, (Height - size) / 2, size, size);
+        }
+        else
+        {
+            DrawCenteredText(graphics, app.Name[..1].ToUpperInvariant(), _smallFont, rect, Color.FromArgb(241, 246, 251));
+        }
+        _trayHits.Add((rect, app));
+        return rect.Left;
     }
 
     private int DrawRightItem(Graphics graphics, int right, string text, Font font, BarAction action, int width)
@@ -512,10 +557,23 @@ internal sealed class MenuBarForm : Form
 
     private void OnMouseMove(object? sender, MouseEventArgs e)
     {
+        var trayHit = _trayHits.FirstOrDefault(hit => hit.Bounds.Contains(e.Location));
+        if (trayHit.App is not null)
+        {
+            if (_hoveredTrayKey == trayHit.App.Key) return;
+            _hovered = null;
+            _hoveredTrayKey = trayHit.App.Key;
+            Cursor = Cursors.Hand;
+            _toolTip.SetToolTip(this, trayHit.App.Name);
+            Invalidate();
+            return;
+        }
         var hovered = _hits.FirstOrDefault(hit => hit.Bounds.Contains(e.Location)).Action;
         BarAction? next = _hits.Any(hit => hit.Bounds.Contains(e.Location)) ? hovered : null;
-        if (_hovered == next) return;
+        if (_hovered == next && _hoveredTrayKey is null) return;
         _hovered = next;
+        _hoveredTrayKey = null;
+        _toolTip.SetToolTip(this, string.Empty);
         Cursor = next is null ? Cursors.Default : Cursors.Hand;
         Invalidate();
     }
@@ -527,6 +585,14 @@ internal sealed class MenuBarForm : Form
         {
             AppLog.Write($"Show Desktop corner clicked on {_screen.DeviceName}: x={e.X} width={Width}");
             MenuRouter.Send("desktop");
+            return;
+        }
+
+        var trayHit = _trayHits.FirstOrDefault(item => item.Bounds.Contains(e.Location));
+        if (trayHit.App is not null)
+        {
+            try { TrayAppLauncher.Activate(trayHit.App); }
+            catch (Exception ex) { AppLog.Write($"Tray app activation failed for {trayHit.App.Name}: {ex.Message}"); }
             return;
         }
 
@@ -548,11 +614,41 @@ internal sealed class MenuBarForm : Form
             case BarAction.ControlCenter:
                 MenuRouter.Send("control");
                 break;
+            case BarAction.TrayOverflow:
+                ShowTrayOverflow(PointToScreen(new Point(e.X, Height)));
+                break;
             case BarAction.Notifications:
             case BarAction.Calendar:
                 MenuRouter.OpenNotifications();
                 break;
         }
+    }
+
+    private void ShowTrayOverflow(Point screenLocation)
+    {
+        var apps = _state.Snapshot.TrayApps.Skip(3).ToArray();
+        if (apps.Length == 0) return;
+        var menu = new ContextMenuStrip
+        {
+            ShowImageMargin = true,
+            BackColor = Color.FromArgb(32, 36, 43),
+            ForeColor = Color.FromArgb(241, 246, 251),
+            Renderer = new ToolStripProfessionalRenderer(new TrayMenuColorTable())
+        };
+        foreach (var app in apps)
+        {
+            var item = new ToolStripMenuItem(app.Name) { ForeColor = menu.ForeColor };
+            var image = _trayIcons.Get(app);
+            if (image is not null) item.Image = new Bitmap(image, new Size(16, 16));
+            item.Click += (_, _) =>
+            {
+                try { TrayAppLauncher.Activate(app); }
+                catch (Exception ex) { AppLog.Write($"Tray overflow activation failed for {app.Name}: {ex.Message}"); }
+            };
+            menu.Items.Add(item);
+        }
+        menu.Closed += (_, _) => menu.Dispose();
+        menu.Show(screenLocation);
     }
 
     internal static bool IsShowDesktopCorner(Point location, Size clientSize, int hitSize) =>
@@ -621,6 +717,8 @@ internal sealed class MenuBarForm : Form
         {
             _state.Changed -= OnStateChanged;
             _appleMark?.Dispose();
+            _trayIcons.Dispose();
+            _toolTip.Dispose();
             _typography?.Dispose();
         }
         base.Dispose(disposing);

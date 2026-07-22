@@ -35,11 +35,12 @@ internal sealed record SystemSnapshot(
     PowerModeKind PowerMode,
     ConnectionKind Connection,
     string ConnectionName,
-    string ActiveApp)
+    string ActiveApp,
+    IReadOnlyList<TrayAppSnapshot> TrayApps)
 {
     public static SystemSnapshot Empty { get; } = new(
         0, 0, 0, 0, 0, 100, true, false, PowerModeKind.Balanced,
-        ConnectionKind.Offline, "Offline", "Finder");
+        ConnectionKind.Offline, "Offline", "Finder", []);
 }
 
 internal sealed class SystemStateProvider : IDisposable
@@ -94,6 +95,7 @@ internal sealed class SystemStateProvider : IDisposable
             var charging = power.BatteryChargeStatus.HasFlag(BatteryChargeStatus.Charging);
             var powerMode = ReadPowerMode(onAcPower);
             var activeApp = ReadActiveApp();
+            var trayApps = TrayAppProvider.Capture();
 
             lock (_gate)
             {
@@ -109,7 +111,8 @@ internal sealed class SystemStateProvider : IDisposable
                     powerMode,
                     connection,
                     interfaceName,
-                    activeApp);
+                    activeApp,
+                    trayApps);
             }
             Changed?.Invoke(this, EventArgs.Empty);
         }

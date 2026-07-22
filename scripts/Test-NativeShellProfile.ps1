@@ -16,12 +16,17 @@ $modSettingsRegistry = Join-Path $modRegistry 'Settings'
 $menuBar = @(Get-Process MacMakeover.MenuBar -ErrorAction SilentlyContinue)
 $menuHost = @(Get-Process MacMakeover.MenuHost -ErrorAction SilentlyContinue)
 $dock = @(Get-Process MacMakeover.Dock -ErrorAction SilentlyContinue)
+$awake = @(Get-Process AwakeAndAvailable -ErrorAction SilentlyContinue)
 $seelen = @(Get-Process seelen-ui, slu-service -ErrorAction SilentlyContinue)
 $yasb = @(Get-Process yasb -ErrorAction SilentlyContinue)
 
 if ($menuBar.Count -ne 1) { $failures.Add("Expected one MenuBar process; found $($menuBar.Count).") }
 if ($menuHost.Count -ne 1) { $failures.Add("Expected one MenuHost process; found $($menuHost.Count).") }
 if ($dock.Count -ne 1) { $failures.Add("Expected one Dock process; found $($dock.Count).") }
+if ($awake.Count -ne 1) { $failures.Add("Expected one Awake & Available process; found $($awake.Count).") }
+if ($awake.Count -eq 1 -and $awake[0].Path -ne (Join-Path $deploymentRoot 'AwakeAndAvailable.exe')) {
+  $failures.Add("Awake & Available is running outside the managed deployment: $($awake[0].Path)")
+}
 if ($seelen.Count) { $failures.Add('Seelen is still running alongside the native shell.') }
 if ($yasb.Count) { $failures.Add('YASB is still running alongside the native shell.') }
 if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { $failures.Add('Windows Explorer is not running.') }
@@ -30,6 +35,7 @@ foreach ($required in @(
     'MacMakeover.MenuBar.exe',
     'MacMakeover.MenuHost.exe',
     'MacMakeover.Dock.exe',
+    'AwakeAndAvailable.exe',
     'native-taskbar-pins.json',
     'Assets\apple-mark.png',
     'Assets\Fonts\Manrope-Regular.ttf',
@@ -52,6 +58,35 @@ foreach ($attempt in 1..3) {
 }
 if ($hostSelfTest.ExitCode -ne 0) {
   $failures.Add("MenuHost Core Audio self-test failed after three attempts with exit code $($hostSelfTest.ExitCode).")
+}
+
+$traySnapshotPath = Join-Path $env:TEMP "macmakeover-tray-apps-$PID.json"
+try {
+  $trayProcess = Start-Process -FilePath (Join-Path $deploymentRoot 'MacMakeover.MenuBar.exe') `
+    -ArgumentList '--snapshot-tray', ('"{0}"' -f $traySnapshotPath) `
+    -Wait -PassThru -WindowStyle Hidden
+  if ($trayProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $traySnapshotPath)) {
+    $failures.Add("MenuBar tray-app snapshot failed with exit code $($trayProcess.ExitCode).")
+  } else {
+    $traySnapshot = @(Get-Content -LiteralPath $traySnapshotPath -Raw | ConvertFrom-Json)
+    foreach ($app in $traySnapshot) {
+      if ([string]::IsNullOrWhiteSpace($app.Name) -or
+          [string]::IsNullOrWhiteSpace($app.ExecutablePath) -or
+          -not (Test-Path -LiteralPath $app.ExecutablePath)) {
+        $failures.Add('MenuBar tray-app snapshot contains an incomplete item.')
+        break
+      }
+    }
+    if (Get-Process AwakeAndAvailable -ErrorAction SilentlyContinue) {
+      if ($traySnapshot.Name -notcontains 'Awake & Available') {
+        $failures.Add('Running Awake & Available is missing from the MenuBar tray-app snapshot.')
+      }
+    }
+  }
+} catch {
+  $failures.Add("MenuBar tray-app snapshot threw: $($_.Exception.Message)")
+} finally {
+  Remove-Item -LiteralPath $traySnapshotPath -Force -ErrorAction SilentlyContinue
 }
 
 $dockExecutable = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
@@ -120,6 +155,9 @@ if (-not $runValues -or $runValues.MacMakeoverMenuHost -notmatch 'MacMakeover\.M
 }
 if (-not $runValues -or $runValues.MacMakeoverDock -notmatch 'MacMakeover\.Dock\.exe') {
   $failures.Add('Dock is not registered at logon.')
+}
+if (-not $runValues -or $runValues.MacMakeoverAwakeAndAvailable -notmatch 'AwakeAndAvailable\.exe') {
+  $failures.Add('Awake & Available is not registered at logon.')
 }
 
 $mod = Get-ItemProperty -LiteralPath $modRegistry -ErrorAction SilentlyContinue

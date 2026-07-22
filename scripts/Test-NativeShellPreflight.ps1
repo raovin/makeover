@@ -14,6 +14,7 @@ foreach ($required in @(
     (Join-Path $DeploymentRoot 'MacMakeover.MenuBar.exe'),
     (Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'),
     (Join-Path $DeploymentRoot 'MacMakeover.Dock.exe'),
+    (Join-Path $DeploymentRoot 'AwakeAndAvailable.exe'),
     (Join-Path $DeploymentRoot 'native-taskbar-pins.json'),
     (Join-Path $DeploymentRoot 'Assets\apple-mark.png'),
     (Join-Path $DeploymentRoot 'Assets\Fonts\Manrope-Regular.ttf'),
@@ -89,8 +90,28 @@ $completeSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Complete-Na
 $profileSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1') -Raw
 $pinTestSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeTaskbarPins.ps1') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
+$trayAppsSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\TrayApps.cs') -Raw
+$awakeProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\AwakeAndAvailable\Program.cs') -Raw
+$awakeContextSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\AwakeAndAvailable\TrayApplicationContext.cs') -Raw
 if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
   $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
+}
+if ($buildSource -notmatch 'AwakeAndAvailable\\AwakeAndAvailable\.csproj' -or
+    $prepareSource -notmatch 'MacMakeoverAwakeAndAvailable' -or
+    $completeSource -notmatch 'AwakeAndAvailable\.exe' -or
+    $profileSource -notmatch 'Expected one Awake & Available process') {
+  $failures.Add('Awake & Available is not fully integrated into build, startup, promotion, and live verification.')
+}
+if ($trayAppsSource -notmatch 'NotifyIconSettings' -or
+    $trayAppsSource -notmatch 'IconSnapshot' -or
+    $menuBarSource -notmatch 'DrawTrayItem' -or
+    $menuBarProgramSource -notmatch '--snapshot-tray') {
+  $failures.Add('MenuBar no longer discovers and renders live notification-area applications.')
+}
+if ($awakeProgramSource -notmatch 'EventWaitHandle' -or
+    $awakeProgramSource -notmatch 'showEvent\.Set\(\)' -or
+    $awakeContextSource -notmatch 'ContextMenuStrip\?\.Show\(Cursor\.Position\)') {
+  $failures.Add('Awake & Available no longer activates its existing tray menu when launched again.')
 }
 if ($menuBarSource -match 'EnsureNativeDockZOrder|MonitorNativeDockAsync' -or
     $nativeSource -match 'IsBorderlessFullscreen|FindTaskbarFor') {

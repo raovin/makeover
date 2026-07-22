@@ -35,9 +35,9 @@ if (Test-Path -LiteralPath $dock) {
   Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
   Start-Sleep -Milliseconds 500
 }
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock -ErrorAction SilentlyContinue |
+Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, AwakeAndAvailable -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
-Remove-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar, MacMakeoverMenuHost, MacMakeoverDock -ErrorAction SilentlyContinue
+Remove-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar, MacMakeoverMenuHost, MacMakeoverDock, MacMakeoverAwakeAndAvailable -ErrorAction SilentlyContinue
 
 function Restore-RegistrySnapshot([string]$Path, [string]$Name, $Snapshot) {
   if ($null -eq $Snapshot) { return }

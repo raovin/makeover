@@ -114,7 +114,7 @@ if (-not (Test-Path -LiteralPath $statePath)) {
   foreach ($name in 'TaskbarAl', 'TaskbarDa', 'ShowTaskViewButton', 'SearchboxTaskbarMode', 'MMTaskbarEnabled') {
     $state.advanced[$name] = Get-RegistryValueSnapshot $advancedKey $name
   }
-  foreach ($name in 'MacMakeoverMenuBar', 'MacMakeoverMenuHost', 'MacMakeoverDock') {
+  foreach ($name in 'MacMakeoverMenuBar', 'MacMakeoverMenuHost', 'MacMakeoverDock', 'MacMakeoverAwakeAndAvailable') {
     $state.run[$name] = Get-RegistryValueSnapshot $runKey $name
   }
   foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
@@ -140,8 +140,9 @@ if (-not $savedState.Contains('search')) {
     (New-Object System.Text.UTF8Encoding($false)))
 }
 if (-not $savedState.Contains('run')) { $savedState.run = [ordered]@{} }
-if (-not $savedState.run.Contains('MacMakeoverDock')) {
-  $savedState.run.MacMakeoverDock = Get-RegistryValueSnapshot $runKey 'MacMakeoverDock'
+foreach ($name in 'MacMakeoverDock', 'MacMakeoverAwakeAndAvailable') {
+  if ($savedState.run.Contains($name)) { continue }
+  $savedState.run[$name] = Get-RegistryValueSnapshot $runKey $name
   [System.IO.File]::WriteAllText(
     $statePath,
     ($savedState | ConvertTo-Json -Depth 8),
@@ -167,6 +168,7 @@ foreach ($required in @(
     'MacMakeover.MenuBar.exe',
     'MacMakeover.MenuHost.exe',
     'MacMakeover.Dock.exe',
+    'AwakeAndAvailable.exe',
     'native-taskbar-pins.json',
     'Assets\apple-mark.png',
     'Assets\Fonts\Manrope-Regular.ttf',
@@ -183,7 +185,7 @@ if (Test-Path -LiteralPath $deployedDock) {
   Start-Process -FilePath $deployedDock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
   Start-Sleep -Milliseconds 500
 }
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock -ErrorAction SilentlyContinue |
+Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, AwakeAndAvailable -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
 if ($artifactRoot -ne $deploymentRoot) {
   New-Item -ItemType Directory -Force -Path $deploymentRoot | Out-Null
@@ -226,9 +228,11 @@ if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
 $menuBar = Join-Path $deploymentRoot 'MacMakeover.MenuBar.exe'
 $menuHost = Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe'
 $dock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
+$awake = Join-Path $deploymentRoot 'AwakeAndAvailable.exe'
 New-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuHost -Value ('"{0}"' -f $menuHost) -PropertyType String -Force | Out-Null
 New-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar -Value ('"{0}"' -f $menuBar) -PropertyType String -Force | Out-Null
 New-ItemProperty -LiteralPath $runKey -Name MacMakeoverDock -Value ('"{0}"' -f $dock) -PropertyType String -Force | Out-Null
+New-ItemProperty -LiteralPath $runKey -Name MacMakeoverAwakeAndAvailable -Value ('"{0}"' -f $awake) -PropertyType String -Force | Out-Null
 
 $prepared = [ordered]@{
   preparedAt = (Get-Date).ToString('o')

@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Text.Json;
 
 namespace MacMakeover.MenuBar;
 
@@ -13,6 +14,13 @@ internal static class Program
         var previewAll = args.Any(arg => arg.Equals("--preview-all", StringComparison.OrdinalIgnoreCase));
         var previewPower = args.FirstOrDefault(arg => arg.StartsWith("--preview-power=", StringComparison.OrdinalIgnoreCase))?
             .Split('=', 2)[1];
+        if (args.Length >= 2 && args[0].Equals("--snapshot-tray", StringComparison.OrdinalIgnoreCase))
+        {
+            File.WriteAllText(args[1], JsonSerializer.Serialize(
+                TrayAppProvider.Capture(),
+                new JsonSerializerOptions { WriteIndented = true }));
+            return;
+        }
         if (args.Any(arg => arg.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
         {
             Environment.ExitCode = PowerStateSelfTest() ? 0 : 2;
@@ -57,6 +65,7 @@ internal static class Program
                SystemStateProvider.FriendlyAppName("acmeeditor", "Quarterly Plan.txt - Acme Editor", "Acme Editor") == "Acme Editor" &&
                SystemStateProvider.FriendlyAppName("acmeeditor", "Quarterly Plan.txt - Acme Editor") == "acmeeditor" &&
                SystemStateProvider.FriendlyAppName("ApplicationFrameHost", "Settings", "Application Frame Host") == "Settings" &&
+               TrayAppProvider.ExpandExecutablePath("{F38BF404-1D43-42F2-9305-67DE0B28FC23}\\explorer.exe") == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe") &&
                MenuBarForm.IsShowDesktopCorner(new Point(0, 0), new Size(1280, 20), 8) &&
                MenuBarForm.IsShowDesktopCorner(new Point(1279, 0), new Size(1280, 20), 8) &&
                !MenuBarForm.IsShowDesktopCorner(new Point(8, 0), new Size(1280, 20), 8) &&

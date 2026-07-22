@@ -11,7 +11,8 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $projects = @(
   (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj'),
   (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MacMakeover.MenuBar.csproj'),
-  (Join-Path $repoRoot 'tools\MacMakeover.Dock\MacMakeover.Dock.csproj')
+  (Join-Path $repoRoot 'tools\MacMakeover.Dock\MacMakeover.Dock.csproj'),
+  (Join-Path $repoRoot 'tools\AwakeAndAvailable\AwakeAndAvailable.csproj')
 )
 $publishRoot = Join-Path $env:TEMP 'MacMakeover\native-shell-publish'
 
@@ -58,6 +59,7 @@ $required = @(
   'MacMakeover.MenuBar.exe',
   'MacMakeover.MenuHost.exe',
   'MacMakeover.Dock.exe',
+  'AwakeAndAvailable.exe',
   'native-taskbar-pins.json',
   'Assets\apple-mark.png',
   'Assets\Fonts\Manrope-Regular.ttf',

@@ -12,6 +12,7 @@ that provide reliable task switching, window management, and application lifecyc
 | Top menu bar rendering and hit testing | `MacMakeover.MenuBar` |
 | Apple, Control Center, Network, and Bluetooth panels | `MacMakeover.MenuHost` |
 | Bottom dock rendering and pin actions | `MacMakeover.Dock` |
+| Sleep prevention and optional Teams activity tray control | `AwakeAndAvailable` |
 | App switching, snap, maximize, and lifecycle | Windows Explorer |
 | Alt+Tab, Win+Tab, snap, maximize, Start, and Search | Windows Explorer |
 | Notifications and calendar | Windows Notification Center |
@@ -31,7 +32,9 @@ The current visual target is captured in
 - Left: Apple mark and focused application.
 - Center: CPU, RAM, best-route network throughput, explicit battery/charging
   source, and the active Windows AC/DC power mode.
-- Right: actual connection type, Bluetooth, volume, Control Center, date, and bell.
+- Right: three live notification-area app extras plus a dark overflow menu, actual
+  connection type, Bluetooth, volume, Control Center, date, and bell. Tray-first apps
+  stay out of the dock, use their real registered icon, and activate from the menu bar.
 - Segoe UI Variable Text and its native semibold face render every text cluster on
   one baseline. Native hinting keeps the 100% external display as crisp as the
   150% laptop panel; geometry and type receive separate optical scaling.
@@ -126,7 +129,8 @@ and `archive/seelen-ui/scripts/Restore-SeelenProfile.ps1`.
 ## Release Gates
 
 1. Build, PowerShell parsing, dock invariants, and real Core Audio test pass.
-2. Exactly one MenuBar, MenuHost, and Dock run; Seelen and YASB do not.
+2. Exactly one MenuBar, MenuHost, Dock, and managed Awake & Available process run;
+   Seelen and YASB do not.
 3. Every monitor reserves both top and bottom work areas.
 4. Desktop, maximized, restored, and snapped visual checks pass at real DPI.
 5. Repeated Alt+Tab works with every custom panel open and closed.
