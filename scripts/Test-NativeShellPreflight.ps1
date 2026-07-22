@@ -207,6 +207,11 @@ $workAreaSource = [regex]::Match(
 if ($dockSource -notmatch 'WsExNoActivate' -or $dockSource -notmatch 'WsExToolWindow') {
   $failures.Add('Dock must remain a non-activating tool window and stay out of Alt+Tab.')
 }
+if ($dockSource -notmatch 'MaintainShellSurfaces' -or
+    $dockSource -notmatch 'form\.EnsureVisible\(\)' -or
+    $dockSource -notmatch 'NativeMethods\.HwndTopMost') {
+  $failures.Add('Dock guard no longer repairs a hidden or fullscreen-occluded dock surface.')
+}
 if ($dockSource -notmatch 'SlotWidth = 44' -or $dockSource -notmatch 'IconSize = 28') {
   $failures.Add('Dock no longer uses the approved icon and slot geometry.')
 }

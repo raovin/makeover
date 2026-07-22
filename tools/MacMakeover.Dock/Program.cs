@@ -101,7 +101,7 @@ internal sealed class DockContext : ApplicationContext
         if (!preview)
         {
             HideWindowsTaskbars();
-            _taskbarGuard.Tick += (_, _) => HideWindowsTaskbars();
+            _taskbarGuard.Tick += (_, _) => MaintainShellSurfaces();
             _taskbarGuard.Start();
         }
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
@@ -180,6 +180,12 @@ internal sealed class DockContext : ApplicationContext
             return true;
         }, IntPtr.Zero);
         foreach (var gapForm in _gapForms) gapForm.EnsureReserved();
+    }
+
+    private void MaintainShellSurfaces()
+    {
+        HideWindowsTaskbars();
+        foreach (var form in _forms) form.EnsureVisible();
     }
 
     protected override void ExitThreadCore()
@@ -482,6 +488,44 @@ internal sealed class DockForm : Form
 
     protected override bool ShowWithoutActivation => true;
     protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ExStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate; return cp; } }
+
+    public void EnsureVisible()
+    {
+        if (_preview || IsDisposed || !IsHandleCreated) return;
+        var extendedStyle = NativeMethods.GetWindowLongPtr(Handle, NativeMethods.GwlExStyle).ToInt64();
+        var needsRepair = !NativeMethods.IsWindowVisible(Handle) ||
+                          (extendedStyle & NativeMethods.WsExTopMost) == 0;
+        var foreground = NativeMethods.GetForegroundWindow();
+        if (!needsRepair && foreground != IntPtr.Zero && foreground != Handle &&
+            NativeMethods.GetWindowRect(foreground, out var foregroundBounds))
+        {
+            needsRepair = IsAbove(foreground, Handle) &&
+                          foregroundBounds.Left <= _screen.Bounds.Left &&
+                          foregroundBounds.Top <= _screen.Bounds.Top &&
+                          foregroundBounds.Right >= _screen.Bounds.Right &&
+                          foregroundBounds.Bottom >= _screen.Bounds.Bottom;
+        }
+        if (!needsRepair) return;
+        NativeMethods.SetWindowPos(
+            Handle,
+            NativeMethods.HwndTopMost,
+            Left,
+            Top,
+            Width,
+            Height,
+            NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+    }
+
+    private static bool IsAbove(IntPtr candidate, IntPtr window)
+    {
+        for (var current = NativeMethods.GetWindow(window, NativeMethods.GwHwndPrev);
+             current != IntPtr.Zero;
+             current = NativeMethods.GetWindow(current, NativeMethods.GwHwndPrev))
+        {
+            if (current == candidate) return true;
+        }
+        return false;
+    }
 
     private void PositionDock()
     {

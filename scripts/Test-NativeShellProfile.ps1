@@ -191,16 +191,34 @@ public static class NativeShellProbe {
   public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern int GetClassName(IntPtr window, System.Text.StringBuilder className, int maxCount);
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+  [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+  public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+  [DllImport("user32.dll")]
+  public static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
+  public struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
   public delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
 }
 '@
 $taskbarWindows = [System.Collections.Generic.List[System.IntPtr]]::new()
+$visibleDockWindows = [System.Collections.Generic.List[System.IntPtr]]::new()
 $enumTaskbars = [NativeShellProbe+EnumWindowsProc]{
   param([IntPtr]$window, [IntPtr]$parameter)
   $className = [Text.StringBuilder]::new(64)
   [void][NativeShellProbe]::GetClassName($window, $className, $className.Capacity)
   if ($className.ToString() -in @('Shell_TrayWnd', 'Shell_SecondaryTrayWnd')) {
     $taskbarWindows.Add($window)
+  }
+  $processId = [uint32]0
+  [void][NativeShellProbe]::GetWindowThreadProcessId($window, [ref]$processId)
+  $bounds = New-Object NativeShellProbe+Rect
+  [void][NativeShellProbe]::GetWindowRect($window, [ref]$bounds)
+  if ($dock.Count -eq 1 -and $processId -eq $dock[0].Id -and
+      [NativeShellProbe]::IsWindowVisible($window) -and
+      (([NativeShellProbe]::GetWindowLongPtr($window, -20).ToInt64() -band 8) -ne 0) -and
+      ($bounds.Right - $bounds.Left) -gt 500 -and ($bounds.Bottom - $bounds.Top) -gt 20) {
+    $visibleDockWindows.Add($window)
   }
   return $true
 }
@@ -212,6 +230,9 @@ foreach ($taskbarWindow in $taskbarWindows) {
   if ([NativeShellProbe]::IsWindowVisible($taskbarWindow)) {
     $failures.Add('A duplicate primary or secondary native taskbar is visible behind MacMakeover.Dock.')
   }
+}
+if ($visibleDockWindows.Count -lt [Windows.Forms.Screen]::AllScreens.Count) {
+  $failures.Add("Expected one visible topmost dock per display; found $($visibleDockWindows.Count).")
 }
 
 foreach ($screen in [Windows.Forms.Screen]::AllScreens) {

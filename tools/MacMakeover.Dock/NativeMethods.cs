@@ -10,6 +10,7 @@ internal static class NativeMethods
     public const int WsExTransparent = 0x20;
     public const int WsExLayered = 0x80000;
     public const int WsExNoActivate = 0x08000000;
+    public const int WsExTopMost = 0x00000008;
     public const int AbmNew = 0;
     public const int AbmRemove = 1;
     public const int AbmQueryPos = 2;
@@ -21,6 +22,7 @@ internal static class NativeMethods
     public const int SwRestore = 9;
     public const int GwlExStyle = -20;
     public const uint GwOwner = 4;
+    public const uint GwHwndPrev = 3;
     public const int DwmwaCloaked = 14;
     public const int WmGetIcon = 0x007F;
     public const int IconBig = 1;
@@ -93,6 +95,8 @@ internal static class NativeMethods
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
     [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] public static extern IntPtr GetClassLongPtr(IntPtr window, int index);
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);

@@ -98,8 +98,9 @@ rectangle, while the AppBar's actual HWND is a nonpainting 1 px anchor at the bo
 edge. This leaves Windows' real wallpaper visible around the dock and prevents a
 separate wallpaper approximation from creating a horizontal seam. The AppBar reacts
 to position changes, re-registers after Explorer starts, and uses bounded startup
-settling plus the taskbar guard to repair a dropped reservation. Graceful shutdown
-removes the gap and restores every native taskbar.
+settling plus the taskbar guard to repair a dropped reservation. The same guard repairs
+a hidden, de-topmost, or fullscreen-occluded dock surface without activating it.
+Graceful shutdown removes the gap and restores every native taskbar.
 The dock has no custom task switcher, window mover, or Explorer injection. Windhawk's
 taskbar styler remains installed as rollback material, disabled with its service manual.
 
