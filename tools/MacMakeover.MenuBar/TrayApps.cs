@@ -186,18 +186,3 @@ internal static class TrayAppLauncher
         Process.Start(new ProcessStartInfo(app.ExecutablePath) { UseShellExecute = true });
     }
 }
-
-internal sealed class TrayMenuColorTable : ProfessionalColorTable
-{
-    private static readonly Color Surface = Color.FromArgb(32, 36, 43);
-    private static readonly Color Hover = Color.FromArgb(54, 61, 72);
-    private static readonly Color Edge = Color.FromArgb(82, 93, 107);
-
-    public override Color ToolStripDropDownBackground => Surface;
-    public override Color ImageMarginGradientBegin => Surface;
-    public override Color ImageMarginGradientMiddle => Surface;
-    public override Color ImageMarginGradientEnd => Surface;
-    public override Color MenuItemSelected => Hover;
-    public override Color MenuItemBorder => Edge;
-    public override Color ToolStripBorder => Edge;
-}

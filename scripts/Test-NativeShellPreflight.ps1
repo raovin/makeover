@@ -108,6 +108,10 @@ if ($trayAppsSource -notmatch 'NotifyIconSettings' -or
     $menuBarProgramSource -notmatch '--snapshot-tray') {
   $failures.Add('MenuBar no longer discovers and renders live notification-area applications.')
 }
+if ($menuBarSource -match 'TrayOverflow|Take\(3\)|Skip\(3\)' -or
+    $menuBarSource -notmatch 'foreach \(var app in snapshot\.TrayApps\)') {
+  $failures.Add('MenuBar must render every live notification-area app inline without an overflow control.')
+}
 if ($awakeProgramSource -notmatch 'EventWaitHandle' -or
     $awakeProgramSource -notmatch 'showEvent\.Set\(\)' -or
     $awakeContextSource -notmatch 'ContextMenuStrip\?\.Show\(Cursor\.Position\)') {

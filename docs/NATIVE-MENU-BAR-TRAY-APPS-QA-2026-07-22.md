@@ -11,8 +11,8 @@ control surface.
 
 - Read registered Windows notification icons and match them to live executable paths.
 - Exclude shell-owned system icons already represented by menu-bar controls.
-- Render three live app extras immediately left of the connection control and expose
-  every additional active registration in a dark overflow menu.
+- Render every live app extra inline immediately left of the connection control; the
+  production display widths do not require a secondary overflow interaction.
 - Prefer the executable's full-quality icon and use Windows' saved tray snapshot as
   a fallback.
 - Show the app name on hover and activate its existing window or executable on click.
@@ -52,3 +52,7 @@ control surface.
   DNS targets, ten successful DNS lookups, successful HTTPS through Proton VPN, and no
   Wi-Fi reset/error events. A 60-second four-process soak found no restart, hang, or
   sustained handle, thread, or working-set growth.
+- Clicking the former overflow exposed a WinForms disposal race in the old release: its
+  `ContextMenuStrip` could dispose while the modal menu filter was still closing it. The
+  inline-all design removes both the extra click and that failure path. A preflight source
+  gate rejects any return of the three-item cap or overflow control.

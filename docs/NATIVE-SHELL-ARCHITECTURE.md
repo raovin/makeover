@@ -32,9 +32,9 @@ The current visual target is captured in
 - Left: Apple mark and focused application.
 - Center: CPU, RAM, best-route network throughput, explicit battery/charging
   source, and the active Windows AC/DC power mode.
-- Right: three live notification-area app extras plus a dark overflow menu, actual
-  connection type, Bluetooth, volume, Control Center, date, and bell. Tray-first apps
-  stay out of the dock, use their real registered icon, and activate from the menu bar.
+- Right: every live notification-area app extra, actual connection type, Bluetooth,
+  volume, Control Center, date, and bell. Tray-first apps stay out of the dock, use
+  their real registered icon, and activate directly from the menu bar.
 - Segoe UI Variable Text and its native semibold face render every text cluster on
   one baseline. Native hinting keeps the 100% external display as crisp as the
   150% laptop panel; geometry and type receive separate optical scaling.

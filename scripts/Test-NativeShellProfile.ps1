@@ -358,8 +358,13 @@ if ($dock.Count -eq 1 -and $dock[0].WorkingSet64 -gt 120MB) {
 
 $menuBarLog = Join-Path $env:LOCALAPPDATA 'MacMakeover\menu-bar.log'
 if (Test-Path -LiteralPath $menuBarLog) {
-  $recentErrors = Get-Content -LiteralPath $menuBarLog -Tail 100 |
-    Where-Object { $_ -match 'exception|failed' }
+  $menuBarStartedAt = if ($menuBar.Count -eq 1) { $menuBar[0].StartTime.AddSeconds(-1) } else { Get-Date }
+  $recentErrors = Get-Content -LiteralPath $menuBarLog -Tail 200 |
+    Where-Object {
+      if ($_ -notmatch 'exception|failed') { return $false }
+      if ($_ -notmatch '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') { return $true }
+      [datetime]::ParseExact($Matches[1], 'yyyy-MM-ddTHH:mm:ss', $null) -ge $menuBarStartedAt
+    }
   if ($recentErrors) {
     $warnings.Add('Recent MenuBar diagnostics contain an error; inspect menu-bar.log.')
   }
