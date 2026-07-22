@@ -169,6 +169,10 @@ if ($menuHostSource -notmatch 'PowerLineStatus\.Online && pct < 100') {
 }
 
 $dockSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Dock\Program.cs') -Raw
+$workAreaSource = [regex]::Match(
+  $dockSource,
+  'internal sealed class WorkAreaGapForm[\s\S]*?(?=internal sealed class DockForm)'
+).Value
 if ($dockSource -notmatch 'WsExNoActivate' -or $dockSource -notmatch 'WsExToolWindow') {
   $failures.Add('Dock must remain a non-activating tool window and stay out of Alt+Tab.')
 }
@@ -219,13 +223,16 @@ if ($dockSource -notmatch 'dispatcher\.InvokeRequired' -or
     $dockSource -notmatch 'Interlocked\.Exchange\(ref _displayRebuildPending') {
   $failures.Add('Dock display changes are no longer marshalled and deduplicated on the UI thread.')
 }
-if ($dockSource -notmatch 'class DockBackdropForm' -or
+if ($dockSource -match 'class DockBackdropForm' -or
+    $workAreaSource -notmatch 'ReservationAnchorSize = 1' -or
+    $workAreaSource -notmatch 'Opacity = 0' -or
+    $workAreaSource -match 'WallpaperSlice\.Draw' -or
+    $workAreaSource -notmatch 'data\.Bounds\.Left,\s*data\.Bounds\.Bottom - ReservationAnchorSize,\s*ReservationAnchorSize,\s*ReservationAnchorSize' -or
     $dockSource -notmatch 'WsExLayered' -or
     $dockSource -notmatch 'WsExTransparent' -or
-    $dockSource -notmatch 'WallpaperSlice\.Draw' -or
     $dockSource -notmatch 'Region = new Region\(path\)' -or
     $dockSource -notmatch '_frame\.Width <= 0') {
-  $failures.Add('Dock no longer isolates its wallpaper-backed click-through strip from the interactive rounded frame.')
+  $failures.Add('Dock reservation must use a nonpainting 1 px anchor and leave the real desktop visible around the rounded frame.')
 }
 if ($dockSource -match 'RegisterHotKey|SetWindowsHookEx') {
   $failures.Add('Dock must not own global keyboard hooks.')

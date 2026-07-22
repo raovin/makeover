@@ -80,11 +80,13 @@ window or asks the shell to launch the pinned app.
 Windows' native taskbar windows remain alive for Explorer ownership but are visually
 hidden while the dock runs. Hidden taskbars no longer retain work-area reservations
 on current Windows builds, so a transparent `WorkAreaGapForm` AppBar owns the full
-visual dock height plus its 8 px breathing room. It reacts to AppBar position changes,
-re-registers after Explorer starts, and uses bounded startup settling plus the taskbar
-guard to repair a dropped reservation. The reservation window is pinned to the bottom
-of z-order and must never paint above the dock surface. Graceful shutdown removes the
-gap and restores every native taskbar.
+visual dock height plus its 8 px breathing room. Explorer records that full reserved
+rectangle, while the AppBar's actual HWND is a nonpainting 1 px anchor at the bottom
+edge. This leaves Windows' real wallpaper visible around the dock and prevents a
+separate wallpaper approximation from creating a horizontal seam. The AppBar reacts
+to position changes, re-registers after Explorer starts, and uses bounded startup
+settling plus the taskbar guard to repair a dropped reservation. Graceful shutdown
+removes the gap and restores every native taskbar.
 The dock has no custom task switcher, window mover, or Explorer injection. Windhawk's
 taskbar styler remains installed as rollback material, disabled with its service manual.
 

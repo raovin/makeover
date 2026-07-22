@@ -70,7 +70,6 @@ internal sealed class DockContext : ApplicationContext
     private readonly bool _previewHover;
     private readonly List<DockForm> _forms = [];
     private readonly List<WorkAreaGapForm> _gapForms = [];
-    private readonly List<DockBackdropForm> _backdropForms = [];
     private readonly List<IntPtr> _taskbars = [];
     private readonly System.Windows.Forms.Timer _taskbarGuard = new() { Interval = 1500 };
     private readonly RegisteredWaitHandle _exitRegistration;
@@ -111,9 +110,6 @@ internal sealed class DockContext : ApplicationContext
                 var gapForm = new WorkAreaGapForm(screen);
                 _gapForms.Add(gapForm);
                 gapForm.Show();
-                var backdropForm = new DockBackdropForm(screen);
-                _backdropForms.Add(backdropForm);
-                backdropForm.Show();
             }
             var form = new DockForm(screen, apps, _preview, _previewHover);
             form.FormClosed += (_, _) => { _forms.Remove(form); if (!_rebuilding && !_exiting && _forms.Count == 0) ExitThread(); };
@@ -149,8 +145,6 @@ internal sealed class DockContext : ApplicationContext
             _forms.Clear();
             foreach (var gapForm in _gapForms.ToArray()) gapForm.Close();
             _gapForms.Clear();
-            foreach (var backdropForm in _backdropForms.ToArray()) backdropForm.Close();
-            _backdropForms.Clear();
             BuildForms();
         }
         finally { _rebuilding = false; }
@@ -182,7 +176,6 @@ internal sealed class DockContext : ApplicationContext
         _taskbarGuard.Dispose();
         foreach (var form in _forms.ToArray()) form.Dispose();
         foreach (var gapForm in _gapForms.ToArray()) gapForm.Dispose();
-        foreach (var backdropForm in _backdropForms.ToArray()) backdropForm.Dispose();
         foreach (var taskbar in _taskbars) NativeMethods.ShowWindow(taskbar, NativeMethods.SwShow);
         base.ExitThreadCore();
     }
@@ -191,6 +184,7 @@ internal sealed class DockContext : ApplicationContext
 internal sealed class WorkAreaGapForm : Form
 {
     private const int LogicalGap = 8;
+    private const int ReservationAnchorSize = 1;
     private const int WmNcHitTest = 0x0084;
     private static readonly IntPtr HtTransparent = new(-1);
     private readonly Screen _screen;
@@ -213,11 +207,9 @@ internal sealed class WorkAreaGapForm : Form
         ShowInTaskbar = false;
         TopMost = false;
         Enabled = false;
-        Opacity = 0.999;
-        BackColor = Color.FromArgb(16, 18, 28);
-        DoubleBuffered = true;
+        Opacity = 0;
         Location = new Point(screen.Bounds.Left, screen.Bounds.Bottom - 1);
-        Size = new Size(1, 1);
+        Size = new Size(ReservationAnchorSize, ReservationAnchorSize);
         _settleTimer.Tick += (_, _) => SettlePosition();
         Shown += (_, _) =>
         {
@@ -286,11 +278,10 @@ internal sealed class WorkAreaGapForm : Form
                 Handle,
                 NativeMethods.HwndBottom,
                 data.Bounds.Left,
-                data.Bounds.Top,
-                data.Bounds.Right - data.Bounds.Left,
-                data.Bounds.Bottom - data.Bounds.Top,
+                data.Bounds.Bottom - ReservationAnchorSize,
+                ReservationAnchorSize,
+                ReservationAnchorSize,
                 NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
-            Invalidate();
         }
         finally
         {
@@ -299,11 +290,6 @@ internal sealed class WorkAreaGapForm : Form
                 NativeMethods.SetThreadDpiAwarenessContext(previousDpiContext);
             }
         }
-    }
-
-    protected override void OnPaintBackground(PaintEventArgs e)
-    {
-        WallpaperSlice.Draw(e.Graphics, ClientRectangle, _screen.Bounds, Bounds.Top);
     }
 
     protected override void WndProc(ref Message message)
@@ -421,65 +407,6 @@ internal sealed class WorkAreaGapForm : Form
             _registered = false;
         }
         base.Dispose(disposing);
-    }
-}
-
-internal sealed class DockBackdropForm : Form
-{
-    private const int LogicalHeight = 48;
-    private const int WmNcHitTest = 0x0084;
-    private static readonly IntPtr HtTransparent = new(-1);
-    private readonly Screen _screen;
-
-    public DockBackdropForm(Screen screen)
-    {
-        _screen = screen;
-        AutoScaleMode = AutoScaleMode.None;
-        StartPosition = FormStartPosition.Manual;
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        TopMost = true;
-        Enabled = false;
-        Opacity = 0.999;
-        BackColor = Color.FromArgb(16, 18, 28);
-        DoubleBuffered = true;
-        Shown += (_, _) => PositionBackdrop();
-        DpiChanged += (_, _) => BeginInvoke(new Action(PositionBackdrop));
-    }
-
-    protected override bool ShowWithoutActivation => true;
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            var cp = base.CreateParams;
-            cp.ExStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate |
-                NativeMethods.WsExTransparent | NativeMethods.WsExLayered;
-            return cp;
-        }
-    }
-
-    private void PositionBackdrop()
-    {
-        var targetDpi = DisplayScale.DpiFor(_screen, DeviceDpi);
-        var height = (int)Math.Round(LogicalHeight * DisplayScale.For(_screen, targetDpi));
-        Bounds = new Rectangle(_screen.Bounds.Left, _screen.Bounds.Bottom - height, _screen.Bounds.Width, height);
-        Invalidate();
-    }
-
-    protected override void OnPaintBackground(PaintEventArgs e)
-    {
-        WallpaperSlice.Draw(e.Graphics, ClientRectangle, _screen.Bounds, Bounds.Top);
-    }
-
-    protected override void WndProc(ref Message message)
-    {
-        if (message.Msg == WmNcHitTest)
-        {
-            message.Result = HtTransparent;
-            return;
-        }
-        base.WndProc(ref message);
     }
 }
 
