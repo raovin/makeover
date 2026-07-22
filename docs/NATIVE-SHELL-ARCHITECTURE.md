@@ -77,6 +77,16 @@ has no transparent child controls: WinForms child transparency composites agains
 fallback color and creates black icon tiles. Clicking an item focuses a matching
 window or asks the shell to launch the pinned app.
 
+Taskbar-eligible windows from unpinned applications are enumerated once per second,
+grouped by executable, and appended as transient dock items. Multiple windows from
+one app share one icon; the item disappears after the last real window closes.
+Owned dialogs, cloaked windows, tool windows, lock/sign-in surfaces, and the shell's
+own processes are excluded. Packaged apps hosted by `ApplicationFrameHost` are
+separated by window title and deduplicated against their concrete process so Settings
+and simultaneous hosted apps each receive one item. Slot spacing contracts only when
+needed to keep a busy dock inside the current display.
+`--snapshot-running <path>` exposes the live classification as JSON for regression QA.
+
 Windows' native taskbar windows remain alive for Explorer ownership but are visually
 hidden while the dock runs. Hidden taskbars no longer retain work-area reservations
 on current Windows builds, so a transparent `WorkAreaGapForm` AppBar owns the full
@@ -123,6 +133,8 @@ and `archive/seelen-ui/scripts/Restore-SeelenProfile.ps1`.
 6. Apple, Network, Bluetooth, Control Center, bell, date, volume, and corners are
    behaviorally independent.
 7. Explorer navigation, restart, and sign-in preserve one coherent shell.
-8. MenuBar and MenuHost stay below 100 MB; Dock stays below 120 MB without growth.
-9. Rollback never leaves Seelen and the native profile running together.
-10. Mixed-DPI signoff is repeated whenever the external display is connected.
+8. Unpinned Edge, Notepad, and packaged Windows apps appear while open and disappear
+   after their last taskbar window closes; pinned items remain stable.
+9. MenuBar and MenuHost stay below 100 MB; Dock stays below 120 MB without growth.
+10. Rollback never leaves Seelen and the native profile running together.
+11. Mixed-DPI signoff is repeated whenever the external display is connected.

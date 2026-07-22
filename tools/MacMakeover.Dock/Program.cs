@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 
 namespace MacMakeover.Dock;
@@ -19,6 +20,20 @@ internal static class Program
             ExportIcons(args[1]);
             return;
         }
+        if (args.Length >= 2 && args[0].Equals("--snapshot-running", StringComparison.OrdinalIgnoreCase))
+        {
+            var pinned = PinnedApp.Load();
+            var snapshot = RunningAppSnapshot.Capture(pinned).Select(app => new
+            {
+                app.Key,
+                app.Name,
+                app.ProcessName,
+                app.ExecutablePath,
+                Windows = app.Windows.Select(window => window.ToInt64()).ToArray()
+            });
+            File.WriteAllText(args[1], JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true }));
+            return;
+        }
         if (args.Any(value => value.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
         {
             try
@@ -30,6 +45,7 @@ internal static class Program
                     using var icon = app.LoadIcon(56);
                     if (icon is null) { Environment.ExitCode = 3; return; }
                 }
+                _ = RunningAppSnapshot.Capture(apps);
                 Environment.ExitCode = 0;
             }
             catch { Environment.ExitCode = 4; }
@@ -418,9 +434,12 @@ internal sealed class DockForm : Form
     private const int HorizontalPadding = 22;
     private readonly Screen _screen;
     private readonly bool _preview;
+    private readonly IReadOnlyList<PinnedApp> _pinnedApps;
     private readonly List<DockItem> _items = [];
+    private readonly List<DockItem> _pinnedItems = [];
+    private readonly Dictionary<string, DockItem> _runningItems = new(StringComparer.OrdinalIgnoreCase);
     private readonly ToolTip _toolTip = new() { InitialDelay = 450, ReshowDelay = 100, AutoPopDelay = 5000 };
-    private readonly System.Windows.Forms.Timer _stateTimer = new() { Interval = 3000 };
+    private readonly System.Windows.Forms.Timer _stateTimer = new() { Interval = 1000 };
     private Rectangle _frame;
     private float _visualScale = 1F;
     private int _hoveredItem = -1;
@@ -429,6 +448,7 @@ internal sealed class DockForm : Form
     {
         _screen = screen;
         _preview = preview;
+        _pinnedApps = apps;
         AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
@@ -438,7 +458,9 @@ internal sealed class DockForm : Form
         DoubleBuffered = true;
         foreach (var app in apps)
         {
-            _items.Add(new DockItem(app, IconSize));
+            var item = new DockItem(app, IconSize);
+            _items.Add(item);
+            _pinnedItems.Add(item);
         }
         if (preview && previewHover) _hoveredItem = Math.Min(4, _items.Count - 1);
         MouseMove += OnDockMouseMove;
@@ -447,14 +469,14 @@ internal sealed class DockForm : Form
         Shown += (_, _) =>
         {
             Location = _screen.Bounds.Location;
-            BeginInvoke(new Action(PositionDock));
+            BeginInvoke(new Action(() =>
+            {
+                RefreshDockState();
+                PositionDock();
+            }));
         };
         DpiChanged += (_, _) => BeginInvoke(new Action(PositionDock));
-        _stateTimer.Tick += (_, _) =>
-        {
-            var running = SnapshotProcesses();
-            if (_items.Any(item => item.RefreshState(running))) Invalidate();
-        };
+        _stateTimer.Tick += (_, _) => RefreshDockState();
         _stateTimer.Start();
     }
 
@@ -470,9 +492,13 @@ internal sealed class DockForm : Form
         var bottom = _preview ? _screen.WorkingArea.Bottom : _screen.Bounds.Bottom;
         Location = new Point(_screen.Bounds.Left, bottom - height);
         Size = new Size(_screen.Bounds.Width, height);
-        var slotWidth = (int)Math.Round(SlotWidth * scale);
+        var maximumFrameWidth = Width - (int)Math.Round(16 * scale);
+        var horizontalPadding = (int)Math.Round(HorizontalPadding * 2 * scale);
+        var preferredSlotWidth = (int)Math.Round(SlotWidth * scale);
+        var availableSlotWidth = Math.Max(1, maximumFrameWidth - horizontalPadding) / Math.Max(1, _items.Count);
+        var slotWidth = Math.Min(preferredSlotWidth, Math.Max(1, availableSlotWidth));
         var contentWidth = _items.Count * slotWidth;
-        var frameWidth = contentWidth + (int)Math.Round(HorizontalPadding * 2 * scale);
+        var frameWidth = Math.Min(maximumFrameWidth, contentWidth + horizontalPadding);
         var frameHeight = (int)Math.Round(42 * scale);
         if ((height - frameHeight) % 2 != 0) frameHeight--;
         _frame = new Rectangle((Width - frameWidth) / 2, (Height - frameHeight) / 2, frameWidth, frameHeight);
@@ -563,6 +589,45 @@ internal sealed class DockForm : Form
             finally { process.Dispose(); }
         }
         return names;
+    }
+
+    private void RefreshDockState()
+    {
+        var visualChanged = false;
+        var runningProcesses = SnapshotProcesses();
+        foreach (var item in _pinnedItems)
+        {
+            visualChanged |= item.RefreshPinnedState(runningProcesses);
+        }
+
+        var layoutChanged = false;
+        var snapshots = RunningAppSnapshot.Capture(_pinnedApps);
+        var currentKeys = new HashSet<string>(snapshots.Select(snapshot => snapshot.Key), StringComparer.OrdinalIgnoreCase);
+        foreach (var staleKey in _runningItems.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
+        {
+            var stale = _runningItems[staleKey];
+            _runningItems.Remove(staleKey);
+            _items.Remove(stale);
+            stale.Dispose();
+            layoutChanged = true;
+        }
+
+        foreach (var snapshot in snapshots)
+        {
+            if (_runningItems.TryGetValue(snapshot.Key, out var existing))
+            {
+                visualChanged |= existing.UpdateRunningApp(snapshot);
+                continue;
+            }
+
+            var item = new DockItem(snapshot, IconSize);
+            _runningItems.Add(snapshot.Key, item);
+            _items.Add(item);
+            layoutChanged = true;
+        }
+
+        if (layoutChanged) PositionDock();
+        else if (visualChanged) Invalidate();
     }
 
     protected override void Dispose(bool disposing)
@@ -663,26 +728,41 @@ internal static class DisplayScale
 
 internal sealed class DockItem : IDisposable
 {
-    private readonly PinnedApp _app;
+    private readonly PinnedApp? _pinnedApp;
+    private RunningApp? _runningApp;
     private readonly Image? _icon;
     private float _visualScale = 1F;
     private bool _running;
 
     public DockItem(PinnedApp app, int iconSize)
     {
-        _app = app;
+        _pinnedApp = app;
         _icon = app.LoadIcon(iconSize * 3);
     }
 
-    public string Name => _app.Name;
+    public DockItem(RunningAppSnapshot app, int iconSize)
+    {
+        _runningApp = new RunningApp(app);
+        _icon = _runningApp.LoadIcon(iconSize * 3);
+        _running = true;
+    }
+
+    public string Name => _pinnedApp?.Name ?? _runningApp?.Name ?? string.Empty;
     public Rectangle Bounds { get; private set; }
 
-    public bool RefreshState(IReadOnlySet<string> processes)
+    public bool RefreshPinnedState(IReadOnlySet<string> processes)
     {
-        var running = _app.IsRunning(processes);
+        if (_pinnedApp is null) return false;
+        var running = _pinnedApp.IsRunning(processes);
         if (running == _running) return false;
         _running = running;
         return true;
+    }
+
+    public bool UpdateRunningApp(RunningAppSnapshot snapshot)
+    {
+        if (_runningApp is null) return false;
+        return _runningApp.Update(snapshot);
     }
 
     public void SetLayout(Rectangle bounds, float visualScale)
@@ -691,27 +771,32 @@ internal sealed class DockItem : IDisposable
         _visualScale = visualScale;
     }
 
-    public void ActivateOrLaunch() => _app.ActivateOrLaunch();
+    public void ActivateOrLaunch()
+    {
+        if (_pinnedApp is not null) _pinnedApp.ActivateOrLaunch();
+        else _runningApp?.Activate();
+    }
 
     public void Draw(Graphics graphics, bool hovered)
     {
         var scale = _visualScale;
         if (_icon != null)
         {
-            var size = (int)Math.Round((hovered ? 30 : 28) * scale);
+            var preferredSize = (int)Math.Round((hovered ? 30 : 28) * scale);
+            var size = Math.Max(4, Math.Min(preferredSize, Bounds.Width - (int)Math.Round(6 * scale)));
             var x = Bounds.Left + (Bounds.Width - size) / 2;
             var y = Bounds.Top + (Bounds.Height - size) / 2 - (int)Math.Round((hovered ? 3 : 2) * scale);
             graphics.DrawImage(_icon, new Rectangle(x, y, size, size));
         }
         else
         {
-            var size = (int)Math.Round(28 * scale);
+            var size = Math.Max(4, Math.Min((int)Math.Round(28 * scale), Bounds.Width - (int)Math.Round(6 * scale)));
             var x = Bounds.Left + (Bounds.Width - size) / 2;
             var y = Bounds.Top + (Bounds.Height - size) / 2 - (int)Math.Round(2 * scale);
             using var tile = new SolidBrush(Color.FromArgb(255, 57, 66, 78));
             graphics.FillEllipse(tile, x, y, size, size);
             using var font = new Font("Segoe UI Semibold", 9.5f * scale, FontStyle.Bold, GraphicsUnit.Pixel);
-            TextRenderer.DrawText(graphics, string.Concat(_app.Name.Where(char.IsLetter).Take(2)).ToUpperInvariant(), font, new Rectangle(x, y, size, size), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(graphics, string.Concat(Name.Where(char.IsLetter).Take(2)).ToUpperInvariant(), font, new Rectangle(x, y, size, size), Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
         if (_running)
         {
@@ -727,6 +812,195 @@ internal sealed class DockItem : IDisposable
     }
 
     public void Dispose() => _icon?.Dispose();
+}
+
+internal sealed record RunningAppSnapshot(
+    string Key,
+    string Name,
+    string ProcessName,
+    string? ExecutablePath,
+    IntPtr[] Windows)
+{
+    private static readonly HashSet<string> ExcludedProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "MacMakeover.Dock", "MacMakeover.MenuBar", "MacMakeover.MenuHost",
+        "ShellExperienceHost", "StartMenuExperienceHost", "SearchHost", "TextInputHost",
+        "LockApp", "LogonUI"
+    };
+
+    public static IReadOnlyList<RunningAppSnapshot> Capture(IReadOnlyList<PinnedApp> pinnedApps)
+    {
+        var groups = new Dictionary<string, RunningAppAccumulator>(StringComparer.OrdinalIgnoreCase);
+        NativeMethods.EnumWindows((window, _) =>
+        {
+            if (!IsTaskbarWindow(window)) return true;
+            NativeMethods.GetWindowThreadProcessId(window, out var processId);
+            if (processId == 0 || processId == Environment.ProcessId) return true;
+
+            try
+            {
+                using var process = Process.GetProcessById((int)processId);
+                var processName = process.ProcessName;
+                if (ExcludedProcesses.Contains(processName) || pinnedApps.Any(app => app.MatchesProcess(processName))) return true;
+
+                string? executablePath = null;
+                try { executablePath = process.MainModule?.FileName; }
+                catch (System.ComponentModel.Win32Exception) { }
+                catch (InvalidOperationException) { }
+
+                var title = WindowTitle(window);
+                var name = DisplayName(processName, executablePath, title);
+                // ApplicationFrameHost can own several unrelated packaged apps at once.
+                // Keep each titled surface distinct, then remove duplicate host entries
+                // when the app also exposes its concrete process below.
+                var key = processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)
+                    ? $"{processName}:{title}"
+                    : string.IsNullOrWhiteSpace(executablePath) ? processName : executablePath;
+                if (!groups.TryGetValue(key, out var group))
+                {
+                    group = new RunningAppAccumulator(key, name, processName, executablePath);
+                    groups.Add(key, group);
+                }
+                group.Windows.Add(window);
+            }
+            catch (ArgumentException) { }
+            catch (InvalidOperationException) { }
+            return true;
+        }, IntPtr.Zero);
+
+        var concreteNames = groups.Values
+            .Where(group => !group.ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
+            .Select(group => group.Name)
+            .ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+        return groups.Values
+            .Where(group => !group.ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) ||
+                            !concreteNames.Contains(group.Name))
+            .OrderBy(group => group.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(group => new RunningAppSnapshot(
+                group.Key,
+                group.Name,
+                group.ProcessName,
+                group.ExecutablePath,
+                group.Windows.ToArray()))
+            .ToArray();
+    }
+
+    private static bool IsTaskbarWindow(IntPtr window)
+    {
+        if (window == IntPtr.Zero || !NativeMethods.IsWindowVisible(window)) return false;
+        var extendedStyle = NativeMethods.GetWindowLongPtr(window, NativeMethods.GwlExStyle).ToInt64();
+        if ((extendedStyle & NativeMethods.WsExToolWindow) != 0) return false;
+        if (NativeMethods.GetWindow(window, NativeMethods.GwOwner) != IntPtr.Zero &&
+            (extendedStyle & NativeMethods.WsExAppWindow) == 0) return false;
+        if (NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DwmwaCloaked, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return false;
+        return !string.IsNullOrWhiteSpace(WindowTitle(window));
+    }
+
+    private static string WindowTitle(IntPtr window)
+    {
+        var length = NativeMethods.GetWindowTextLength(window);
+        if (length <= 0) return string.Empty;
+        var title = new StringBuilder(length + 1);
+        NativeMethods.GetWindowText(window, title, title.Capacity);
+        return title.ToString().Trim();
+    }
+
+    private static string DisplayName(string processName, string? executablePath, string title)
+    {
+        var knownName = processName.ToLowerInvariant() switch
+        {
+            "msedge" => "Microsoft Edge",
+            "notepad" => "Notepad",
+            "mspaint" => "Paint",
+            "snippingtool" => "Snipping Tool",
+            "systemsettings" => "Settings",
+            "applicationframehost" => string.IsNullOrWhiteSpace(title) ? "Windows App" : title,
+            _ => null
+        };
+        if (knownName is not null) return knownName;
+
+        if (!string.IsNullOrWhiteSpace(executablePath))
+        {
+            try
+            {
+                var version = FileVersionInfo.GetVersionInfo(executablePath);
+                if (!string.IsNullOrWhiteSpace(version.FileDescription))
+                {
+                    var description = version.FileDescription.Trim();
+                    return description.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                        ? Path.GetFileNameWithoutExtension(description)
+                        : description;
+                }
+                if (!string.IsNullOrWhiteSpace(version.ProductName)) return version.ProductName.Trim();
+            }
+            catch (FileNotFoundException) { }
+        }
+        return string.IsNullOrWhiteSpace(title) ? processName : title;
+    }
+
+    private sealed class RunningAppAccumulator(string key, string name, string processName, string? executablePath)
+    {
+        public string Key { get; } = key;
+        public string Name { get; } = name;
+        public string ProcessName { get; } = processName;
+        public string? ExecutablePath { get; } = executablePath;
+        public List<IntPtr> Windows { get; } = [];
+    }
+}
+
+internal sealed class RunningApp
+{
+    private IntPtr[] _windows;
+
+    public RunningApp(RunningAppSnapshot snapshot)
+    {
+        Name = snapshot.Name;
+        ProcessName = snapshot.ProcessName;
+        ExecutablePath = snapshot.ExecutablePath;
+        _windows = snapshot.Windows;
+    }
+
+    public string Name { get; private set; }
+    public string ProcessName { get; }
+    public string? ExecutablePath { get; }
+
+    public bool Update(RunningAppSnapshot snapshot)
+    {
+        var changed = !string.Equals(Name, snapshot.Name, StringComparison.Ordinal) ||
+                      !_windows.SequenceEqual(snapshot.Windows);
+        Name = snapshot.Name;
+        _windows = snapshot.Windows;
+        return changed;
+    }
+
+    public void Activate()
+    {
+        foreach (var window in _windows.Where(NativeMethods.IsWindow))
+        {
+            if (NativeMethods.IsIconic(window)) NativeMethods.ShowWindow(window, NativeMethods.SwRestore);
+            if (NativeMethods.SetForegroundWindow(window)) return;
+        }
+    }
+
+    public Image? LoadIcon(int size)
+    {
+        if (!string.IsNullOrWhiteSpace(ExecutablePath) && File.Exists(ExecutablePath))
+        {
+            var fileIcon = PinnedApp.LoadFileIcon(ExecutablePath, size);
+            if (fileIcon is not null) return fileIcon;
+        }
+
+        foreach (var window in _windows)
+        {
+            var iconHandle = NativeMethods.SendMessage(window, NativeMethods.WmGetIcon, new IntPtr(NativeMethods.IconBig2), IntPtr.Zero);
+            if (iconHandle == IntPtr.Zero) iconHandle = NativeMethods.SendMessage(window, NativeMethods.WmGetIcon, new IntPtr(NativeMethods.IconBig), IntPtr.Zero);
+            if (iconHandle == IntPtr.Zero) iconHandle = NativeMethods.GetClassLongPtr(window, NativeMethods.GclpHIcon);
+            if (iconHandle == IntPtr.Zero) continue;
+            using var icon = Icon.FromHandle(iconHandle);
+            return new Bitmap(icon.ToBitmap(), new Size(size, size));
+        }
+        return null;
+    }
 }
 
 internal sealed class PinnedApp
@@ -760,6 +1034,8 @@ internal sealed class PinnedApp
     }
 
     public bool IsRunning(IReadOnlySet<string> processes) => Processes.GetValueOrDefault(Name, []).Any(processes.Contains);
+
+    public bool MatchesProcess(string processName) => Processes.GetValueOrDefault(Name, []).Contains(processName, StringComparer.OrdinalIgnoreCase);
 
     public void ActivateOrLaunch()
     {
@@ -806,7 +1082,7 @@ internal sealed class PinnedApp
         return LoadShellItemIcon(source, size) ?? LoadFileIcon(source, size);
     }
 
-    private static Image? LoadFileIcon(string source, int size)
+    internal static Image? LoadFileIcon(string source, int size)
     {
         var result = NativeMethods.SHGetFileInfo(source, 0, out var info, (uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.ShFileInfo>(), NativeMethods.ShgfiIcon | NativeMethods.ShgfiLargeIcon);
         if (result == IntPtr.Zero || info.Icon == IntPtr.Zero) return null;

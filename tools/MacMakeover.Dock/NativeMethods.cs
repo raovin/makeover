@@ -6,6 +6,7 @@ namespace MacMakeover.Dock;
 internal static class NativeMethods
 {
     public const int WsExToolWindow = 0x80;
+    public const int WsExAppWindow = 0x00040000;
     public const int WsExTransparent = 0x20;
     public const int WsExLayered = 0x80000;
     public const int WsExNoActivate = 0x08000000;
@@ -18,6 +19,13 @@ internal static class NativeMethods
     public const int SwHide = 0;
     public const int SwShow = 5;
     public const int SwRestore = 9;
+    public const int GwlExStyle = -20;
+    public const uint GwOwner = 4;
+    public const int DwmwaCloaked = 14;
+    public const int WmGetIcon = 0x007F;
+    public const int IconBig = 1;
+    public const int IconBig2 = 2;
+    public const int GclpHIcon = -14;
     public static readonly IntPtr HwndTopMost = new(-1);
     public static readonly IntPtr HwndBottom = new(1);
     public static readonly IntPtr DpiAwarenessContextPerMonitorAwareV2 = new(-4);
@@ -82,7 +90,14 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string message);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+    [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] public static extern IntPtr GetClassLongPtr(IntPtr window, int index);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextLength(IntPtr window);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, StringBuilder text, int maxCount);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(NativePoint point, uint flags);
@@ -95,4 +110,5 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr handle);
     [DllImport("gdi32.dll")] public static extern int GetObject(IntPtr handle, int size, out BitmapObject bitmap);
     [DllImport("gdi32.dll")] public static extern int GetDIBits(IntPtr deviceContext, IntPtr bitmap, uint firstScanLine, uint scanLineCount, IntPtr bits, ref BitmapInfo info, uint usage);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
 }

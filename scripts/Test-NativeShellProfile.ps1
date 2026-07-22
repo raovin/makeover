@@ -54,6 +54,57 @@ if ($hostSelfTest.ExitCode -ne 0) {
   $failures.Add("MenuHost Core Audio self-test failed after three attempts with exit code $($hostSelfTest.ExitCode).")
 }
 
+$dockExecutable = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
+$runningSnapshotPath = Join-Path $env:TEMP "macmakeover-running-apps-$PID.json"
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DockWindowProbe {
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr window);
+}
+'@
+try {
+  $snapshotProcess = Start-Process -FilePath $dockExecutable `
+    -ArgumentList '--snapshot-running', ('"{0}"' -f $runningSnapshotPath) `
+    -Wait -PassThru -WindowStyle Hidden
+  if ($snapshotProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $runningSnapshotPath)) {
+    $failures.Add("Dock running-app snapshot failed with exit code $($snapshotProcess.ExitCode).")
+  } else {
+    $runningSnapshot = @(Get-Content -LiteralPath $runningSnapshotPath -Raw | ConvertFrom-Json)
+    foreach ($app in $runningSnapshot) {
+      if ([string]::IsNullOrWhiteSpace($app.Name) -or
+          [string]::IsNullOrWhiteSpace($app.ProcessName) -or
+          @($app.Windows).Count -eq 0) {
+        $failures.Add('Dock running-app snapshot contains an incomplete item.')
+        break
+      }
+    }
+    $knownDynamicApps = @(
+      @{ Process = 'msedge'; Name = 'Microsoft Edge' }
+      @{ Process = 'notepad'; Name = 'Notepad' }
+      @{ Process = 'mspaint'; Name = 'Paint' }
+      @{ Process = 'SnippingTool'; Name = 'Snipping Tool' }
+      @{ Process = 'ApplicationFrameHost'; Name = 'Settings'; Title = 'Settings' }
+    )
+    foreach ($entry in $knownDynamicApps) {
+      $visible = @(Get-Process -Name $entry.Process -ErrorAction SilentlyContinue |
+        Where-Object {
+          $_.MainWindowHandle -ne [IntPtr]::Zero -and
+          [DockWindowProbe]::IsWindowVisible($_.MainWindowHandle) -and
+          (-not $entry.ContainsKey('Title') -or $_.MainWindowTitle -eq $entry.Title)
+        }).Count -gt 0
+      if ($visible -and $runningSnapshot.Name -notcontains $entry.Name) {
+        $failures.Add("Visible unpinned app is missing from the dock snapshot: $($entry.Name)")
+      }
+    }
+  }
+} catch {
+  $failures.Add("Dock running-app snapshot threw: $($_.Exception.Message)")
+} finally {
+  Remove-Item -LiteralPath $runningSnapshotPath -Force -ErrorAction SilentlyContinue
+}
+
 $seelenTask = Get-ScheduledTask -TaskPath '\Seelen\' -TaskName 'Seelen UI Service' -ErrorAction SilentlyContinue
 if ($seelenTask -and $seelenTask.State -ne 'Disabled') {
   $failures.Add('Seelen is still enabled at logon.')
