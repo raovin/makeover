@@ -13,7 +13,9 @@ $seelenTaskName = 'Seelen UI Service'
 $windhawkUiTaskName = 'WindhawkRunUITask'
 $wallpaperGuardTaskName = 'MacMakeover Wallpaper Guard'
 $desktopPolicyPath = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Policies\System'
-$hotCornersStartup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk'
+$hotCornersStartupRoot = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+$hotCornersStartupName = 'Mac Makeover Hot Corners.lnk'
+$hotCornersStartup = Join-Path $hotCornersStartupRoot $hotCornersStartupName
 $hotCornersStartupBackup = Join-Path $stateRoot 'hot-corners-startup.lnk'
 $wallpaperGuardRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\maintenance'
 $wallpaperGuardScript = Join-Path $wallpaperGuardRoot 'Repair-NativeWallpaperPolicy.ps1'
@@ -110,6 +112,10 @@ try {
     Copy-Item -LiteralPath $hotCornersStartup -Destination $hotCornersStartupBackup -Force
     Remove-Item -LiteralPath $hotCornersStartup -Force
   }
+  $hotCornersStartupVariants = @(
+    Get-ChildItem -LiteralPath $hotCornersStartupRoot -File -Filter "$hotCornersStartupName*" -ErrorAction SilentlyContinue
+  )
+  $hotCornersStartupVariants | Remove-Item -Force
   & (Join-Path $PSScriptRoot 'stop-hot-corners.ps1')
   Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
@@ -127,6 +133,7 @@ try {
     hotCornersStartupExisted = $hotCornersStartupExisted
     hotCornersStartupPath = $hotCornersStartup
     hotCornersStartupBackup = $hotCornersStartupBackup
+    hotCornersStartupVariantsRemoved = $hotCornersStartupVariants.Count
     wallpaperGuardTaskName = $wallpaperGuardTaskName
     wallpaperGuardScript = $wallpaperGuardScript
   } | ConvertTo-Json

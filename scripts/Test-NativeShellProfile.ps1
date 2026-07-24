@@ -97,6 +97,20 @@ using System.Runtime.InteropServices;
 public static class DockWindowProbe {
   [DllImport("user32.dll")]
   public static extern bool IsWindowVisible(IntPtr window);
+
+  [DllImport("dwmapi.dll")]
+  private static extern int DwmGetWindowAttribute(
+    IntPtr window,
+    int attribute,
+    out int value,
+    int valueSize);
+
+  public static bool IsWindowCloaked(IntPtr window) {
+    const int DwmwaCloaked = 14;
+    int cloaked;
+    return DwmGetWindowAttribute(window, DwmwaCloaked, out cloaked, sizeof(int)) == 0 &&
+      cloaked != 0;
+  }
 }
 '@
 try {
@@ -115,6 +129,7 @@ try {
         break
       }
     }
+    $runningSnapshotNames = @($runningSnapshot | ForEach-Object { $_.Name })
     $knownDynamicApps = @(
       @{ Process = 'msedge'; Name = 'Microsoft Edge' }
       @{ Process = 'notepad'; Name = 'Notepad' }
@@ -127,9 +142,10 @@ try {
         Where-Object {
           $_.MainWindowHandle -ne [IntPtr]::Zero -and
           [DockWindowProbe]::IsWindowVisible($_.MainWindowHandle) -and
+          -not [DockWindowProbe]::IsWindowCloaked($_.MainWindowHandle) -and
           (-not $entry.ContainsKey('Title') -or $_.MainWindowTitle -eq $entry.Title)
         }).Count -gt 0
-      if ($visible -and $runningSnapshot.Name -notcontains $entry.Name) {
+      if ($visible -and $runningSnapshotNames -notcontains $entry.Name) {
         $failures.Add("Visible unpinned app is missing from the dock snapshot: $($entry.Name)")
       }
     }
@@ -349,9 +365,13 @@ $hotCornerProcesses = Get-CimInstance Win32_Process -Filter "Name='powershell.ex
 if ($hotCornerProcesses) {
   $failures.Add('The polling hot-corner helper is still running.')
 }
-$hotCornerStartup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk'
-if (Test-Path -LiteralPath $hotCornerStartup) {
-  $failures.Add('The retired global hot-corner hook is still registered in the Startup folder.')
+$hotCornerStartupRoot = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+$hotCornerStartupArtifacts = @(
+  Get-ChildItem -LiteralPath $hotCornerStartupRoot -File -Filter 'Mac Makeover Hot Corners.lnk*' -ErrorAction SilentlyContinue
+)
+if ($hotCornerStartupArtifacts.Count -gt 0) {
+  $artifactNames = $hotCornerStartupArtifacts.Name -join ', '
+  $failures.Add("Retired global hot-corner artifacts remain in the Startup folder: $artifactNames")
 }
 $wallpaperGuard = Get-ScheduledTask -TaskName 'MacMakeover Wallpaper Guard' -ErrorAction SilentlyContinue
 if (-not $wallpaperGuard -or -not $wallpaperGuard.Settings.Enabled -or

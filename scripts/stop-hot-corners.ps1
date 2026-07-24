@@ -8,7 +8,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $keepaliveTaskName = "MacMakeover Hot Corners Keepalive"
-$startupShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk"
+$startupRoot = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
+$startupShortcutName = "Mac Makeover Hot Corners.lnk"
 
 # The keepalive task relaunches the helper every 5 minutes, so stopping the helper
 # without pausing the task would just resurrect it. Disable on stop, remove on unregister.
@@ -27,9 +28,14 @@ try {
   Write-Warning "Keepalive task cleanup skipped: $($_.Exception.Message)"
 }
 
-if ($Unregister -and (Test-Path -LiteralPath $startupShortcut)) {
-  Remove-Item -LiteralPath $startupShortcut -Force
-  Write-Host "Removed Startup shortcut: $startupShortcut"
+if ($Unregister) {
+  $startupArtifacts = @(
+    Get-ChildItem -LiteralPath $startupRoot -File -Filter "$startupShortcutName*" -ErrorAction SilentlyContinue
+  )
+  foreach ($artifact in $startupArtifacts) {
+    Remove-Item -LiteralPath $artifact.FullName -Force
+    Write-Host "Removed Startup artifact: $($artifact.FullName)"
+  }
 }
 
 if (-not $StopTaskOnly) {
