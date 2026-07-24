@@ -207,6 +207,9 @@ $workAreaSource = [regex]::Match(
 if ($dockSource -notmatch 'WsExNoActivate' -or $dockSource -notmatch 'WsExToolWindow') {
   $failures.Add('Dock must remain a non-activating tool window and stay out of Alt+Tab.')
 }
+if ($dockSource -notmatch '"OpenWith"') {
+  $failures.Add('Dock must exclude the Windows Open With dialog from transient application items.')
+}
 if ($dockSource -notmatch 'MaintainShellSurfaces' -or
     $dockSource -notmatch 'form\.EnsureVisible\(\)' -or
     $dockSource -notmatch 'NativeMethods\.HwndTopMost') {

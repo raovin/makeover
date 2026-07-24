@@ -31,6 +31,15 @@ Screenshots are captured under the ignored `qa/` directory:
 - `dynamic-dock-multi-app-production-20260722.png`
 - `dynamic-dock-after-removal-production-20260722.png`
 
+## System-dialog follow-up
+
+On 24 July, Windows left an `OpenWith.exe` "Pick an app" dialog running. Dynamic
+enumeration treated that shell dialog as an application and rendered its generic
+white-document icon after the final pinned item. `OpenWith` is now explicitly
+excluded alongside the other shell-owned surfaces. Preflight guards the exclusion,
+and `qa/openwith-dock-fix-20260724.png` confirms that Bitwarden is followed directly
+by the genuine Snipping Tool transient item on both displays.
+
 ## Gates
 
 - Release build: zero warnings and zero errors.

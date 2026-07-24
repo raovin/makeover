@@ -869,7 +869,7 @@ internal sealed record RunningAppSnapshot(
     {
         "MacMakeover.Dock", "MacMakeover.MenuBar", "MacMakeover.MenuHost",
         "ShellExperienceHost", "StartMenuExperienceHost", "SearchHost", "TextInputHost",
-        "LockApp", "LogonUI"
+        "LockApp", "LogonUI", "OpenWith"
     };
 
     public static IReadOnlyList<RunningAppSnapshot> Capture(IReadOnlyList<PinnedApp> pinnedApps)
