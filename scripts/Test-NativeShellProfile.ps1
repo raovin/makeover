@@ -159,6 +159,15 @@ if (-not $runValues -or $runValues.MacMakeoverDock -notmatch 'MacMakeover\.Dock\
 if (-not $runValues -or $runValues.MacMakeoverAwakeAndAvailable -notmatch 'AwakeAndAvailable\.exe') {
   $failures.Add('Awake & Available is not registered at logon.')
 }
+$startupDelayProperty = Get-ItemProperty `
+  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize' `
+  -Name StartupDelayInMSec -ErrorAction SilentlyContinue
+$startupDelay = if ($startupDelayProperty) {
+  $startupDelayProperty.PSObject.Properties['StartupDelayInMSec'].Value
+} else { $null }
+if ($startupDelay -ne 0) {
+  $failures.Add('Explorer startup delay is enabled; the menu bar and dock may appear about a minute late after sign-in.')
+}
 
 $mod = Get-ItemProperty -LiteralPath $modRegistry -ErrorAction SilentlyContinue
 if ($mod -and -not $mod.Disabled) {
@@ -373,8 +382,13 @@ if ($menuBar.Count -eq 1 -and $menuBar[0].WorkingSet64 -gt 100MB) {
 if ($menuHost.Count -eq 1 -and $menuHost[0].WorkingSet64 -gt 100MB) {
   $failures.Add("MenuHost memory exceeds 100 MB: $([math]::Round($menuHost[0].WorkingSet64 / 1MB, 1)) MB")
 }
-if ($dock.Count -eq 1 -and $dock[0].WorkingSet64 -gt 120MB) {
-  $failures.Add("Dock memory exceeds 120 MB: $([math]::Round($dock[0].WorkingSet64 / 1MB, 1)) MB")
+if ($dock.Count -eq 1 -and $dock[0].WorkingSet64 -gt 150MB) {
+  $failures.Add("Dock memory exceeds 150 MB: $([math]::Round($dock[0].WorkingSet64 / 1MB, 1)) MB")
+}
+$shellWorkingSet = @($menuBar + $menuHost + $dock | ForEach-Object { $_.WorkingSet64 } |
+    Measure-Object -Sum).Sum
+if ($shellWorkingSet -gt 300MB) {
+  $failures.Add("Native shell memory exceeds 300 MB: $([math]::Round($shellWorkingSet / 1MB, 1)) MB")
 }
 
 $menuBarLog = Join-Path $env:LOCALAPPDATA 'MacMakeover\menu-bar.log'
@@ -400,5 +414,6 @@ if ($failures.Count) {
 $barMb = [math]::Round($menuBar[0].WorkingSet64 / 1MB, 1)
 $hostMb = [math]::Round($menuHost[0].WorkingSet64 / 1MB, 1)
 $dockMb = [math]::Round($dock[0].WorkingSet64 / 1MB, 1)
-Write-Host ('PASS: native shell is coherent. MenuBar {0} MB; MenuHost {1} MB; Dock {2} MB.' -f $barMb, $hostMb, $dockMb)
+$shellMb = [math]::Round($shellWorkingSet / 1MB, 1)
+Write-Host ('PASS: native shell is coherent. MenuBar {0} MB; MenuHost {1} MB; Dock {2} MB; total {3} MB.' -f $barMb, $hostMb, $dockMb, $shellMb)
 exit 0

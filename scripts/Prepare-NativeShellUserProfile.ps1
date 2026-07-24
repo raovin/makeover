@@ -225,6 +225,13 @@ foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
 }
 
 if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
+$startupSerializeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize'
+if (-not (Test-Path -LiteralPath $startupSerializeKey)) {
+  New-Item -Path $startupSerializeKey -Force | Out-Null
+}
+# Windows otherwise defers Run-key applications for roughly a minute after Explorer.
+New-ItemProperty -LiteralPath $startupSerializeKey -Name StartupDelayInMSec `
+  -Value 0 -PropertyType DWord -Force | Out-Null
 $menuBar = Join-Path $deploymentRoot 'MacMakeover.MenuBar.exe'
 $menuHost = Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe'
 $dock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'

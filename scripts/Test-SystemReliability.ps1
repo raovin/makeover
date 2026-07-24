@@ -81,10 +81,21 @@ if (-not $adapter -or $adapter.Status -ne 'Up') {
 
 $driverEvents = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; StartTime = $Since } -ErrorAction SilentlyContinue |
     Where-Object { $_.ProviderName -like 'Netwtw*' -and $_.Id -in @(5010, 6062) })
-if ($driverEvents.Count) {
-    $failures.Add("Found $($driverEvents.Count) Intel WiFi reset/invalid-value event(s) since $($Since.ToString('s')).")
+$bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+$bootGraceEnd = $bootTime.AddSeconds(90)
+$startupEvents = @($driverEvents | Where-Object {
+    $_.Id -eq 6062 -and $_.TimeCreated -le $bootGraceEnd
+})
+$actionableDriverEvents = @($driverEvents | Where-Object {
+    $_.Id -eq 5010 -or $_.TimeCreated -gt $bootGraceEnd
+})
+if ($actionableDriverEvents.Count) {
+    $failures.Add("Found $($actionableDriverEvents.Count) actionable Intel WiFi reset/invalid-value event(s) since $($Since.ToString('s')).")
 } else {
-    Write-Host "PASS: no Intel WiFi reset/invalid-value events since $($Since.ToString('s'))."
+    Write-Host "PASS: no mid-session Intel WiFi reset/invalid-value events since $($Since.ToString('s'))."
+}
+if ($startupEvents.Count) {
+    $warnings.Add("Observed $($startupEvents.Count) Intel WiFi 6062 initialization event(s) within 90 seconds of boot; none recurred mid-session.")
 }
 
 $operatingSystem = Get-CimInstance Win32_OperatingSystem

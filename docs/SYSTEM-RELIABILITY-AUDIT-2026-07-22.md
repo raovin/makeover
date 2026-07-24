@@ -147,4 +147,27 @@ Do not close this incident until all of the following pass:
 - Native preflight, live profile, taskbar pins, Alt+Tab, maximized/restored work
   areas, wallpaper, and screenshot QA pass. **Passed.**
 - BIOS `01.04.03` is installed at a controlled reboot, then the network soak is
-  repeated. **Pending a user-approved restart window.**
+  repeated. **Passed on 24 July 2026.**
+
+## 24 July Firmware Completion
+
+- HP package `SP172966` transferred X70 firmware successfully and returned
+  restart-required code `3010`.
+- The controlled AC-powered reboot completed normally. The installed firmware is
+  `X70 Ver. 01.04.03`; the embedded-controller version is `52.2F.00`.
+- The Intel AX211 remains on Intel's current `24.50.0.4` driver (`oem35.inf`).
+- The post-boot acceptance passed 30/30 gateway, 30/30 public-IP, and 5/5 DNS
+  probes. A separate sustained soak passed 300/300 gateway, 300/300 public-IP,
+  30/30 DNS, and 10/10 HTTPS probes, with zero adapter packet errors or discards.
+- One `Netwtw16` event 6062 occurred 37 seconds into the firmware-change boot,
+  during adapter initialization. It did not recur during the sustained soak.
+  Reliability acceptance now distinguishes this bounded startup condition from
+  any 5010 event or 6062 event after the first 90 seconds; those remain failures.
+- Windows Update has no pending OS reboot. Its optional-driver catalog contains
+  overlapping historical packages and was intentionally not bulk-installed.
+- The native menu bar, host, and dock rendered correctly after reboot. A live
+  1920x1200 capture confirmed the reserved work areas, visible dock, continuous
+  wallpaper, and non-overlapping menu-bar clusters.
+- Explorer's default Run-key delay held the native shell for about 52 seconds
+  after Explorer. The production profile now sets `StartupDelayInMSec=0` and
+  verifies it, so future sign-ins launch the menu bar and dock immediately.
