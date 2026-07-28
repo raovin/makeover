@@ -463,11 +463,7 @@ internal sealed class MenuBarForm : Form
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
     }
 
-    internal static string PowerSourceLabel(SystemSnapshot snapshot) => snapshot.OnAcPower
-        ? snapshot.Charging
-            ? $"Charging {snapshot.BatteryPercent}%"
-            : $"Plugged in {snapshot.BatteryPercent}%"
-        : $"Battery {snapshot.BatteryPercent}%";
+    internal static string PowerSourceLabel(SystemSnapshot snapshot) => $"{snapshot.BatteryPercent}%";
 
     internal static bool ShowsExternalPowerIndicator(SystemSnapshot snapshot) => snapshot.OnAcPower;
 
