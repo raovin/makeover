@@ -371,7 +371,7 @@ internal sealed class MenuBarForm : Form
         var minimumX = leftEnd + Scale(8);
         var maximumX = rightStart - groupWidth - Scale(8);
         if (maximumX < minimumX) return;
-        var x = Math.Clamp((Width - groupWidth) / 2, minimumX, maximumX);
+        var x = leftEnd + (rightStart - leftEnd - groupWidth) / 2;
         foreach (var segment in segments)
         {
             var width = MeasureTelemetry(segment);

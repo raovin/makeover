@@ -610,9 +610,27 @@ internal sealed class DockForm : Form
 
     private void OnDockMouseUp(object? sender, MouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Left) return;
         var item = _items.FirstOrDefault(candidate => candidate.Bounds.Contains(e.Location));
-        item?.ActivateOrLaunch();
+        if (item is null) return;
+
+        if (e.Button == MouseButtons.Left)
+        {
+            item.ActivateOrLaunch();
+        }
+        else if (e.Button == MouseButtons.Right)
+        {
+            var menu = new ContextMenuStrip();
+            menu.BackColor = Color.FromArgb(30, 35, 46);
+            menu.ForeColor = Color.White;
+            menu.ShowImageMargin = false;
+            menu.Items.Add("Open", null, (_, _) => item.ActivateOrLaunch());
+            if (item.IsRunning)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add("Close Window", null, (_, _) => item.Close());
+            }
+            menu.Show(this, e.Location);
+        }
     }
 
     private static GraphicsPath Rounded(Rectangle rectangle, int radius)
@@ -793,6 +811,7 @@ internal sealed class DockItem : IDisposable
 
     public string Name => _pinnedApp?.Name ?? _runningApp?.Name ?? string.Empty;
     public Rectangle Bounds { get; private set; }
+    public bool IsRunning => _running;
 
     public bool RefreshPinnedState(IReadOnlySet<string> processes)
     {
@@ -819,6 +838,11 @@ internal sealed class DockItem : IDisposable
     {
         if (_pinnedApp is not null) _pinnedApp.ActivateOrLaunch();
         else _runningApp?.Activate();
+    }
+
+    public void Close()
+    {
+        _runningApp?.Close();
     }
 
     public void Draw(Graphics graphics, bool hovered)
@@ -1023,6 +1047,14 @@ internal sealed class RunningApp
         {
             if (NativeMethods.IsIconic(window)) NativeMethods.ShowWindow(window, NativeMethods.SwRestore);
             if (NativeMethods.SetForegroundWindow(window)) return;
+        }
+    }
+
+    public void Close()
+    {
+        foreach (var window in _windows.Where(NativeMethods.IsWindow))
+        {
+            NativeMethods.SendMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE
         }
     }
 
