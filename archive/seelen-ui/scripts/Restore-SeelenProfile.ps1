@@ -31,12 +31,24 @@ if (-not $SkipElevation) {
 }
 
 $dock = Join-Path $env:LOCALAPPDATA 'MacMakeover\bin\MacMakeover.Dock.exe'
+foreach ($taskName in 'MacMakeover Shell - MenuHost', 'MacMakeover Shell - MenuBar', 'MacMakeover Shell - Dock', 'MacMakeover Shell - Awake', 'MacMakeover Shell - Supervisor') {
+  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+}
 if (Test-Path -LiteralPath $dock) {
   Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
   Start-Sleep -Milliseconds 500
 }
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, AwakeAndAvailable -ErrorAction SilentlyContinue |
+Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, MacMakeover.Supervisor, AwakeAndAvailable -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
+$remainingNativeTasks = @(Get-ScheduledTask -TaskName 'MacMakeover Shell -*' -ErrorAction SilentlyContinue)
+if ($remainingNativeTasks.Count -gt 0) {
+  throw "Native-shell startup tasks remain after rollback: $($remainingNativeTasks.TaskName -join ', ')"
+}
+$remainingNativeProcesses = @(Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, MacMakeover.Supervisor, AwakeAndAvailable -ErrorAction SilentlyContinue)
+if ($remainingNativeProcesses.Count -gt 0) {
+  throw "Native-shell processes remain after rollback: $($remainingNativeProcesses.ProcessName -join ', ')"
+}
 Remove-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar, MacMakeoverMenuHost, MacMakeoverDock, MacMakeoverAwakeAndAvailable -ErrorAction SilentlyContinue
 
 function Restore-RegistrySnapshot([string]$Path, [string]$Name, $Snapshot) {

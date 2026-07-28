@@ -624,11 +624,15 @@ internal sealed class DockForm : Form
             menu.ForeColor = Color.White;
             menu.ShowImageMargin = false;
             menu.Items.Add("Open", null, (_, _) => item.ActivateOrLaunch());
-            if (item.IsRunning)
+            if (item.CanClose)
             {
                 menu.Items.Add(new ToolStripSeparator());
-                menu.Items.Add("Close Window", null, (_, _) => item.Close());
+                menu.Items.Add("Close All Windows", null, (_, _) =>
+                {
+                    if (!item.Close()) System.Media.SystemSounds.Exclamation.Play();
+                });
             }
+            menu.Closed += (_, _) => menu.Dispose();
             menu.Show(this, e.Location);
         }
     }
@@ -812,6 +816,7 @@ internal sealed class DockItem : IDisposable
     public string Name => _pinnedApp?.Name ?? _runningApp?.Name ?? string.Empty;
     public Rectangle Bounds { get; private set; }
     public bool IsRunning => _running;
+    public bool CanClose => _pinnedApp?.HasClosableWindows() ?? _runningApp?.HasClosableWindows() ?? false;
 
     public bool RefreshPinnedState(IReadOnlySet<string> processes)
     {
@@ -840,9 +845,9 @@ internal sealed class DockItem : IDisposable
         else _runningApp?.Activate();
     }
 
-    public void Close()
+    public bool Close()
     {
-        _runningApp?.Close();
+        return _pinnedApp is not null ? _pinnedApp.Close() : _runningApp?.Close() ?? false;
     }
 
     public void Draw(Graphics graphics, bool hovered)
@@ -953,7 +958,7 @@ internal sealed record RunningAppSnapshot(
             .ToArray();
     }
 
-    private static bool IsTaskbarWindow(IntPtr window)
+    internal static bool IsTaskbarWindow(IntPtr window)
     {
         if (window == IntPtr.Zero || !NativeMethods.IsWindowVisible(window)) return false;
         var extendedStyle = NativeMethods.GetWindowLongPtr(window, NativeMethods.GwlExStyle).ToInt64();
@@ -962,6 +967,14 @@ internal sealed record RunningAppSnapshot(
             (extendedStyle & NativeMethods.WsExAppWindow) == 0) return false;
         if (NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DwmwaCloaked, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return false;
         return !string.IsNullOrWhiteSpace(WindowTitle(window));
+    }
+
+    internal static string WindowClass(IntPtr window)
+    {
+        var className = new StringBuilder(256);
+        return NativeMethods.GetClassName(window, className, className.Capacity) > 0
+            ? className.ToString()
+            : string.Empty;
     }
 
     private static string WindowTitle(IntPtr window)
@@ -1031,6 +1044,7 @@ internal sealed class RunningApp
     public string Name { get; private set; }
     public string ProcessName { get; }
     public string? ExecutablePath { get; }
+    public bool HasClosableWindows() => _windows.Any(NativeMethods.IsWindow);
 
     public bool Update(RunningAppSnapshot snapshot)
     {
@@ -1050,12 +1064,14 @@ internal sealed class RunningApp
         }
     }
 
-    public void Close()
+    public bool Close()
     {
+        var succeeded = false;
         foreach (var window in _windows.Where(NativeMethods.IsWindow))
         {
-            NativeMethods.SendMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE
+            succeeded |= NativeMethods.PostMessage(window, NativeMethods.WmClose, IntPtr.Zero, IntPtr.Zero);
         }
+        return succeeded;
     }
 
     public Image? LoadIcon(int size)
@@ -1127,6 +1143,54 @@ internal sealed class PinnedApp
         var target = Shortcut ?? (AppId is null ? null : $"shell:AppsFolder\\{AppId}");
         if (target is null) return;
         Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+    }
+
+    public bool Close()
+    {
+        var succeeded = false;
+        foreach (var window in ClosableWindows())
+        {
+            succeeded |= NativeMethods.PostMessage(window, NativeMethods.WmClose, IntPtr.Zero, IntPtr.Zero);
+        }
+        return succeeded;
+    }
+
+    public bool HasClosableWindows() => ClosableWindows().Length > 0;
+
+    private IntPtr[] ClosableWindows()
+    {
+        var processIds = new HashSet<uint>();
+        var currentSessionId = Process.GetCurrentProcess().SessionId;
+        foreach (var processName in Processes.GetValueOrDefault(Name, []))
+        {
+            foreach (var process in Process.GetProcessesByName(processName))
+            {
+                using (process)
+                {
+                    try
+                    {
+                        if (process.SessionId == currentSessionId) processIds.Add((uint)process.Id);
+                    }
+                    catch (InvalidOperationException) { }
+                }
+            }
+        }
+        if (processIds.Count == 0) return [];
+
+        var windows = new List<IntPtr>();
+        NativeMethods.EnumWindows((window, _) =>
+        {
+            NativeMethods.GetWindowThreadProcessId(window, out var processId);
+            if (processIds.Contains(processId) &&
+                RunningAppSnapshot.IsTaskbarWindow(window) &&
+                (!Name.Equals("File Explorer", StringComparison.OrdinalIgnoreCase) ||
+                 RunningAppSnapshot.WindowClass(window) is "CabinetWClass" or "ExploreWClass"))
+            {
+                windows.Add(window);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return windows.ToArray();
     }
 
     public Image? LoadIcon(int size)

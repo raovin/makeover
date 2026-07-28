@@ -69,7 +69,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 Approve the one Windows UAC prompt. The promoter builds and stages the binaries,
 checks Core Audio and dock invariants, applies the privileged phase,
-restarts Explorer once, and runs acceptance checks.
+restarts Explorer once, starts each shell component through its own interactive
+scheduled task, and runs acceptance checks. A lightweight native watchdog re-runs
+any component task that exits unexpectedly. The task boundary keeps the shell alive
+when installation is launched by Codex, another agent, or a closing terminal.
 
 To verify an existing installation without changing it:
 
@@ -83,7 +86,8 @@ To verify an existing installation without changing it:
 
 Run rollback from a normal PowerShell session. It requests elevation only to
 disable the native profile and re-enable the Seelen scheduled task; user-profile state
-is restored after returning to the normal token.
+is restored after returning to the normal token. Rollback also removes all four
+native-shell startup tasks so the two shells cannot race at the next sign-in.
 
 ```powershell
 .\archive\seelen-ui\scripts\Restore-SeelenProfile.ps1

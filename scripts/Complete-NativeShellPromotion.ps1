@@ -3,6 +3,7 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'NativeShellTasks.ps1')
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -20,27 +21,19 @@ if (-not (Test-Path -LiteralPath $resultPath) -or (Get-Content -LiteralPath $res
 }
 
 $dock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
+Stop-NativeShellTasks -DeploymentRoot $deploymentRoot
 if (Test-Path -LiteralPath $dock) {
   Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
   Start-Sleep -Milliseconds 500
 }
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, AwakeAndAvailable, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
+Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, MacMakeover.Supervisor, AwakeAndAvailable, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
 Get-Process explorer -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
 Start-Sleep -Seconds 4
 
-$menuHost = Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe'
-$menuBar = Join-Path $deploymentRoot 'MacMakeover.MenuBar.exe'
-$awake = Join-Path $deploymentRoot 'AwakeAndAvailable.exe'
-Start-Process -FilePath $menuHost -WindowStyle Hidden
-Start-Sleep -Milliseconds 500
-Start-Process -FilePath $menuBar -WindowStyle Hidden
-Start-Sleep -Milliseconds 500
-Start-Process -FilePath $dock -WindowStyle Hidden
-Start-Sleep -Milliseconds 500
-Start-Process -FilePath $awake -WindowStyle Hidden
+Start-NativeShellTasks -DeploymentRoot $deploymentRoot
 Start-Sleep -Seconds 6
 
 $profileScript = Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1'

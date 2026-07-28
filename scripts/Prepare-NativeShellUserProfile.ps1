@@ -5,6 +5,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'NativeShellTasks.ps1')
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -169,6 +170,7 @@ foreach ($required in @(
     'MacMakeover.MenuHost.exe',
     'MacMakeover.Dock.exe',
     'AwakeAndAvailable.exe',
+    'MacMakeover.Supervisor.exe',
     'native-taskbar-pins.json',
     'Assets\apple-mark.png',
     'Assets\Fonts\Manrope-Regular.ttf',
@@ -181,11 +183,12 @@ foreach ($required in @(
 }
 
 $deployedDock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
+Stop-NativeShellTasks -DeploymentRoot $deploymentRoot
 if (Test-Path -LiteralPath $deployedDock) {
   Start-Process -FilePath $deployedDock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
   Start-Sleep -Milliseconds 500
 }
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, AwakeAndAvailable -ErrorAction SilentlyContinue |
+Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, MacMakeover.Supervisor, AwakeAndAvailable -ErrorAction SilentlyContinue |
   Stop-Process -Force -ErrorAction SilentlyContinue
 if ($artifactRoot -ne $deploymentRoot) {
   New-Item -ItemType Directory -Force -Path $deploymentRoot | Out-Null
@@ -229,17 +232,13 @@ $startupSerializeKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer
 if (-not (Test-Path -LiteralPath $startupSerializeKey)) {
   New-Item -Path $startupSerializeKey -Force | Out-Null
 }
-# Windows otherwise defers Run-key applications for roughly a minute after Explorer.
+# Keep any remaining user startup entries responsive; native-shell startup itself is task-based.
 New-ItemProperty -LiteralPath $startupSerializeKey -Name StartupDelayInMSec `
   -Value 0 -PropertyType DWord -Force | Out-Null
-$menuBar = Join-Path $deploymentRoot 'MacMakeover.MenuBar.exe'
-$menuHost = Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe'
-$dock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
-$awake = Join-Path $deploymentRoot 'AwakeAndAvailable.exe'
-New-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuHost -Value ('"{0}"' -f $menuHost) -PropertyType String -Force | Out-Null
-New-ItemProperty -LiteralPath $runKey -Name MacMakeoverMenuBar -Value ('"{0}"' -f $menuBar) -PropertyType String -Force | Out-Null
-New-ItemProperty -LiteralPath $runKey -Name MacMakeoverDock -Value ('"{0}"' -f $dock) -PropertyType String -Force | Out-Null
-New-ItemProperty -LiteralPath $runKey -Name MacMakeoverAwakeAndAvailable -Value ('"{0}"' -f $awake) -PropertyType String -Force | Out-Null
+Register-NativeShellTasks -DeploymentRoot $deploymentRoot
+foreach ($legacyRunValue in 'MacMakeoverMenuHost', 'MacMakeoverMenuBar', 'MacMakeoverDock', 'MacMakeoverAwakeAndAvailable') {
+  Remove-ItemProperty -LiteralPath $runKey -Name $legacyRunValue -ErrorAction SilentlyContinue
+}
 
 $prepared = [ordered]@{
   preparedAt = (Get-Date).ToString('o')

@@ -15,6 +15,7 @@ foreach ($required in @(
     (Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'),
     (Join-Path $DeploymentRoot 'MacMakeover.Dock.exe'),
     (Join-Path $DeploymentRoot 'AwakeAndAvailable.exe'),
+    (Join-Path $DeploymentRoot 'MacMakeover.Supervisor.exe'),
     (Join-Path $DeploymentRoot 'native-taskbar-pins.json'),
     (Join-Path $DeploymentRoot 'Assets\apple-mark.png'),
     (Join-Path $DeploymentRoot 'Assets\Fonts\Manrope-Regular.ttf'),
@@ -41,6 +42,7 @@ $scriptNames = @(
   'Capture-Desktop.ps1',
   'install-apps.ps1',
   'Install-NativeDock.ps1',
+  'NativeShellTasks.ps1',
   'Prepare-NativeShellUserProfile.ps1',
   'Promote-NativeShell.ps1',
   'Request-NativeShellPromotion.ps1',
@@ -83,24 +85,60 @@ $menuBarProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\Mac
 $systemStateSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\SystemState.cs') -Raw
 $switchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Switch-To-NativeShell.ps1') -Raw
 $menuHostSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\Program.cs') -Raw
+$dockSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Dock\Program.cs') -Raw
 $buildSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Raw
 $promoteSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Promote-NativeShell.ps1') -Raw
 $prepareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Prepare-NativeShellUserProfile.ps1') -Raw
 $completeSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Complete-NativeShellPromotion.ps1') -Raw
+$taskSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'NativeShellTasks.ps1') -Raw
 $profileSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1') -Raw
 $pinTestSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeTaskbarPins.ps1') -Raw
 $nativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\NativeMethods.cs') -Raw
 $trayAppsSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\TrayApps.cs') -Raw
 $awakeProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\AwakeAndAvailable\Program.cs') -Raw
 $awakeContextSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\AwakeAndAvailable\TrayApplicationContext.cs') -Raw
+$seelenRestoreSource = Get-Content -LiteralPath (Join-Path $repoRoot 'archive\seelen-ui\scripts\Restore-SeelenProfile.ps1') -Raw
 if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
   $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
 }
+if ($taskSource -notmatch 'Register-ScheduledTask' -or
+    $taskSource -notmatch 'LogonType Interactive' -or
+    $taskSource -notmatch 'Persistent native-shell task is disabled' -or
+    $taskSource -notmatch 'Export-ScheduledTask' -or
+    $taskSource -notmatch 'DontStopOnIdleEnd' -or
+    $taskSource -notmatch 'RepetitionInterval \(New-TimeSpan -Minutes 1\)' -or
+    $taskSource -notmatch 'did not start its interactive process within 8 seconds' -or
+    $taskSource -notmatch 'Stop-Process -Force' -or
+    $taskSource -notmatch 'Start-ScheduledTask' -or
+    $completeSource -notmatch 'Start-NativeShellTasks' -or
+    $promoteSource -notmatch 'Start-NativeShellTasks') {
+  $failures.Add('Native-shell lifetime is not detached from the invoking terminal through interactive scheduled tasks.')
+}
+if ($prepareSource -notmatch "MacMakeoverMenuHost', 'MacMakeoverMenuBar', 'MacMakeoverDock', 'MacMakeoverAwakeAndAvailable" -or
+    $prepareSource -notmatch 'Remove-ItemProperty' -or
+    $prepareSource -notmatch 'Register-NativeShellTasks') {
+  $failures.Add('Legacy Run-key startup entries can race the persistent native-shell tasks.')
+}
+if ($seelenRestoreSource -notmatch 'MacMakeover Shell - MenuHost' -or
+    $seelenRestoreSource -notmatch 'Unregister-ScheduledTask' -or
+    $seelenRestoreSource -notmatch 'Native-shell startup tasks remain after rollback' -or
+    $seelenRestoreSource -notmatch 'Native-shell processes remain after rollback' -or
+    $seelenRestoreSource.IndexOf('Unregister-ScheduledTask') -gt $seelenRestoreSource.IndexOf('Stop-Process -Force')) {
+  $failures.Add('Seelen rollback does not unregister the persistent native-shell tasks.')
+}
+if ($dockSource -notmatch 'process\.SessionId == currentSessionId' -or
+    $dockSource -notmatch 'CabinetWClass.*ExploreWClass' -or
+    $dockSource -notmatch 'PostMessage\(window, NativeMethods\.WmClose') {
+  $failures.Add('Dock window closure is not restricted to safe current-session taskbar windows.')
+}
 if ($buildSource -notmatch 'AwakeAndAvailable\\AwakeAndAvailable\.csproj' -or
-    $prepareSource -notmatch 'MacMakeoverAwakeAndAvailable' -or
-    $completeSource -notmatch 'AwakeAndAvailable\.exe' -or
-    $profileSource -notmatch 'Expected one Awake & Available process') {
-  $failures.Add('Awake & Available is not fully integrated into build, startup, promotion, and live verification.')
+    $buildSource -notmatch 'MacMakeover\.Supervisor\\MacMakeover\.Supervisor\.csproj' -or
+    $taskSource -notmatch "TaskName = 'MacMakeover Shell - Awake'" -or
+    $taskSource -notmatch "TaskName = 'MacMakeover Shell - Supervisor'" -or
+    $taskSource -notmatch "FileName = 'AwakeAndAvailable\.exe'" -or
+    $profileSource -notmatch 'Expected one Awake & Available process' -or
+    $profileSource -notmatch 'Expected one native-shell supervisor process') {
+  $failures.Add('Native-shell components and watchdog are not fully integrated into build, startup, promotion, and live verification.')
 }
 if ($trayAppsSource -notmatch 'NotifyIconSettings' -or
     $trayAppsSource -notmatch 'IconSnapshot' -or
@@ -160,6 +198,19 @@ if ($completeSource -notmatch 'foreach \(\$attempt in 1\.\.4\)' -or
     $completeSource -notmatch '\$profilePassed') {
   $failures.Add('Native-shell completion can report acceptance after a failed live-profile check.')
 }
+$dockSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Dock\Program.cs') -Raw
+$dockNativeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Dock\NativeMethods.cs') -Raw
+if ($dockSource -notmatch 'public bool CanClose' -or
+    $dockSource -notmatch '_pinnedApp is not null \? _pinnedApp\.Close\(\)' -or
+    $dockSource -notmatch 'menu\.Closed[\s\S]*?menu\.Dispose' -or
+    $dockSource -notmatch 'Close All Windows' -or
+    $dockSource -notmatch 'PostMessage\(window, NativeMethods\.WmClose' -or
+    $dockNativeSource -notmatch 'PostMessage') {
+  $failures.Add('Dock Quit is not safe and complete for both pinned and dynamic applications.')
+}
+if ($menuBarSource -notmatch 'Math\.Clamp\(\(Width - groupWidth\) / 2, minimumX, maximumX\)') {
+  $failures.Add('MenuBar telemetry is not centered on the physical display when space permits.')
+}
 if ($profileSource -match '\.Verbs\(' -or $pinTestSource -match '\.Verbs\(' -or
     $profileSource -notmatch 'User Pinned\\TaskBar' -or $pinTestSource -notmatch 'User Pinned\\TaskBar') {
   $failures.Add('Pin verification can block on Shell verb enumeration instead of using Taskband and pinned shortcuts.')
@@ -169,6 +220,7 @@ if ($profileSource -notmatch "Write-Host \('PASS: native shell is coherent[\s\S]
 }
 if ($promoteSource -notmatch 'Restore-InteractiveNativeShell' -or
     $promoteSource -notmatch 'Get-Process explorer.*Stop-Process' -or
+    $promoteSource -notmatch 'Explorer was restored, but the custom shell could not be restarted' -or
     $promoteSource -notmatch 'Native-shell promotion failed; restoring the interactive shell') {
   $failures.Add('Promotion no longer restores Explorer and the native shell after cancellation or failure.')
 }

@@ -5,6 +5,7 @@ namespace MacMakeover.Dock;
 
 internal static class NativeMethods
 {
+    public const int WmClose = 0x0010;
     public const int WsExToolWindow = 0x80;
     public const int WsExAppWindow = 0x00040000;
     public const int WsExTransparent = 0x20;
@@ -100,6 +101,7 @@ internal static class NativeMethods
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
     [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] public static extern IntPtr GetClassLongPtr(IntPtr window, int index);
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool PostMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextLength(IntPtr window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, StringBuilder text, int maxCount);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);

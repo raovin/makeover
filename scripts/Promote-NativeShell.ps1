@@ -5,6 +5,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'NativeShellTasks.ps1')
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -15,6 +16,7 @@ if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
 function Restore-InteractiveNativeShell {
   $deploymentRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\bin'
   $dock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
+  Stop-NativeShellTasks -DeploymentRoot $deploymentRoot
   if (Test-Path -LiteralPath $dock) {
     Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
@@ -30,17 +32,10 @@ function Restore-InteractiveNativeShell {
   if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
   Start-Sleep -Seconds 4
 
-  foreach ($entry in @(
-      @{ Name = 'MacMakeover.MenuHost'; File = 'MacMakeover.MenuHost.exe' },
-      @{ Name = 'MacMakeover.MenuBar'; File = 'MacMakeover.MenuBar.exe' },
-      @{ Name = 'MacMakeover.Dock'; File = 'MacMakeover.Dock.exe' },
-      @{ Name = 'AwakeAndAvailable'; File = 'AwakeAndAvailable.exe' }
-    )) {
-    $path = Join-Path $deploymentRoot $entry.File
-    if ((Test-Path -LiteralPath $path) -and -not (Get-Process -Name $entry.Name -ErrorAction SilentlyContinue)) {
-      Start-Process -FilePath $path -WindowStyle Hidden
-      Start-Sleep -Milliseconds 500
-    }
+  try {
+    Start-NativeShellTasks -DeploymentRoot $deploymentRoot
+  } catch {
+    Write-Warning "Explorer was restored, but the custom shell could not be restarted: $($_.Exception.Message)"
   }
   Start-Sleep -Seconds 5
 }

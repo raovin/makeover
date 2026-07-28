@@ -16,6 +16,7 @@ $modSettingsRegistry = Join-Path $modRegistry 'Settings'
 $menuBar = @(Get-Process MacMakeover.MenuBar -ErrorAction SilentlyContinue)
 $menuHost = @(Get-Process MacMakeover.MenuHost -ErrorAction SilentlyContinue)
 $dock = @(Get-Process MacMakeover.Dock -ErrorAction SilentlyContinue)
+$supervisor = @(Get-Process MacMakeover.Supervisor -ErrorAction SilentlyContinue)
 $awake = @(Get-Process AwakeAndAvailable -ErrorAction SilentlyContinue)
 $seelen = @(Get-Process seelen-ui, slu-service -ErrorAction SilentlyContinue)
 $yasb = @(Get-Process yasb -ErrorAction SilentlyContinue)
@@ -23,9 +24,19 @@ $yasb = @(Get-Process yasb -ErrorAction SilentlyContinue)
 if ($menuBar.Count -ne 1) { $failures.Add("Expected one MenuBar process; found $($menuBar.Count).") }
 if ($menuHost.Count -ne 1) { $failures.Add("Expected one MenuHost process; found $($menuHost.Count).") }
 if ($dock.Count -ne 1) { $failures.Add("Expected one Dock process; found $($dock.Count).") }
+if ($supervisor.Count -ne 1) { $failures.Add("Expected one native-shell supervisor process; found $($supervisor.Count).") }
 if ($awake.Count -ne 1) { $failures.Add("Expected one Awake & Available process; found $($awake.Count).") }
-if ($awake.Count -eq 1 -and $awake[0].Path -ne (Join-Path $deploymentRoot 'AwakeAndAvailable.exe')) {
-  $failures.Add("Awake & Available is running outside the managed deployment: $($awake[0].Path)")
+foreach ($processDefinition in @(
+    @{ Name = 'MenuBar'; Processes = $menuBar; Executable = 'MacMakeover.MenuBar.exe' }
+    @{ Name = 'MenuHost'; Processes = $menuHost; Executable = 'MacMakeover.MenuHost.exe' }
+    @{ Name = 'Dock'; Processes = $dock; Executable = 'MacMakeover.Dock.exe' }
+    @{ Name = 'Supervisor'; Processes = $supervisor; Executable = 'MacMakeover.Supervisor.exe' }
+    @{ Name = 'Awake & Available'; Processes = $awake; Executable = 'AwakeAndAvailable.exe' }
+  )) {
+  if ($processDefinition.Processes.Count -eq 1 -and
+      $processDefinition.Processes[0].Path -ne (Join-Path $deploymentRoot $processDefinition.Executable)) {
+    $failures.Add("$($processDefinition.Name) is running outside the managed deployment: $($processDefinition.Processes[0].Path)")
+  }
 }
 if ($seelen.Count) { $failures.Add('Seelen is still running alongside the native shell.') }
 if ($yasb.Count) { $failures.Add('YASB is still running alongside the native shell.') }
@@ -36,6 +47,7 @@ foreach ($required in @(
     'MacMakeover.MenuHost.exe',
     'MacMakeover.Dock.exe',
     'AwakeAndAvailable.exe',
+    'MacMakeover.Supervisor.exe',
     'native-taskbar-pins.json',
     'Assets\apple-mark.png',
     'Assets\Fonts\Manrope-Regular.ttf',
@@ -161,19 +173,95 @@ if ($seelenTask -and $seelenTask.State -ne 'Disabled') {
   $failures.Add('Seelen is still enabled at logon.')
 }
 
+$taskDefinitions = @(
+  @{ Name = 'MacMakeover Shell - MenuHost'; Executable = 'MacMakeover.MenuHost.exe' }
+  @{ Name = 'MacMakeover Shell - MenuBar'; Executable = 'MacMakeover.MenuBar.exe' }
+  @{ Name = 'MacMakeover Shell - Dock'; Executable = 'MacMakeover.Dock.exe' }
+  @{ Name = 'MacMakeover Shell - Awake'; Executable = 'AwakeAndAvailable.exe' }
+  @{ Name = 'MacMakeover Shell - Supervisor'; Executable = 'MacMakeover.Supervisor.exe' }
+)
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$currentUserName = ($currentIdentity -split '\\')[-1]
+$currentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+function Test-SameUserId([string]$Actual) {
+  if ([string]::IsNullOrWhiteSpace($Actual)) { return $false }
+  return $Actual -eq $currentIdentity -or ($Actual -split '\\')[-1] -eq $currentUserName
+}
+function Test-TaskDuration($Actual, [TimeSpan]$Expected) {
+  if ($Actual -is [TimeSpan]) { return $Actual -eq $Expected }
+  try {
+    return [Xml.XmlConvert]::ToTimeSpan([string]$Actual) -eq $Expected
+  } catch {
+    return $false
+  }
+}
+foreach ($definition in $taskDefinitions) {
+  $task = Get-ScheduledTask -TaskName $definition.Name -ErrorAction SilentlyContinue
+  if (-not $task) {
+    $failures.Add("$($definition.Name) is not registered at logon.")
+    continue
+  }
+  if ($task.State -ne 'Running') {
+    $failures.Add("$($definition.Name) is not supervising its process; state is $($task.State).")
+  }
+  $action = @($task.Actions)[0]
+  if (@($task.Actions).Count -ne 1 -or -not $action -or
+      $action.Execute -ne (Join-Path $deploymentRoot $definition.Executable) -or
+      -not [string]::IsNullOrWhiteSpace($action.Arguments)) {
+    $failures.Add("$($definition.Name) does not launch the managed executable.")
+  }
+  if ($task.Principal.LogonType -ne 'Interactive' -or
+      $task.Principal.RunLevel -ne 'Limited' -or
+      -not (Test-SameUserId $task.Principal.UserId)) {
+    $failures.Add("$($definition.Name) is not bound to the unelevated interactive user session.")
+  }
+  $triggers = @($task.Triggers)
+  $logonTriggers = @($triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' })
+  $timeTriggers = @($triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskTimeTrigger' })
+  if ($logonTriggers.Count -ne 1 -or
+      -not $logonTriggers[0].Enabled -or
+      -not (Test-SameUserId $logonTriggers[0].UserId)) {
+    $failures.Add("$($definition.Name) is missing its logon trigger.")
+  }
+  if ($definition.Name -eq 'MacMakeover Shell - Supervisor') {
+    if ($timeTriggers.Count -ne 1 -or
+        -not $timeTriggers[0].Enabled -or
+        -not (Test-TaskDuration $timeTriggers[0].Repetition.Interval (New-TimeSpan -Minutes 1))) {
+      $failures.Add("$($definition.Name) is missing its one-minute watchdog health trigger.")
+    }
+  } elseif ($triggers.Count -ne 1) {
+    $failures.Add("$($definition.Name) has unexpected startup triggers.")
+  }
+  if ($task.Settings.MultipleInstances -ne 'IgnoreNew' -or
+      $task.Settings.RestartCount -ne 3 -or
+      -not (Test-TaskDuration $task.Settings.RestartInterval (New-TimeSpan -Minutes 1)) -or
+      -not $task.Settings.Enabled -or
+      -not $task.Settings.StartWhenAvailable -or
+      $task.Settings.IdleSettings.StopOnIdleEnd -or
+      -not (Test-TaskDuration $task.Settings.ExecutionTimeLimit ([TimeSpan]::Zero)) -or
+      $task.Settings.DisallowStartIfOnBatteries -or
+      $task.Settings.StopIfGoingOnBatteries) {
+    $failures.Add("$($definition.Name) does not have the required resilience settings.")
+  }
+}
+foreach ($processDefinition in @(
+    @{ Name = 'MenuBar'; Processes = $menuBar }
+    @{ Name = 'MenuHost'; Processes = $menuHost }
+    @{ Name = 'Dock'; Processes = $dock }
+    @{ Name = 'Supervisor'; Processes = $supervisor }
+    @{ Name = 'Awake & Available'; Processes = $awake }
+  )) {
+  if ($processDefinition.Processes.Count -eq 1 -and
+      $processDefinition.Processes[0].SessionId -ne $currentSessionId) {
+    $failures.Add("$($processDefinition.Name) is not running in the current interactive session.")
+  }
+}
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runValues = Get-ItemProperty -LiteralPath $runKey -ErrorAction SilentlyContinue
-if (-not $runValues -or $runValues.MacMakeoverMenuBar -notmatch 'MacMakeover\.MenuBar\.exe') {
-  $failures.Add('MenuBar is not registered at logon.')
-}
-if (-not $runValues -or $runValues.MacMakeoverMenuHost -notmatch 'MacMakeover\.MenuHost\.exe') {
-  $failures.Add('MenuHost is not registered at logon.')
-}
-if (-not $runValues -or $runValues.MacMakeoverDock -notmatch 'MacMakeover\.Dock\.exe') {
-  $failures.Add('Dock is not registered at logon.')
-}
-if (-not $runValues -or $runValues.MacMakeoverAwakeAndAvailable -notmatch 'AwakeAndAvailable\.exe') {
-  $failures.Add('Awake & Available is not registered at logon.')
+foreach ($legacyRunValue in 'MacMakeoverMenuHost', 'MacMakeoverMenuBar', 'MacMakeoverDock', 'MacMakeoverAwakeAndAvailable') {
+  if ($runValues -and $runValues.PSObject.Properties.Name -contains $legacyRunValue) {
+    $failures.Add("Legacy startup entry remains and can race the persistent tasks: $legacyRunValue")
+  }
 }
 $startupDelayProperty = Get-ItemProperty `
   'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize' `
@@ -405,7 +493,7 @@ if ($menuHost.Count -eq 1 -and $menuHost[0].WorkingSet64 -gt 100MB) {
 if ($dock.Count -eq 1 -and $dock[0].WorkingSet64 -gt 150MB) {
   $failures.Add("Dock memory exceeds 150 MB: $([math]::Round($dock[0].WorkingSet64 / 1MB, 1)) MB")
 }
-$shellWorkingSet = @($menuBar + $menuHost + $dock | ForEach-Object { $_.WorkingSet64 } |
+$shellWorkingSet = @($menuBar + $menuHost + $dock + $supervisor | ForEach-Object { $_.WorkingSet64 } |
     Measure-Object -Sum).Sum
 if ($shellWorkingSet -gt 300MB) {
   $failures.Add("Native shell memory exceeds 300 MB: $([math]::Round($shellWorkingSet / 1MB, 1)) MB")
@@ -434,6 +522,7 @@ if ($failures.Count) {
 $barMb = [math]::Round($menuBar[0].WorkingSet64 / 1MB, 1)
 $hostMb = [math]::Round($menuHost[0].WorkingSet64 / 1MB, 1)
 $dockMb = [math]::Round($dock[0].WorkingSet64 / 1MB, 1)
+$supervisorMb = [math]::Round($supervisor[0].WorkingSet64 / 1MB, 1)
 $shellMb = [math]::Round($shellWorkingSet / 1MB, 1)
-Write-Host ('PASS: native shell is coherent. MenuBar {0} MB; MenuHost {1} MB; Dock {2} MB; total {3} MB.' -f $barMb, $hostMb, $dockMb, $shellMb)
+Write-Host ('PASS: native shell is coherent. MenuBar {0} MB; MenuHost {1} MB; Dock {2} MB; Supervisor {3} MB; total {4} MB.' -f $barMb, $hostMb, $dockMb, $supervisorMb, $shellMb)
 exit 0
