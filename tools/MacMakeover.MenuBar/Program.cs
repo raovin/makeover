@@ -52,12 +52,12 @@ internal static class Program
                SystemStateProvider.ClassifyPowerMode(Guid.Empty) == PowerModeKind.Balanced &&
                SystemStateProvider.ClassifyPowerMode(new Guid("381b4222-f694-41f0-9685-ff5bb260df2e")) == PowerModeKind.Balanced &&
                SystemStateProvider.ClassifyPowerMode(new Guid("ded574b5-45a0-4f42-8737-46345c09c238")) == PowerModeKind.Performance &&
-               MenuBarForm.PowerSourceLabel(battery) == "Battery 42%" &&
+               MenuBarForm.PowerSourceLabel(battery) == "42%" &&
                MenuBarForm.PowerModeLabel(battery.PowerMode) == "Power saver" &&
-               MenuBarForm.PowerSourceLabel(charging) == "Charging 42%" &&
+               MenuBarForm.PowerSourceLabel(charging) == "42%" &&
                MenuBarForm.ShowsExternalPowerIndicator(charging) &&
                MenuBarForm.PowerModeLabel(charging.PowerMode) == "High performance" &&
-               MenuBarForm.PowerSourceLabel(pluggedIn) == "Plugged in 94%" &&
+               MenuBarForm.PowerSourceLabel(pluggedIn) == "94%" &&
                MenuBarForm.ShowsExternalPowerIndicator(pluggedIn) &&
                !MenuBarForm.ShowsExternalPowerIndicator(battery) &&
                MenuBarForm.PowerModeLabel(pluggedIn.PowerMode) == "Balanced" &&
