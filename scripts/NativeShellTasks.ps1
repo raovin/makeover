@@ -86,13 +86,30 @@ function Stop-NativeShellTasks {
     [string]$DeploymentRoot
   )
 
-  foreach ($definition in Get-NativeShellTaskDefinitions -DeploymentRoot $DeploymentRoot) {
+  $definitions = @(Get-NativeShellTaskDefinitions -DeploymentRoot $DeploymentRoot)
+  foreach ($definition in $definitions) {
     Stop-ScheduledTask -TaskName $definition.TaskName -ErrorAction SilentlyContinue
   }
-  Start-Sleep -Milliseconds 300
-  $processNames = (Get-NativeShellTaskDefinitions -DeploymentRoot $DeploymentRoot).ProcessName
-  Get-Process -Name $processNames -ErrorAction SilentlyContinue |
-    Stop-Process -Force -ErrorAction SilentlyContinue
+  $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+  $supervisorName = 'MacMakeover.Supervisor'
+  $supervisor = @(Get-Process -Name $supervisorName -ErrorAction SilentlyContinue |
+    Where-Object { $_.SessionId -eq $sessionId })
+  $supervisor | Stop-Process -Force -ErrorAction SilentlyContinue
+
+  $processNames = $definitions.ProcessName
+  $deadline = [DateTime]::UtcNow.AddSeconds(3)
+  do {
+    $processes = @(Get-Process -Name $processNames -ErrorAction SilentlyContinue |
+      Where-Object { $_.SessionId -eq $sessionId })
+    if ($processes.Count -eq 0) { break }
+    $processes | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 100
+  } while ([DateTime]::UtcNow -lt $deadline)
+  $remaining = @(Get-Process -Name $processNames -ErrorAction SilentlyContinue |
+    Where-Object { $_.SessionId -eq $sessionId })
+  if ($remaining.Count -gt 0) {
+    throw "Native-shell stop left $($remaining.Count) process(es) running in session $sessionId."
+  }
 }
 
 function Start-NativeShellTasks {
@@ -112,25 +129,40 @@ function Start-NativeShellTasks {
     }
   }
 
+  $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+  $attemptedDefinitions = [Collections.Generic.List[object]]::new()
   try {
     foreach ($definition in $definitions) {
+      $before = @(Get-Process -Name $definition.ProcessName -ErrorAction SilentlyContinue |
+        Where-Object { $_.SessionId -eq $sessionId })
+      if ($before.Count -eq 0) { $attemptedDefinitions.Add($definition) }
       Start-ScheduledTask -TaskName $definition.TaskName
       $deadline = [DateTime]::UtcNow.AddSeconds(8)
       do {
         Start-Sleep -Milliseconds 200
         $process = @(Get-Process -Name $definition.ProcessName -ErrorAction SilentlyContinue |
-          Where-Object { $_.SessionId -eq [Diagnostics.Process]::GetCurrentProcess().SessionId })
+          Where-Object { $_.SessionId -eq $sessionId })
       } until ($process.Count -gt 0 -or [DateTime]::UtcNow -ge $deadline)
       if ($process.Count -eq 0) {
         throw "$($definition.TaskName) did not start its interactive process within 8 seconds."
       }
+      if ($before.Count -eq 0) {
+        $startedIds = @($process.Id)
+        Start-Sleep -Milliseconds 500
+        $stable = @(Get-Process -Name $definition.ProcessName -ErrorAction SilentlyContinue |
+          Where-Object { $_.SessionId -eq $sessionId -and $_.Id -in $startedIds })
+        if ($stable.Count -ne 1) {
+          throw "$($definition.TaskName) did not retain one stable interactive process after startup."
+        }
+      }
     }
   } catch {
-    foreach ($definition in $definitions) {
+    foreach ($definition in $attemptedDefinitions) {
       Stop-ScheduledTask -TaskName $definition.TaskName -ErrorAction SilentlyContinue
+      Get-Process -Name $definition.ProcessName -ErrorAction SilentlyContinue |
+        Where-Object { $_.SessionId -eq $sessionId } |
+        Stop-Process -Force -ErrorAction SilentlyContinue
     }
-    Get-Process -Name $definitions.ProcessName -ErrorAction SilentlyContinue |
-      Stop-Process -Force -ErrorAction SilentlyContinue
     throw
   }
 }

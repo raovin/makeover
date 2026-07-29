@@ -299,6 +299,7 @@ internal sealed class SystemStateProvider : IDisposable
             "explorer" => "Finder",
             "applicationframehost" => FirstTitleSegment(title),
             "notepad" => "Notepad",
+            "mspaint" => "Paint",
             "msedge" => "Microsoft Edge",
             "chrome" => "Google Chrome",
             "firefox" => "Firefox",

@@ -3,8 +3,13 @@ param(
   [Parameter(Mandatory)]
   [string]$Profile,
 
-  [Parameter(Mandatory)]
-  [string[]]$CustomProcessNames,
+  [string[]]$CustomProcessNames = @(
+    'MacMakeover.MenuBar',
+    'MacMakeover.MenuHost',
+    'MacMakeover.Dock',
+    'MacMakeover.Supervisor',
+    'AwakeAndAvailable'
+  ),
 
   [ValidateRange(15, 1800)]
   [int]$DurationSeconds = 90,
@@ -25,20 +30,24 @@ function Get-Percentile([double[]]$Values, [double]$Percentile) {
 
 function Get-ProcessSnapshot([string[]]$Names) {
   $snapshot = @{}
-  foreach ($process in Get-Process -Name $Names -ErrorAction SilentlyContinue) {
-    try {
-      $snapshot[$process.Id] = [pscustomobject]@{
-        Id = $process.Id
-        Name = $process.ProcessName
-        CpuSeconds = [double]$process.TotalProcessorTime.TotalSeconds
-        WorkingSetBytes = [double]$process.WorkingSet64
-        PrivateBytes = [double]$process.PrivateMemorySize64
-        Threads = $process.Threads.Count
-        Handles = $process.HandleCount
-        Responding = $process.Responding
+  foreach ($name in @($Names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)) {
+    foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+      try {
+        $snapshot[$process.Id] = [pscustomobject]@{
+          Id = $process.Id
+          Name = $process.ProcessName
+          CpuSeconds = [double]$process.TotalProcessorTime.TotalSeconds
+          WorkingSetBytes = [double]$process.WorkingSet64
+          PrivateBytes = [double]$process.PrivateMemorySize64
+          Threads = $process.Threads.Count
+          Handles = $process.HandleCount
+          Responding = $process.Responding
+        }
+      } catch {
+        # A process can exit between enumeration and property access.
+      } finally {
+        $process.Dispose()
       }
-    } catch {
-      # A process can exit between enumeration and property access.
     }
   }
   return $snapshot
@@ -46,16 +55,43 @@ function Get-ProcessSnapshot([string[]]$Names) {
 
 function Get-Sum($Snapshot, [string[]]$Names, [string]$Property) {
   $sum = 0.0
+  if ($null -eq $Snapshot) { return $sum }
   foreach ($item in $Snapshot.Values) {
     if ($Names -contains $item.Name) { $sum += [double]$item.$Property }
   }
   return $sum
 }
 
+function Get-CpuDelta($Previous, $Current, [string[]]$Names) {
+  $sum = 0.0
+  if ($null -eq $Previous -or $null -eq $Current) { return $sum }
+  foreach ($processId in $Current.Keys) {
+    if (-not $Previous.ContainsKey($processId)) { continue }
+    $currentItem = $Current[$processId]
+    $previousItem = $Previous[$processId]
+    if ($Names -notcontains $currentItem.Name -or $currentItem.Name -ne $previousItem.Name) { continue }
+    $sum += [Math]::Max(0.0, [double]($currentItem.CpuSeconds - $previousItem.CpuSeconds))
+  }
+  return $sum
+}
+
+function Get-PropertyTotal($Items, [string]$Property) {
+  $values = @($Items)
+  if ($values.Count -eq 0) { return 0 }
+  $sum = ($values | Measure-Object -Property $Property -Sum).Sum
+  if ($null -eq $sum) { return 0 }
+  return $sum
+}
+
 $logicalProcessors = [Environment]::ProcessorCount
 $shellProcessNames = @('explorer', 'dwm')
-$allProcessNames = @($CustomProcessNames + $shellProcessNames | Sort-Object -Unique)
-$expectedCustomNames = @($CustomProcessNames | Sort-Object -Unique)
+$expectedCustomNames = @($CustomProcessNames |
+  Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+  Sort-Object -Unique)
+if ($expectedCustomNames.Count -eq 0) {
+  throw 'At least one custom process name is required.'
+}
+$allProcessNames = @($expectedCustomNames + $shellProcessNames | Sort-Object -Unique)
 $counterNames = @(
   '\Processor(_Total)\% Processor Time',
   '\Memory\Available MBytes',
@@ -69,8 +105,6 @@ $csvPath = Join-Path $OutputDirectory "$stamp-$safeProfile.csv"
 $summaryPath = Join-Path $OutputDirectory "$stamp-$safeProfile-summary.json"
 
 $previous = Get-ProcessSnapshot $allProcessNames
-$previousCustomCpuSeconds = Get-Sum $previous $expectedCustomNames 'CpuSeconds'
-$previousShellCpuSeconds = Get-Sum $previous $allProcessNames 'CpuSeconds'
 $previousTime = [DateTime]::UtcNow
 $rows = [System.Collections.Generic.List[object]]::new()
 $samples = [Math]::Max(1, $DurationSeconds)
@@ -84,8 +118,8 @@ foreach ($sampleIndex in 1..$samples) {
 
   $customCpuSeconds = Get-Sum $current $expectedCustomNames 'CpuSeconds'
   $shellCpuSeconds = Get-Sum $current $allProcessNames 'CpuSeconds'
-  $customCpuDelta = [Math]::Max(0.0, [double]($customCpuSeconds - $previousCustomCpuSeconds))
-  $shellCpuDelta = [Math]::Max(0.0, [double]($shellCpuSeconds - $previousShellCpuSeconds))
+  $customCpuDelta = Get-CpuDelta $previous $current $expectedCustomNames
+  $shellCpuDelta = Get-CpuDelta $previous $current $allProcessNames
   $customCpuPercent = if ($elapsed -gt 0) {
     100.0 * $customCpuDelta / $elapsed / $logicalProcessors
   } else { 0.0 }
@@ -124,18 +158,18 @@ foreach ($sampleIndex in 1..$samples) {
     CustomPrivateMb = [Math]::Round((Get-Sum $current $expectedCustomNames 'PrivateBytes') / 1MB, 3)
     ShellWorkingSetMb = [Math]::Round((Get-Sum $current $allProcessNames 'WorkingSetBytes') / 1MB, 3)
     ShellPrivateMb = [Math]::Round((Get-Sum $current $allProcessNames 'PrivateBytes') / 1MB, 3)
-    CustomThreads = [int](($customItems | Measure-Object Threads -Sum).Sum)
-    CustomHandles = [int](($customItems | Measure-Object Handles -Sum).Sum)
-    ShellThreads = [int](($shellItems | Measure-Object Threads -Sum).Sum)
-    ShellHandles = [int](($shellItems | Measure-Object Handles -Sum).Sum)
+    CustomProcessCount = $customItems.Count
+    ShellProcessCount = $shellItems.Count
+    CustomThreads = [int](Get-PropertyTotal $customItems 'Threads')
+    CustomHandles = [int](Get-PropertyTotal $customItems 'Handles')
+    ShellThreads = [int](Get-PropertyTotal $shellItems 'Threads')
+    ShellHandles = [int](Get-PropertyTotal $shellItems 'Handles')
     AllCustomProcessesPresent = ($missingCustomNames.Count -eq 0)
     AllResponsive = -not ($shellItems | Where-Object { -not $_.Responding })
     MissingCustomProcesses = ($missingCustomNames -join ',')
   })
 
   $previous = $current
-  $previousCustomCpuSeconds = $customCpuSeconds
-  $previousShellCpuSeconds = $shellCpuSeconds
   $previousTime = $now
 }
 
@@ -147,7 +181,8 @@ $metricNames = @(
   'SystemCpuPercent', 'AvailableMemoryMb', 'CommittedMemoryMb',
   'CustomCpuPercent', 'ShellCpuPercent', 'CustomWorkingSetMb',
   'CustomPrivateMb', 'ShellWorkingSetMb', 'ShellPrivateMb',
-  'CustomThreads', 'CustomHandles', 'ShellThreads', 'ShellHandles'
+  'CustomProcessCount', 'ShellProcessCount', 'CustomThreads',
+  'CustomHandles', 'ShellThreads', 'ShellHandles'
 )
 $metrics = [ordered]@{}
 foreach ($metricName in $metricNames) {
@@ -167,6 +202,9 @@ $summary = [ordered]@{
   warmupSamplesExcluded = $rows.Count - $steadyRows.Count
   logicalProcessors = $logicalProcessors
   customProcessNames = $expectedCustomNames
+  missingProcessNames = @($rows | ForEach-Object { $_.MissingCustomProcesses -split ',' } |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+    Sort-Object -Unique)
   samples = $rows.Count
   allExpectedProcessesPresent = -not ($rows | Where-Object { -not $_.AllCustomProcessesPresent })
   allProcessesResponsive = -not ($rows | Where-Object { -not $_.AllResponsive })

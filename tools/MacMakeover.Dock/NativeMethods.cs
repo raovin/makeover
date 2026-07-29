@@ -20,6 +20,7 @@ internal static class NativeMethods
     public const int AbeBottom = 3;
     public const int SwHide = 0;
     public const int SwShow = 5;
+    public const int SwMinimize = 6;
     public const int SwRestore = 9;
     public const int GwlExStyle = -20;
     public const uint GwOwner = 4;

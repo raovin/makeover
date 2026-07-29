@@ -50,6 +50,8 @@ $scriptNames = @(
   'Invoke-NativeShellPromotion.ps1',
   'Complete-NativeShellPromotion.ps1',
   'Repair-NativeWallpaperPolicy.ps1',
+  'Measure-ShellPerformance.ps1',
+  'Test-NativeShellRegression.ps1',
   'Test-NativeShellProfile.ps1',
   'verify.ps1'
 )
@@ -98,6 +100,9 @@ $trayAppsSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeov
 $awakeProgramSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\AwakeAndAvailable\Program.cs') -Raw
 $awakeContextSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\AwakeAndAvailable\TrayApplicationContext.cs') -Raw
 $seelenRestoreSource = Get-Content -LiteralPath (Join-Path $repoRoot 'archive\seelen-ui\scripts\Restore-SeelenProfile.ps1') -Raw
+$performanceSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Measure-ShellPerformance.ps1') -Raw
+$regressionSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeShellRegression.ps1') -Raw
+$supervisorSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Supervisor\Program.cs') -Raw
 if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
   $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
 }
@@ -186,6 +191,7 @@ if ($menuBarSource -notmatch 'ReassertAppBarAfterStartupAsync' -or
   $failures.Add('MenuBar no longer reasserts its AppBar work area after restored windows settle at login.')
 }
 if ($systemStateSource -notmatch '"notepad" => "Notepad"' -or
+    $systemStateSource -notmatch '"mspaint" => "Paint"' -or
     $systemStateSource -notmatch '_ => executableDescription' -or
     $systemStateSource -notmatch 'ReadExecutableDescription\(process\)') {
   $failures.Add('MenuBar active-app identity has regressed to document-window titles instead of executable application names.')
@@ -208,8 +214,40 @@ if ($dockSource -notmatch 'public bool CanClose' -or
     $dockNativeSource -notmatch 'PostMessage') {
   $failures.Add('Dock Quit is not safe and complete for both pinned and dynamic applications.')
 }
-if ($menuBarSource -notmatch 'Math\.Clamp\(\(Width - groupWidth\) / 2, minimumX, maximumX\)') {
-  $failures.Add('MenuBar telemetry is not centered on the physical display when space permits.')
+if ($menuBarSource -notmatch 'screenCenteredX' -or
+    $menuBarSource -notmatch 'availableSpaceCenteredX' -or
+    $menuBarSource -notmatch '\(screenCenteredX \* 2 \+ availableSpaceCenteredX\) / 3' -or
+    $menuBarSource -notmatch 'TelemetryKind\.Cpu' -or
+    $menuBarSource -notmatch 'TelemetryKind\.Memory' -or
+    $menuBarSource -notmatch 'TelemetryKind\.Network') {
+  $failures.Add('MenuBar telemetry no longer uses the requested left-biased adaptive position and symbolic readouts.')
+}
+if ($dockSource -notmatch 'Pin to Dock' -or
+    $dockSource -notmatch 'Remove from Dock' -or
+    $dockSource -notmatch 'dock-pins\.json' -or
+    $dockSource -notmatch 'DockPinStore\.Changed' -or
+    $dockSource -notmatch 'File\.Move\(temporaryPath, StatePath, true\)') {
+  $failures.Add('Dock pin and unpin persistence is incomplete or cannot refresh live across displays.')
+}
+if ($performanceSource -notmatch "'MacMakeover\.Supervisor'" -or
+    $performanceSource -notmatch 'function Get-CpuDelta' -or
+    $performanceSource -notmatch 'Previous\.ContainsKey' -or
+    $performanceSource -notmatch 'MissingCustomProcesses' -or
+    $performanceSource -notmatch 'CustomProcessCount') {
+  $failures.Add('The performance sampler no longer handles missing/restarted processes safely or measure the Supervisor.')
+}
+if ($dockSource -notmatch '--regression-test' -or
+    $dockSource -notmatch '--probe-window' -or
+    $dockSource -notmatch 'BuildContextMenu' -or
+    $menuBarProgramSource -notmatch 'TelemetryLayoutSelfTest' -or
+    $menuBarSource -notmatch 'CalculateTelemetryX' -or
+    $menuHostSource -notmatch '--alt-tab-regression-test' -or
+    $menuHostSource -notmatch 'ShouldDismissSystemSwitcher' -or
+    $supervisorSource -notmatch '--self-test' -or
+    $regressionSource -notmatch 'IncludeInteractiveAltTab' -or
+    $regressionSource -notmatch 'IncludeLiveRecovery' -or
+    $regressionSource -notmatch 'Wait-ForReplacement') {
+  $failures.Add('Repeatable Dock, mixed-DPI, Alt+Tab, and watchdog regression coverage is incomplete.')
 }
 if ($profileSource -match '\.Verbs\(' -or $pinTestSource -match '\.Verbs\(' -or
     $profileSource -notmatch 'User Pinned\\TaskBar' -or $pinTestSource -notmatch 'User Pinned\\TaskBar') {

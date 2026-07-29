@@ -19,6 +19,16 @@ internal static class Program
             Environment.ExitCode = RunSelfTest();
             return;
         }
+        if (args.Any(arg => arg.Equals("--regression-test", StringComparison.OrdinalIgnoreCase)))
+        {
+            Environment.ExitCode = RunRegressionTest(interactiveAltTab: false);
+            return;
+        }
+        if (args.Any(arg => arg.Equals("--alt-tab-regression-test", StringComparison.OrdinalIgnoreCase)))
+        {
+            Environment.ExitCode = RunRegressionTest(interactiveAltTab: true);
+            return;
+        }
 
         using var mutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
         var command = args.Length >= 2 && args[0].Equals("--show", StringComparison.OrdinalIgnoreCase)
@@ -69,6 +79,59 @@ internal static class Program
         catch (Exception ex)
         {
             Log("Self-test failed: " + ex);
+            return 1;
+        }
+    }
+
+    private static int RunRegressionTest(bool interactiveAltTab)
+    {
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            var original = new IntPtr(10);
+            var current = new IntPtr(20);
+            var own = new IntPtr(30);
+            var decisionMatrix =
+                MenuForm.ShouldDismissSystemSwitcher(true, TimeSpan.Zero, original, original, own) &&
+                !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(200), original, current, own) &&
+                MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, current, own) &&
+                !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, original, own) &&
+                !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, own, own);
+            if (!decisionMatrix) return 4;
+            if (!interactiveAltTab) return 0;
+
+            using var form = MenuForm.CreateApple();
+            form.Show();
+            NativeMethods.ShowWithoutActivation(form);
+            form.Update();
+            var shownDeadline = DateTime.UtcNow.AddSeconds(2);
+            while (!form.Visible && DateTime.UtcNow < shownDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(20);
+            }
+            if (!form.Visible) return 5;
+
+            NativeMethods.PressAltTab(() =>
+            {
+                var altHeldDeadline = DateTime.UtcNow.AddMilliseconds(500);
+                while (form.Visible && DateTime.UtcNow < altHeldDeadline)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(10);
+                }
+            });
+            var closeDeadline = DateTime.UtcNow.AddSeconds(2);
+            while (form.Visible && DateTime.UtcNow < closeDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(20);
+            }
+            return form.Visible ? 6 : 0;
+        }
+        catch (Exception exception)
+        {
+            Log("Regression test failed: " + exception);
             return 1;
         }
     }
@@ -1177,27 +1240,34 @@ internal sealed class MenuForm : Form
 
     private void CloseIfSystemSwitcherStarts()
     {
-        if (NativeMethods.IsAltPressed())
-        {
-            Program.Log($"Closing {Text}: Alt/system switcher detected");
-            Close();
-            return;
-        }
-
-        if ((DateTime.UtcNow - _shownAt).TotalMilliseconds < 420)
-        {
-            return;
-        }
-
+        var altPressed = NativeMethods.IsAltPressed();
+        var age = DateTime.UtcNow - _shownAt;
         var foreground = NativeMethods.GetForegroundWindowHandle();
-        if (_foregroundAtShown != IntPtr.Zero
-            && foreground != IntPtr.Zero
-            && foreground != Handle
-            && foreground != _foregroundAtShown)
+        if (ShouldDismissSystemSwitcher(
+                altPressed,
+                age,
+                _foregroundAtShown,
+                foreground,
+                Handle))
         {
-            Program.Log($"Closing {Text}: foreground changed");
+            Program.Log($"Closing {Text}: {(altPressed ? "Alt/system switcher detected" : "foreground changed")}");
             Close();
         }
+    }
+
+    internal static bool ShouldDismissSystemSwitcher(
+        bool altPressed,
+        TimeSpan age,
+        IntPtr foregroundAtShown,
+        IntPtr foreground,
+        IntPtr ownHandle)
+    {
+        if (altPressed) return true;
+        if (age.TotalMilliseconds < 420) return false;
+        return foregroundAtShown != IntPtr.Zero &&
+               foreground != IntPtr.Zero &&
+               foreground != ownHandle &&
+               foreground != foregroundAtShown;
     }
 
     private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -1396,6 +1466,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
 
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
@@ -1421,6 +1494,25 @@ internal static class NativeMethods
         const int vkMenu = 0x12;
         var state = GetAsyncKeyState(vkMenu);
         return (state & unchecked((short)0x8000)) != 0 || (state & 0x0001) != 0;
+    }
+
+    public static void PressAltTab(Action? whilePressed = null)
+    {
+        const byte vkMenu = 0x12;
+        const byte vkTab = 0x09;
+        const uint keyUp = 0x0002;
+        keybd_event(vkMenu, 0, 0, UIntPtr.Zero);
+        try
+        {
+            keybd_event(vkTab, 0, 0, UIntPtr.Zero);
+            Thread.Sleep(80);
+            whilePressed?.Invoke();
+        }
+        finally
+        {
+            keybd_event(vkTab, 0, keyUp, UIntPtr.Zero);
+            keybd_event(vkMenu, 0, keyUp, UIntPtr.Zero);
+        }
     }
 
     public static IntPtr GetForegroundWindowHandle()

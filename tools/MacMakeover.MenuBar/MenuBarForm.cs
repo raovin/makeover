@@ -16,6 +16,15 @@ internal enum BarAction
     Calendar
 }
 
+internal enum TelemetryKind
+{
+    Cpu,
+    Memory,
+    Network
+}
+
+internal sealed record TelemetrySegment(TelemetryKind Kind, string Text);
+
 internal sealed class MenuBarForm : Form
 {
     private const int LogicalHeight = 20;
@@ -46,6 +55,7 @@ internal sealed class MenuBarForm : Form
         _state = state;
         _preview = preview;
         _previewPower = previewPower;
+        if (preview) Text = "MacMakeover Menu Bar Preview";
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -336,17 +346,21 @@ internal sealed class MenuBarForm : Form
         {
             new[]
             {
-                $"CPU {snapshot.CpuPercent}%",
-                $"RAM {snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0} GB",
-                $"NET \u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"
+                new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
+                new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0} GB"),
+                new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}")
             },
             new[]
             {
-                $"{snapshot.CpuPercent}% CPU",
-                $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0}G",
-                $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"
+                new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
+                new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0}G"),
+                new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}")
             },
-            new[] { $"CPU {snapshot.CpuPercent}%", $"RAM {snapshot.UsedMemoryGb:0}G" }
+            new[]
+            {
+                new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
+                new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}G")
+            }
         };
         var battery = PowerSourceLabel(snapshot);
         var powerMode = PowerModeLabel(snapshot.PowerMode);
@@ -354,7 +368,7 @@ internal sealed class MenuBarForm : Form
         // shifts the rest of the centered telemetry group when power is connected.
         var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(34);
         var powerModeWidth = TextRenderer.MeasureText(powerMode, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(6);
-        string[]? segments = null;
+        TelemetrySegment[]? segments = null;
         var groupWidth = 0;
         foreach (var candidate in candidates)
         {
@@ -371,14 +385,11 @@ internal sealed class MenuBarForm : Form
         var minimumX = leftEnd + Scale(8);
         var maximumX = rightStart - groupWidth - Scale(8);
         if (maximumX < minimumX) return;
-        var x = Math.Clamp((Width - groupWidth) / 2, minimumX, maximumX);
+        var x = CalculateTelemetryX(Width, groupWidth, leftEnd, rightStart, Scale(8));
         foreach (var segment in segments)
         {
             var width = MeasureTelemetry(segment);
-            var textRect = new Rectangle(x, 0, width, Height);
-            TextRenderer.DrawText(graphics, segment, _smallFont, textRect, Color.FromArgb(228, 233, 239),
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
-                TextFormatFlags.NoPadding);
+            DrawTelemetry(graphics, segment, new Rectangle(x, 0, width, Height));
             x += width + Scale(8);
             DrawTelemetrySeparator(graphics, x);
             x += Scale(9);
@@ -391,8 +402,70 @@ internal sealed class MenuBarForm : Form
         DrawPowerMode(graphics, new Rectangle(x, 0, powerModeWidth, Height), snapshot.PowerMode, powerMode);
     }
 
-    private int MeasureTelemetry(string text) =>
-        TextRenderer.MeasureText(text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+    internal static int CalculateTelemetryX(int width, int groupWidth, int leftEnd, int rightStart, int inset)
+    {
+        var minimumX = leftEnd + inset;
+        var maximumX = rightStart - groupWidth - inset;
+        if (maximumX < minimumX) return minimumX;
+        var screenCenteredX = (width - groupWidth) / 2;
+        var availableSpaceCenteredX = leftEnd + (rightStart - leftEnd - groupWidth) / 2;
+        // Keep the familiar centered composition, but lean toward the free space so
+        // the denser right-side controls have more breathing room.
+        return Math.Clamp((screenCenteredX * 2 + availableSpaceCenteredX) / 3, minimumX, maximumX);
+    }
+
+    private int MeasureTelemetry(TelemetrySegment segment) =>
+        Scale(14) + TextRenderer.MeasureText(segment.Text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+
+    private void DrawTelemetry(Graphics graphics, TelemetrySegment segment, Rectangle area)
+    {
+        var color = Color.FromArgb(228, 233, 239);
+        var icon = new Rectangle(area.Left, area.Top + (area.Height - Scale(11)) / 2, Scale(11), Scale(11));
+        using var pen = new Pen(color, Math.Max(1F, ScaleValue(1F)))
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+            LineJoin = LineJoin.Round
+        };
+
+        switch (segment.Kind)
+        {
+            case TelemetryKind.Cpu:
+                var chip = Rectangle.Inflate(icon, -Scale(2), -Scale(2));
+                graphics.DrawRectangle(pen, chip);
+                for (var offset = Scale(2); offset <= Scale(8); offset += Scale(3))
+                {
+                    graphics.DrawLine(pen, icon.Left + offset, icon.Top, icon.Left + offset, chip.Top);
+                    graphics.DrawLine(pen, icon.Left + offset, chip.Bottom, icon.Left + offset, icon.Bottom);
+                    graphics.DrawLine(pen, icon.Left, icon.Top + offset, chip.Left, icon.Top + offset);
+                    graphics.DrawLine(pen, chip.Right, icon.Top + offset, icon.Right, icon.Top + offset);
+                }
+                break;
+            case TelemetryKind.Memory:
+                var memory = new Rectangle(icon.Left, icon.Top + Scale(2), icon.Width, Scale(7));
+                graphics.DrawRectangle(pen, memory);
+                graphics.DrawLine(pen, memory.Left + Scale(2), memory.Bottom, memory.Left + Scale(2), icon.Bottom);
+                graphics.DrawLine(pen, memory.Right - Scale(2), memory.Bottom, memory.Right - Scale(2), icon.Bottom);
+                for (var offset = Scale(2); offset <= Scale(8); offset += Scale(3))
+                {
+                    graphics.DrawLine(pen, icon.Left + offset, memory.Top + Scale(2), icon.Left + offset, memory.Bottom - Scale(2));
+                }
+                break;
+            case TelemetryKind.Network:
+                graphics.DrawLine(pen, icon.Left + Scale(3), icon.Bottom, icon.Left + Scale(3), icon.Top + Scale(1));
+                graphics.DrawLine(pen, icon.Left + Scale(1), icon.Top + Scale(3), icon.Left + Scale(3), icon.Top + Scale(1));
+                graphics.DrawLine(pen, icon.Left + Scale(5), icon.Top + Scale(3), icon.Left + Scale(3), icon.Top + Scale(1));
+                graphics.DrawLine(pen, icon.Right - Scale(3), icon.Top, icon.Right - Scale(3), icon.Bottom - Scale(1));
+                graphics.DrawLine(pen, icon.Right - Scale(5), icon.Bottom - Scale(3), icon.Right - Scale(3), icon.Bottom - Scale(1));
+                graphics.DrawLine(pen, icon.Right - Scale(1), icon.Bottom - Scale(3), icon.Right - Scale(3), icon.Bottom - Scale(1));
+                break;
+        }
+
+        var textRect = new Rectangle(icon.Right + Scale(3), area.Top, area.Right - icon.Right - Scale(3), area.Height);
+        TextRenderer.DrawText(graphics, segment.Text, _smallFont, textRect, color,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+            TextFormatFlags.NoPadding);
+    }
 
     private void DrawTelemetrySeparator(Graphics graphics, int x)
     {

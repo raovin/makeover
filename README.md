@@ -11,11 +11,13 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
 - Apple mark and focused app at the left of a 20 px logical menu bar.
 - The original Seelen `Big Sur (Day)` 6K wallpaper, preserved and managed locally.
 - Crisp Segoe UI Variable Text typography, optically scaled for mixed-DPI displays.
-- CPU, RAM, network throughput, explicit battery/charging source, and Windows
-  power mode in the center.
+- Symbolic CPU, RAM, and network-throughput readouts, gently biased left to
+  preserve room for the right-side controls, followed by explicit battery,
+  charging-source, and Windows power-mode state.
 - Separate Wi-Fi, Bluetooth, volume, Control Center, date, and notification controls.
 - Apple-style power and session commands without the old full-screen launcher.
-- A centered opaque dock with the complete inherited pin set and live running indicators.
+- A centered opaque dock with the inherited pin set, live running apps and
+  persistent `Pin to Dock` / `Remove from Dock` actions.
 - Spotlight-style local search through `Alt+Space`, with Bing results suppressed.
 - Native Explorer ownership of Alt+Tab, Win+Tab, snap, maximize, Start, and Search.
 
@@ -58,9 +60,10 @@ follow-up are recorded in
 
 ## Install Or Upgrade
 
-Open a normal PowerShell session in this repository. Do not start it as
+Open a normal interactive PowerShell session in this repository. Do not start it as
 administrator; the script requests elevation only for the legacy-mod and scheduled
-task phase.
+task phase. Do not launch the promoter from a background agent terminal: the person
+at the desktop must run it in their own interactive session.
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
@@ -72,7 +75,7 @@ checks Core Audio and dock invariants, applies the privileged phase,
 restarts Explorer once, starts each shell component through its own interactive
 scheduled task, and runs acceptance checks. A lightweight native watchdog re-runs
 any component task that exits unexpectedly. The task boundary keeps the shell alive
-when installation is launched by Codex, another agent, or a closing terminal.
+after a successful interactive installation.
 
 To verify an existing installation without changing it:
 
@@ -81,6 +84,23 @@ To verify an existing installation without changing it:
 .\scripts\Test-NativeShellProfile.ps1
 .\scripts\Test-NativeTaskbarPins.ps1
 ```
+
+To run the repeatable native-shell regression suite, including a safe missing-process
+performance smoke test:
+
+```powershell
+.\scripts\Test-NativeShellRegression.ps1
+```
+
+The explicit interaction and recovery gates are opt-in because they perform one real
+Alt+Tab and intentionally terminate/recover MenuHost and the Supervisor:
+
+```powershell
+.\scripts\Test-NativeShellRegression.ps1 -IncludeInteractiveAltTab -IncludeLiveRecovery
+```
+
+Timestamped JSON evidence and performance samples are written under `qa/regression/`
+and remain local.
 
 ## Rollback
 
@@ -100,10 +120,12 @@ assets/                         Wallpapers and visual assets
 archive/seelen-ui/              Retired Seelen profile, scripts, and history
 config/windhawk/native-dock.json Archived Windhawk rollback profile
 config/native-taskbar-pins.json  Required dock pins inherited from Seelen
+%LOCALAPPDATA%/MacMakeover/config/dock-pins.json  Per-user Dock pin overrides
 config/powertoys/               Spotlight-style launcher settings
 scripts/Promote-NativeShell.ps1 Production installer/orchestrator
 scripts/Test-NativeShell*.ps1   Preflight and live acceptance checks
-scripts/Measure-ShellPerformance.ps1 Reproducible process sampler
+scripts/Test-NativeShellRegression.ps1 Repeatable interaction and recovery suite
+scripts/Measure-ShellPerformance.ps1 Restart-safe native process sampler
 archive/seelen-ui/scripts/      Optional legacy rollback utilities
 tools/MacMakeover.MenuBar/      Owned per-monitor top AppBar
 tools/MacMakeover.MenuHost/     Apple and system panels

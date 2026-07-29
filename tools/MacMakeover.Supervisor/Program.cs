@@ -17,8 +17,22 @@ internal static class Program
         "MacMakeover", "logs", "supervisor.log");
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        if (args.Any(arg => arg.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
+        {
+            Environment.ExitCode = Components.Length == 4 &&
+                                   Components.Select(component => component.TaskName).Distinct().Count() == Components.Length &&
+                                   Components.Select(component => component.ProcessName).Distinct().Count() == Components.Length &&
+                                   Components.Any(component => component.ProcessName == "MacMakeover.MenuHost") &&
+                                   Components.Any(component => component.ProcessName == "MacMakeover.MenuBar") &&
+                                   Components.Any(component => component.ProcessName == "MacMakeover.Dock") &&
+                                   Components.Any(component => component.ProcessName == "AwakeAndAvailable") &&
+                                   !IsRunningInCurrentSession("MacMakeover.Process.That.Does.Not.Exist")
+                ? 0
+                : 2;
+            return;
+        }
         using var singleton = new Mutex(true, @"Local\MacMakeover.Supervisor", out var ownsMutex);
         if (!ownsMutex) return;
 
@@ -30,7 +44,7 @@ internal static class Program
             foreach (var component in Components)
             {
                 if (IsRunningInCurrentSession(component.ProcessName)) continue;
-                StartTask(component);
+                RequestTaskStart(component);
             }
             Thread.Sleep(TimeSpan.FromSeconds(2));
         }
@@ -53,7 +67,7 @@ internal static class Program
         return false;
     }
 
-    private static void StartTask(Component component)
+    private static void RequestTaskStart(Component component)
     {
         try
         {
@@ -71,10 +85,26 @@ internal static class Program
                 Log($"Could not start task {component.TaskName}.");
                 return;
             }
-            process.WaitForExit(5000);
-            Log(process.ExitCode == 0
-                ? $"Restart requested for {component.ProcessName}."
-                : $"Task restart failed for {component.ProcessName}; exit {process.ExitCode}: {process.StandardError.ReadToEnd().Trim()}");
+            if (!process.WaitForExit(5000))
+            {
+                process.Kill(true);
+                Log($"Task restart command timed out for {component.ProcessName}.");
+                return;
+            }
+            if (process.ExitCode != 0)
+            {
+                Log($"Task restart failed for {component.ProcessName}; exit {process.ExitCode}: {process.StandardError.ReadToEnd().Trim()}");
+                return;
+            }
+
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (DateTime.UtcNow < deadline && !IsRunningInCurrentSession(component.ProcessName))
+            {
+                Thread.Sleep(100);
+            }
+            Log(IsRunningInCurrentSession(component.ProcessName)
+                ? $"Restart verified for {component.ProcessName}."
+                : $"Restart request returned success but {component.ProcessName} is still absent; will retry.");
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {

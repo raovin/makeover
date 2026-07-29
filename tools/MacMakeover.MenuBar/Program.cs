@@ -62,14 +62,37 @@ internal static class Program
                !MenuBarForm.ShowsExternalPowerIndicator(battery) &&
                MenuBarForm.PowerModeLabel(pluggedIn.PowerMode) == "Balanced" &&
                SystemStateProvider.FriendlyAppName("notepad", "handover.txt - Notepad", "Notepad") == "Notepad" &&
+               SystemStateProvider.FriendlyAppName("mspaint", "Untitled - Paint", "mspaint.exe") == "Paint" &&
                SystemStateProvider.FriendlyAppName("acmeeditor", "Quarterly Plan.txt - Acme Editor", "Acme Editor") == "Acme Editor" &&
                SystemStateProvider.FriendlyAppName("acmeeditor", "Quarterly Plan.txt - Acme Editor") == "acmeeditor" &&
                SystemStateProvider.FriendlyAppName("ApplicationFrameHost", "Settings", "Application Frame Host") == "Settings" &&
                TrayAppProvider.ExpandExecutablePath("{F38BF404-1D43-42F2-9305-67DE0B28FC23}\\explorer.exe") == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe") &&
+               TelemetryLayoutSelfTest() &&
                MenuBarForm.IsShowDesktopCorner(new Point(0, 0), new Size(1280, 20), 8) &&
                MenuBarForm.IsShowDesktopCorner(new Point(1279, 0), new Size(1280, 20), 8) &&
                !MenuBarForm.IsShowDesktopCorner(new Point(8, 0), new Size(1280, 20), 8) &&
                !MenuBarForm.IsShowDesktopCorner(new Point(1271, 8), new Size(1280, 20), 8);
+    }
+
+    private static bool TelemetryLayoutSelfTest()
+    {
+        const int width = 1280;
+        const int groupWidth = 460;
+        const int leftEnd = 150;
+        const int rightStart = 1010;
+        var normal = MenuBarForm.CalculateTelemetryX(width, groupWidth, leftEnd, rightStart, 8);
+        var scaled = MenuBarForm.CalculateTelemetryX(
+            width * 3 / 2,
+            groupWidth * 3 / 2,
+            leftEnd * 3 / 2,
+            rightStart * 3 / 2,
+            12);
+        var physicalCenter = (width - groupWidth) / 2;
+        return normal < physicalCenter &&
+               normal >= leftEnd + 8 &&
+               normal + groupWidth <= rightStart - 8 &&
+               Math.Abs(scaled - normal * 3 / 2) <= 1 &&
+               MenuBarForm.CalculateTelemetryX(800, 620, 120, 700, 8) == 128;
     }
 }
 

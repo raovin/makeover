@@ -13,6 +13,25 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Any(value => value.Equals("--probe-window", StringComparison.OrdinalIgnoreCase)))
+        {
+            ApplicationConfiguration.Initialize();
+            Application.Run(new Form
+            {
+                Text = "MacMakeover Dynamic Dock Probe",
+                StartPosition = FormStartPosition.Manual,
+                Location = new Point(-30000, -30000),
+                Size = new Size(320, 180),
+                ShowInTaskbar = true
+            });
+            return;
+        }
+        if (args.Any(value => value.Equals("--regression-test", StringComparison.OrdinalIgnoreCase)))
+        {
+            ApplicationConfiguration.Initialize();
+            Environment.ExitCode = DockRegressionTests.Run();
+            return;
+        }
         var preview = args.Any(value => value.Equals("--preview", StringComparison.OrdinalIgnoreCase));
         var previewAll = args.Any(value => value.Equals("--preview-all", StringComparison.OrdinalIgnoreCase));
         if (args.Length >= 2 && args[0].Equals("--export-icons", StringComparison.OrdinalIgnoreCase))
@@ -39,7 +58,7 @@ internal static class Program
             try
             {
                 var apps = PinnedApp.Load();
-                if (apps.Count != 21) { Environment.ExitCode = 2; return; }
+                if (apps.Count == 0) { Environment.ExitCode = 2; return; }
                 foreach (var app in apps)
                 {
                     using var icon = app.LoadIcon(56);
@@ -76,6 +95,148 @@ internal static class Program
                 Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
             icon.Save(Path.Combine(directory, fileName + ".png"), ImageFormat.Png);
         }
+    }
+}
+
+internal static class DockRegressionTests
+{
+    public static int Run()
+    {
+        var probePath = Path.Combine(AppContext.BaseDirectory, "MacMakeover.QaProbe.exe");
+        var pinStatePath = Path.Combine(Path.GetTempPath(), "MacMakeover", $"dock-pins-qa-{Environment.ProcessId}.json");
+        try
+        {
+            Environment.SetEnvironmentVariable("MACMAKEOVER_DOCK_PIN_STATE", pinStatePath);
+            File.Copy(Environment.ProcessPath!, probePath, true);
+            if (!TestDynamicApp(probePath)) return 2;
+            if (!TestPinnedApp(probePath)) return 3;
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception);
+            return 1;
+        }
+        finally
+        {
+            try { File.Delete(probePath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            try { File.Delete(pinStatePath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static bool TestDynamicApp(string probePath)
+    {
+        using var probe = StartProbe(probePath);
+        var snapshot = WaitForSnapshot(probe);
+        if (snapshot is null) return false;
+
+        using var item = new DockItem(snapshot, 28);
+        using var menu = DockForm.BuildContextMenu(item);
+        if (!HasCommands(menu, "Open", "Pin to Dock", "Close All Windows")) return false;
+        if (item.IsPinned || !item.CanPin || !item.CanClose) return false;
+
+        menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Pin to Dock").PerformClick();
+        var persisted = PinnedApp.Load()
+            .FirstOrDefault(app => app.MatchesProcess(snapshot.ProcessName));
+        if (persisted is null || !persisted.IsUserPin) return false;
+        using (var persistedItem = new DockItem(persisted, 28))
+        using (var persistedMenu = DockForm.BuildContextMenu(persistedItem))
+        {
+            if (!HasCommands(persistedMenu, "Open", "Remove from Dock", "Close All Windows")) return false;
+            persistedMenu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Remove from Dock").PerformClick();
+        }
+        if (PinnedApp.Load().Any(app => app.MatchesProcess(snapshot.ProcessName))) return false;
+
+        NativeMethods.ShowWindow(snapshot.Windows[0], NativeMethods.SwMinimize);
+        if (!WaitUntil(() => NativeMethods.IsIconic(snapshot.Windows[0]), TimeSpan.FromSeconds(2))) return false;
+        menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Open").PerformClick();
+        if (!WaitUntil(() => !NativeMethods.IsIconic(snapshot.Windows[0]), TimeSpan.FromSeconds(2))) return false;
+        menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Close All Windows").PerformClick();
+        return probe.WaitForExit(3000);
+    }
+
+    private static bool TestPinnedApp(string probePath)
+    {
+        using var probe = StartProbe(probePath);
+        var snapshot = WaitForSnapshot(probe);
+        if (snapshot is null) return false;
+
+        var pinned = new PinnedApp
+        {
+            Name = "MacMakeover QA Probe",
+            Patterns = [],
+            ExecutablePath = probePath,
+            ProcessNames = [snapshot.ProcessName],
+            IsUserPin = true
+        };
+        using var item = new DockItem(pinned, 28);
+        using var menu = DockForm.BuildContextMenu(item);
+        if (!HasCommands(menu, "Open", "Remove from Dock", "Close All Windows")) return false;
+        if (!item.IsPinned || item.CanPin || !item.CanClose) return false;
+
+        NativeMethods.ShowWindow(snapshot.Windows[0], NativeMethods.SwMinimize);
+        if (!WaitUntil(() => NativeMethods.IsIconic(snapshot.Windows[0]), TimeSpan.FromSeconds(2))) return false;
+        menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Open").PerformClick();
+        if (!WaitUntil(() => !NativeMethods.IsIconic(snapshot.Windows[0]), TimeSpan.FromSeconds(2))) return false;
+        menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Close All Windows").PerformClick();
+        return probe.WaitForExit(3000);
+    }
+
+    private static Process StartProbe(string probePath)
+    {
+        var process = Process.Start(new ProcessStartInfo(probePath, "--probe-window")
+        {
+            UseShellExecute = false
+        }) ?? throw new InvalidOperationException("Could not start Dock QA probe.");
+        if (!WaitUntil(() =>
+            {
+                process.Refresh();
+                return process.HasExited || process.MainWindowHandle != IntPtr.Zero;
+            }, TimeSpan.FromSeconds(5)) || process.HasExited)
+        {
+            process.Dispose();
+            throw new InvalidOperationException("Dock QA probe did not expose a window.");
+        }
+        return process;
+    }
+
+    private static RunningAppSnapshot? WaitForSnapshot(Process process)
+    {
+        RunningAppSnapshot? result = null;
+        WaitUntil(() =>
+        {
+            process.Refresh();
+            if (process.HasExited) return true;
+            result = RunningAppSnapshot.Capture(PinnedApp.Load())
+                .FirstOrDefault(snapshot => snapshot.ProcessName.Equals(process.ProcessName, StringComparison.OrdinalIgnoreCase));
+            return result is not null;
+        }, TimeSpan.FromSeconds(5));
+        return result;
+    }
+
+    private static bool HasCommands(ContextMenuStrip menu, params string[] expected)
+    {
+        var labels = menu.Items.Cast<ToolStripItem>()
+            .Where(item => item is not ToolStripSeparator)
+            .Select(item => item.Text)
+            .ToArray();
+        return expected.All(label => labels.Contains(label, StringComparer.Ordinal));
+    }
+
+    private static bool WaitUntil(Func<bool> predicate, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        do
+        {
+            Application.DoEvents();
+            if (predicate()) return true;
+            Thread.Sleep(40);
+        } while (DateTime.UtcNow < deadline);
+        return predicate();
     }
 }
 
@@ -440,7 +601,7 @@ internal sealed class DockForm : Form
     private const int HorizontalPadding = 22;
     private readonly Screen _screen;
     private readonly bool _preview;
-    private readonly IReadOnlyList<PinnedApp> _pinnedApps;
+    private IReadOnlyList<PinnedApp> _pinnedApps;
     private readonly List<DockItem> _items = [];
     private readonly List<DockItem> _pinnedItems = [];
     private readonly Dictionary<string, DockItem> _runningItems = new(StringComparer.OrdinalIgnoreCase);
@@ -455,6 +616,7 @@ internal sealed class DockForm : Form
         _screen = screen;
         _preview = preview;
         _pinnedApps = apps;
+        if (preview) Text = "MacMakeover Dock Preview";
         AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
@@ -484,6 +646,7 @@ internal sealed class DockForm : Form
         DpiChanged += (_, _) => BeginInvoke(new Action(PositionDock));
         _stateTimer.Tick += (_, _) => RefreshDockState();
         _stateTimer.Start();
+        DockPinStore.Changed += OnPinsChanged;
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -619,22 +782,69 @@ internal sealed class DockForm : Form
         }
         else if (e.Button == MouseButtons.Right)
         {
-            var menu = new ContextMenuStrip();
-            menu.BackColor = Color.FromArgb(30, 35, 46);
-            menu.ForeColor = Color.White;
-            menu.ShowImageMargin = false;
-            menu.Items.Add("Open", null, (_, _) => item.ActivateOrLaunch());
-            if (item.CanClose)
-            {
-                menu.Items.Add(new ToolStripSeparator());
-                menu.Items.Add("Close All Windows", null, (_, _) =>
-                {
-                    if (!item.Close()) System.Media.SystemSounds.Exclamation.Play();
-                });
-            }
+            var menu = BuildContextMenu(item);
             menu.Closed += (_, _) => menu.Dispose();
             menu.Show(this, e.Location);
         }
+    }
+
+    internal static ContextMenuStrip BuildContextMenu(DockItem item)
+    {
+        var menu = new ContextMenuStrip
+        {
+            BackColor = Color.FromArgb(30, 35, 46),
+            ForeColor = Color.White,
+            ShowImageMargin = false
+        };
+        menu.Items.Add("Open", null, (_, _) => item.ActivateOrLaunch());
+        menu.Items.Add(new ToolStripSeparator());
+        if (item.IsPinned)
+        {
+            menu.Items.Add("Remove from Dock", null, (_, _) => item.Unpin());
+        }
+        else if (item.CanPin)
+        {
+            menu.Items.Add("Pin to Dock", null, (_, _) => item.Pin());
+        }
+        if (item.CanClose)
+        {
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Close All Windows", null, (_, _) =>
+            {
+                if (!item.Close()) System.Media.SystemSounds.Exclamation.Play();
+            });
+        }
+        return menu;
+    }
+
+    private void OnPinsChanged()
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(new Action(ReloadPins)); }
+            catch (InvalidOperationException) { }
+            return;
+        }
+        ReloadPins();
+    }
+
+    private void ReloadPins()
+    {
+        foreach (var item in _items) item.Dispose();
+        _items.Clear();
+        _pinnedItems.Clear();
+        _runningItems.Clear();
+        _pinnedApps = PinnedApp.Load();
+        foreach (var app in _pinnedApps)
+        {
+            var item = new DockItem(app, IconSize);
+            _items.Add(item);
+            _pinnedItems.Add(item);
+        }
+        _hoveredItem = -1;
+        RefreshDockState();
+        PositionDock();
     }
 
     private static GraphicsPath Rounded(Rectangle rectangle, int radius)
@@ -700,6 +910,7 @@ internal sealed class DockForm : Form
     {
         if (disposing)
         {
+            DockPinStore.Changed -= OnPinsChanged;
             _stateTimer.Dispose();
             _toolTip.Dispose();
             foreach (var item in _items) item.Dispose();
@@ -816,6 +1027,8 @@ internal sealed class DockItem : IDisposable
     public string Name => _pinnedApp?.Name ?? _runningApp?.Name ?? string.Empty;
     public Rectangle Bounds { get; private set; }
     public bool IsRunning => _running;
+    public bool IsPinned => _pinnedApp is not null;
+    public bool CanPin => _runningApp is { CanPin: true };
     public bool CanClose => _pinnedApp?.HasClosableWindows() ?? _runningApp?.HasClosableWindows() ?? false;
 
     public bool RefreshPinnedState(IReadOnlySet<string> processes)
@@ -848,6 +1061,16 @@ internal sealed class DockItem : IDisposable
     public bool Close()
     {
         return _pinnedApp is not null ? _pinnedApp.Close() : _runningApp?.Close() ?? false;
+    }
+
+    public void Pin()
+    {
+        if (_runningApp is not null) DockPinStore.Pin(_runningApp);
+    }
+
+    public void Unpin()
+    {
+        if (_pinnedApp is not null) DockPinStore.Unpin(_pinnedApp);
     }
 
     public void Draw(Graphics graphics, bool hovered)
@@ -1044,6 +1267,10 @@ internal sealed class RunningApp
     public string Name { get; private set; }
     public string ProcessName { get; }
     public string? ExecutablePath { get; }
+    public bool CanPin =>
+        !ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(ExecutablePath) &&
+        File.Exists(ExecutablePath);
     public bool HasClosableWindows() => _windows.Any(NativeMethods.IsWindow);
 
     public bool Update(RunningAppSnapshot snapshot)
@@ -1095,6 +1322,94 @@ internal sealed class RunningApp
     }
 }
 
+internal sealed class DockPinState
+{
+    public List<UserDockPin> Added { get; init; } = [];
+    public List<string> Removed { get; init; } = [];
+}
+
+internal sealed record UserDockPin(string Name, string ProcessName, string ExecutablePath);
+
+internal static class DockPinStore
+{
+    private static readonly object Sync = new();
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
+    private static string StatePath =>
+        Environment.GetEnvironmentVariable("MACMAKEOVER_DOCK_PIN_STATE") ??
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "MacMakeover",
+            "config",
+            "dock-pins.json");
+
+    public static event Action? Changed;
+
+    public static DockPinState Load()
+    {
+        lock (Sync)
+        {
+            if (!File.Exists(StatePath)) return new DockPinState();
+            try
+            {
+                return JsonSerializer.Deserialize<DockPinState>(File.ReadAllText(StatePath), JsonOptions)
+                       ?? new DockPinState();
+            }
+            catch (JsonException)
+            {
+                return new DockPinState();
+            }
+            catch (IOException)
+            {
+                return new DockPinState();
+            }
+        }
+    }
+
+    public static void Pin(RunningApp app)
+    {
+        if (!app.CanPin || string.IsNullOrWhiteSpace(app.ExecutablePath)) return;
+        lock (Sync)
+        {
+            var state = Load();
+            state.Removed.RemoveAll(name => name.Equals(app.Name, StringComparison.OrdinalIgnoreCase));
+            state.Added.RemoveAll(pin =>
+                pin.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase) ||
+                pin.ExecutablePath.Equals(app.ExecutablePath, StringComparison.OrdinalIgnoreCase));
+            state.Added.Add(new UserDockPin(app.Name, app.ProcessName, app.ExecutablePath));
+            Save(state);
+        }
+        Changed?.Invoke();
+    }
+
+    public static void Unpin(PinnedApp app)
+    {
+        lock (Sync)
+        {
+            var state = Load();
+            state.Added.RemoveAll(pin => pin.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase));
+            if (!state.Removed.Contains(app.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                state.Removed.Add(app.Name);
+            }
+            Save(state);
+        }
+        Changed?.Invoke();
+    }
+
+    private static void Save(DockPinState state)
+    {
+        var directory = Path.GetDirectoryName(StatePath)!;
+        Directory.CreateDirectory(directory);
+        var temporaryPath = StatePath + ".tmp";
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(state, JsonOptions));
+        File.Move(temporaryPath, StatePath, true);
+    }
+}
+
 internal sealed class PinnedApp
 {
     private static readonly Dictionary<string, string[]> Processes = new(StringComparer.OrdinalIgnoreCase)
@@ -1111,27 +1426,53 @@ internal sealed class PinnedApp
     public string? AppId { get; init; }
     public required string[] Patterns { get; init; }
     public string? Shortcut { get; init; }
+    public string? ExecutablePath { get; init; }
+    public required string[] ProcessNames { get; init; }
+    public bool IsUserPin { get; init; }
 
     public static IReadOnlyList<PinnedApp> Load()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "native-taskbar-pins.json")));
         var pinned = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar");
-        return document.RootElement.GetProperty("pins").EnumerateArray().Select(item =>
+        var state = DockPinStore.Load();
+        var removed = state.Removed.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var builtIn = document.RootElement.GetProperty("pins").EnumerateArray().Select(item =>
         {
             var name = item.GetProperty("name").GetString()!;
             var patterns = item.GetProperty("taskbandPatterns").EnumerateArray().Select(p => p.GetString()!).ToArray();
             var shortcut = Directory.Exists(pinned) ? Directory.EnumerateFiles(pinned, "*.lnk").FirstOrDefault(path => patterns.Any(p => Path.GetFileName(path).Contains(Path.GetFileNameWithoutExtension(p), StringComparison.OrdinalIgnoreCase))) : null;
-            return new PinnedApp { Name = name, AppId = item.TryGetProperty("appId", out var id) && id.ValueKind != JsonValueKind.Null ? id.GetString() : null, Patterns = patterns, Shortcut = shortcut };
-        }).ToArray();
+            return new PinnedApp
+            {
+                Name = name,
+                AppId = item.TryGetProperty("appId", out var id) && id.ValueKind != JsonValueKind.Null ? id.GetString() : null,
+                Patterns = patterns,
+                Shortcut = shortcut,
+                ProcessNames = Processes.GetValueOrDefault(name, [])
+            };
+        }).Where(app => !removed.Contains(app.Name));
+        var added = state.Added
+            .Where(pin => !removed.Contains(pin.Name) && !string.IsNullOrWhiteSpace(pin.ExecutablePath))
+            .Select(pin => new PinnedApp
+            {
+                Name = pin.Name,
+                Patterns = [],
+                ExecutablePath = pin.ExecutablePath,
+                ProcessNames = [pin.ProcessName],
+                IsUserPin = true
+            });
+        return builtIn
+            .Concat(added)
+            .DistinctBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
-    public bool IsRunning(IReadOnlySet<string> processes) => Processes.GetValueOrDefault(Name, []).Any(processes.Contains);
+    public bool IsRunning(IReadOnlySet<string> processes) => ProcessNames.Any(processes.Contains);
 
-    public bool MatchesProcess(string processName) => Processes.GetValueOrDefault(Name, []).Contains(processName, StringComparer.OrdinalIgnoreCase);
+    public bool MatchesProcess(string processName) => ProcessNames.Contains(processName, StringComparer.OrdinalIgnoreCase);
 
     public void ActivateOrLaunch()
     {
-        foreach (var processName in Processes.GetValueOrDefault(Name, []))
+        foreach (var processName in ProcessNames)
         {
             foreach (var process in Process.GetProcessesByName(processName))
             {
@@ -1140,7 +1481,7 @@ internal sealed class PinnedApp
                 if (NativeMethods.SetForegroundWindow(process.MainWindowHandle)) return;
             }
         }
-        var target = Shortcut ?? (AppId is null ? null : $"shell:AppsFolder\\{AppId}");
+        var target = ExecutablePath ?? Shortcut ?? (AppId is null ? null : $"shell:AppsFolder\\{AppId}");
         if (target is null) return;
         Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
     }
@@ -1161,7 +1502,7 @@ internal sealed class PinnedApp
     {
         var processIds = new HashSet<uint>();
         var currentSessionId = Process.GetCurrentProcess().SessionId;
-        foreach (var processName in Processes.GetValueOrDefault(Name, []))
+        foreach (var processName in ProcessNames)
         {
             foreach (var process in Process.GetProcessesByName(processName))
             {
@@ -1215,7 +1556,8 @@ internal sealed class PinnedApp
             var packaged = LoadShellItemIcon($"shell:AppsFolder\\{AppId}", size);
             if (packaged is not null) return packaged;
         }
-        var source = Shortcut is null ? null : ResolveShortcutTarget(Shortcut);
+        var source = ExecutablePath;
+        source ??= Shortcut is null ? null : ResolveShortcutTarget(Shortcut);
         source ??= Shortcut;
         source ??= AppId is null ? null : $"shell:AppsFolder\\{AppId}";
         if (source is null) return null;
