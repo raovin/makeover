@@ -93,7 +93,7 @@ performance smoke test:
 ```
 
 The explicit interaction and recovery gates are opt-in because they perform one real
-Alt+Tab and intentionally terminate/recover MenuHost and the Supervisor:
+Alt+Tab and intentionally terminate/recover MenuHost, MenuBar, Dock, and the Supervisor:
 
 ```powershell
 .\scripts\Test-NativeShellRegression.ps1 -IncludeInteractiveAltTab -IncludeLiveRecovery

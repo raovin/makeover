@@ -188,8 +188,41 @@ if ($menuBarSource -notmatch 'LogicalCornerHitSize = 8' -or
   $failures.Add('MenuBar no longer preserves the Seelen-sized Show Desktop corner hit target.')
 }
 if ($menuBarSource -notmatch 'ReassertAppBarAfterStartupAsync' -or
-    $menuBarSource -notmatch 'foreach \(var delay in new\[\] \{ 1000, 4000 \}\)') {
-  $failures.Add('MenuBar no longer reasserts its AppBar work area after restored windows settle at login.')
+    $menuBarSource -notmatch 'foreach \(var delay in new\[\] \{ 1000, 4000 \}\)' -or
+    $menuBarSource -notmatch 'IsAppBarRegistrationAccepted' -or
+    $menuBarSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmNew, ref data\)' -or
+    $menuBarSource -notmatch 'if \(!IsAppBarRegistrationAccepted\(result\)\)' -or
+    $menuBarSource -notmatch 'AppBar registration failed' -or
+    $menuBarSource -notmatch 'if \(_appBarRegistered\) RemoveAppBar\(\)' -or
+    $menuBarSource -notmatch 'DecideStartupReassertFollowUp' -or
+    $menuBarSource -notmatch 'ApplyVisibleTopBarBounds' -or
+    $menuBarSource -notmatch 'ComputeTopBarBounds' -or
+    $menuBarSource -notmatch 'var wasRegistered = _appBarRegistered' -or
+    $menuBarSource -notmatch 'Startup reassert could not register appbar' -or
+    $menuBarSource -notmatch 'Applied visible top-bar bounds without reservation' -or
+    $menuBarSource -match 'AppBarRecoveryPolicy' -or
+    $menuBarSource -match '_recoveryTimer') {
+  $failures.Add('MenuBar AppBar registration no longer checks ABM_NEW, re-registers cleanly on TaskbarCreated, or bounds startup reassert without a resident recovery loop.')
+}
+if ($menuBarProgramSource -notmatch 'AppBarRegistrationSelfTest' -or
+    $menuBarProgramSource -notmatch 'IsAppBarRegistrationAccepted\(UIntPtr\.Zero\)' -or
+    $menuBarProgramSource -notmatch 'DecideStartupReassertFollowUp\(wasRegistered: false, isRegistered: true\)' -or
+    $menuBarProgramSource -notmatch 'StartupReassertFollowUp\.None' -or
+    $menuBarProgramSource -notmatch 'StartupReassertFollowUp\.ApplyVisibleBoundsOnly' -or
+    $menuBarProgramSource -notmatch 'ComputeTopBarBounds') {
+  $failures.Add('MenuBar no longer self-tests ABM_NEW acceptance, single-position reassert follow-up, or visible top-bar bounds fallback.')
+}
+if ($systemStateSource -notmatch 'BuildRenderedNotificationToken' -or
+    $systemStateSource -notmatch 'FormatNetworkRate' -or
+    $systemStateSource -notmatch '_lastNotificationToken' -or
+    $systemStateSource -notmatch 'if \(raiseChanged\) Changed\?\.Invoke' -or
+    $systemStateSource -notmatch 'yyyy-MM-dd HH:mm' -or
+    $systemStateSource -notmatch '_cachedForegroundPid' -or
+    $systemStateSource -notmatch 'ApplicationFrameHost' -or
+    $systemStateSource -notmatch 'ClearActiveAppCache' -or
+    $menuBarProgramSource -notmatch 'RenderedNotificationTokenSelfTest' -or
+    $menuBarProgramSource -notmatch 'NotificationTokenChanged') {
+  $failures.Add('MenuBar idle-CPU suppression no longer gates Changed on a rendered notification token with minute clock, network buckets, and PID-cached active-app metadata.')
 }
 if ($systemStateSource -notmatch '"notepad" => "Notepad"' -or
     $systemStateSource -notmatch '"mspaint" => "Paint"' -or
@@ -247,7 +280,12 @@ if ($dockSource -notmatch '--regression-test' -or
     $supervisorSource -notmatch '--self-test' -or
     $regressionSource -notmatch 'IncludeInteractiveAltTab' -or
     $regressionSource -notmatch 'IncludeLiveRecovery' -or
-    $regressionSource -notmatch 'Wait-ForReplacement') {
+    $regressionSource -notmatch 'Wait-ForReplacement' -or
+    $regressionSource -notmatch "MacMakeover Shell - MenuBar" -or
+    $regressionSource -notmatch "MacMakeover Shell - Dock" -or
+    $regressionSource -notmatch 'Test-NativeShellProfile\.ps1' -or
+    $regressionSource -notmatch 'Supervisor recovers crashed MacMakeover\.MenuBar' -or
+    $regressionSource -notmatch 'Supervisor recovers crashed MacMakeover\.Dock') {
   $failures.Add('Repeatable Dock, mixed-DPI, Alt+Tab, and watchdog regression coverage is incomplete.')
 }
 if ($profileSource -match '\.Verbs\(' -or $pinTestSource -match '\.Verbs\(' -or

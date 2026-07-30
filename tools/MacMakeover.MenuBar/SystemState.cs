@@ -54,6 +54,11 @@ internal sealed class SystemStateProvider : IDisposable
     private ulong _previousKernel;
     private ulong _previousUser;
     private string _lastActiveApp = "Finder";
+    private string _lastNotificationToken = string.Empty;
+    private int _cachedForegroundPid;
+    private string _cachedProcessName = string.Empty;
+    private string _cachedExecutableDescription = string.Empty;
+    private string _cachedFrameHostTitle = string.Empty;
     private int _polling;
     private bool _disposed;
 
@@ -75,6 +80,8 @@ internal sealed class SystemStateProvider : IDisposable
     public void Start()
     {
         Poll();
+        // Keep the established telemetry cadence; Changed is suppressed when the
+        // rendered notification token is unchanged so idle CPU stays flat.
         _timer.Change(1000, 1500);
     }
 
@@ -97,24 +104,32 @@ internal sealed class SystemStateProvider : IDisposable
             var activeApp = ReadActiveApp();
             var trayApps = TrayAppProvider.Capture();
 
+            var snapshot = new SystemSnapshot(
+                cpu,
+                usedMemory,
+                totalMemory,
+                down,
+                up,
+                battery,
+                onAcPower,
+                charging,
+                powerMode,
+                connection,
+                interfaceName,
+                activeApp,
+                trayApps);
+            var token = BuildRenderedNotificationToken(snapshot, DateTime.Now);
+            var raiseChanged = false;
             lock (_gate)
             {
-                _snapshot = new SystemSnapshot(
-                    cpu,
-                    usedMemory,
-                    totalMemory,
-                    down,
-                    up,
-                    battery,
-                    onAcPower,
-                    charging,
-                    powerMode,
-                    connection,
-                    interfaceName,
-                    activeApp,
-                    trayApps);
+                _snapshot = snapshot;
+                if (!string.Equals(token, _lastNotificationToken, StringComparison.Ordinal))
+                {
+                    _lastNotificationToken = token;
+                    raiseChanged = true;
+                }
             }
-            Changed?.Invoke(this, EventArgs.Empty);
+            if (raiseChanged) Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)
         {
@@ -125,6 +140,51 @@ internal sealed class SystemStateProvider : IDisposable
             Volatile.Write(ref _polling, 0);
         }
     }
+
+    /// <summary>
+    /// Network text buckets identical to the menu bar's FormatRate paint path.
+    /// </summary>
+    internal static string FormatNetworkRate(long bytesPerSecond)
+    {
+        if (bytesPerSecond >= 1024L * 1024L) return $"{bytesPerSecond / 1024d / 1024d:0.0}M";
+        if (bytesPerSecond >= 1024L) return $"{bytesPerSecond / 1024d:0}K";
+        return $"{bytesPerSecond}B";
+    }
+
+    /// <summary>
+    /// Pure rendered-state token. Changed fires only when this token differs, so
+    /// polling continues at the same cadence without full-bar invalidation on noise.
+    /// Includes rendered CPU, rounded memory, FormatRate network buckets, battery/
+    /// power/connection/app/tray identities, and minute-resolution clock.
+    /// </summary>
+    internal static string BuildRenderedNotificationToken(SystemSnapshot snapshot, DateTime localNow)
+    {
+        var trays = snapshot.TrayApps.Count == 0
+            ? string.Empty
+            : string.Join('|', snapshot.TrayApps.Select(app =>
+                $"{app.Key}\u001e{app.Name}\u001e{app.ExecutablePath}\u001e{(app.Promoted ? '1' : '0')}"));
+        return string.Join('\u001f',
+            snapshot.CpuPercent.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            snapshot.UsedMemoryGb.ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+            snapshot.TotalMemoryGb.ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+            FormatNetworkRate(snapshot.DownloadBytesPerSecond),
+            FormatNetworkRate(snapshot.UploadBytesPerSecond),
+            snapshot.BatteryPercent.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            snapshot.OnAcPower ? "1" : "0",
+            snapshot.Charging ? "1" : "0",
+            ((int)snapshot.PowerMode).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ((int)snapshot.Connection).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            snapshot.ConnectionName,
+            snapshot.ActiveApp,
+            trays,
+            localNow.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// True when two consecutive polls should raise Changed for the paint path.
+    /// </summary>
+    internal static bool NotificationTokenChanged(string? previous, string current) =>
+        !string.Equals(previous, current, StringComparison.Ordinal);
 
     private static PowerModeKind ReadPowerMode(bool onAcPower)
     {
@@ -251,6 +311,7 @@ internal sealed class SystemStateProvider : IDisposable
         var window = NativeMethods.GetForegroundWindow();
         if (window == IntPtr.Zero || NativeMethods.IsIconic(window))
         {
+            ClearActiveAppCache();
             _lastActiveApp = "Finder";
             return _lastActiveApp;
         }
@@ -261,23 +322,59 @@ internal sealed class SystemStateProvider : IDisposable
         {
             using var process = Process.GetProcessById((int)processId);
             var processName = process.ProcessName;
-            if (processName.StartsWith("MacMakeover.", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("seelen-ui", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("ShellExperienceHost", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("StartMenuExperienceHost", StringComparison.OrdinalIgnoreCase) ||
-                processName.Equals("SearchHost", StringComparison.OrdinalIgnoreCase))
+            if (IsShellOwnedForeground(processName))
             {
                 return _lastActiveApp;
             }
 
-            _lastActiveApp = FriendlyAppName(processName, process.MainWindowTitle, ReadExecutableDescription(process));
+            var title = process.MainWindowTitle;
+            var pid = (int)processId;
+            var isFrameHost = processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase);
+
+            // Cache friendly metadata by foreground PID. ApplicationFrameHost and other
+            // title-driven packaged apps still recompute when the title changes; a new
+            // PID always refreshes name/description so labels never go stale.
+            if (pid == _cachedForegroundPid &&
+                string.Equals(processName, _cachedProcessName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (isFrameHost &&
+                    !string.Equals(title, _cachedFrameHostTitle, StringComparison.Ordinal))
+                {
+                    _cachedFrameHostTitle = title;
+                    _lastActiveApp = FriendlyAppName(processName, title, _cachedExecutableDescription);
+                }
+                return _lastActiveApp;
+            }
+
+            _cachedForegroundPid = pid;
+            _cachedProcessName = processName;
+            _cachedExecutableDescription = ReadExecutableDescription(process);
+            _cachedFrameHostTitle = title;
+            _lastActiveApp = FriendlyAppName(processName, title, _cachedExecutableDescription);
         }
         catch
         {
             // A process can exit between the foreground query and name lookup.
+            // Drop the cache so the next successful poll does not reuse a dead PID label.
+            ClearActiveAppCache();
         }
         return _lastActiveApp;
     }
+
+    private void ClearActiveAppCache()
+    {
+        _cachedForegroundPid = 0;
+        _cachedProcessName = string.Empty;
+        _cachedExecutableDescription = string.Empty;
+        _cachedFrameHostTitle = string.Empty;
+    }
+
+    private static bool IsShellOwnedForeground(string processName) =>
+        processName.StartsWith("MacMakeover.", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("seelen-ui", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("ShellExperienceHost", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("StartMenuExperienceHost", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("SearchHost", StringComparison.OrdinalIgnoreCase);
 
     private static string ReadExecutableDescription(Process process)
     {

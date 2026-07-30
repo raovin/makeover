@@ -80,13 +80,41 @@ function Wait-ForReplacement {
   return $null
 }
 
+function Test-ForceStopAndRecover {
+  param(
+    [Parameter(Mandatory)][string]$ProcessName,
+    [Parameter(Mandatory)][int]$SessionId,
+    [Parameter(Mandatory)][int]$TimeoutSeconds,
+    [Parameter(Mandatory)][string]$ResultName
+  )
+
+  $process = @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue |
+    Where-Object { $_.SessionId -eq $SessionId } | Select-Object -First 1)
+  if ($process.Count -eq 0) {
+    Add-Result $ResultName $false "$ProcessName was absent before the recovery test." 0
+    return $false
+  }
+
+  $timer = [Diagnostics.Stopwatch]::StartNew()
+  $oldId = $process.Id
+  Stop-Process -Id $oldId -Force
+  $replacement = Wait-ForReplacement -ProcessName $ProcessName -PreviousId $oldId -TimeoutSeconds $TimeoutSeconds
+  $timer.Stop()
+  $replacementId = if ($replacement) { $replacement.Id } else { 'none' }
+  Add-Result $ResultName ($null -ne $replacement) "Automatic recovery only. Old PID $oldId; new PID $replacementId." $timer.Elapsed.TotalMilliseconds
+  return ($null -ne $replacement)
+}
+
 function Restore-LiveRecoveryTargets {
   param([int]$SessionId)
 
+  # Start missing components only. Never kill duplicates; report failure instead.
   $restored = $true
   foreach ($target in @(
       @{ ProcessName = 'MacMakeover.Supervisor'; TaskName = 'MacMakeover Shell - Supervisor'; Timeout = 90 },
-      @{ ProcessName = 'MacMakeover.MenuHost'; TaskName = 'MacMakeover Shell - MenuHost'; Timeout = 15 }
+      @{ ProcessName = 'MacMakeover.MenuHost'; TaskName = 'MacMakeover Shell - MenuHost'; Timeout = 15 },
+      @{ ProcessName = 'MacMakeover.MenuBar'; TaskName = 'MacMakeover Shell - MenuBar'; Timeout = 15 },
+      @{ ProcessName = 'MacMakeover.Dock'; TaskName = 'MacMakeover Shell - Dock'; Timeout = 15 }
     )) {
     $instances = @(Get-Process -Name $target.ProcessName -ErrorAction SilentlyContinue |
       Where-Object { $_.SessionId -eq $SessionId })
@@ -179,66 +207,101 @@ if (-not $SkipPerformanceSmoke) {
 if ($IncludeLiveRecovery) {
   $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
   $recoveryReady = $true
-  foreach ($required in 'MacMakeover.MenuHost', 'MacMakeover.Supervisor') {
-    $instances = @(Get-Process -Name $required -ErrorAction SilentlyContinue |
+  $liveRecoveryComponents = @(
+    @{ ProcessName = 'MacMakeover.MenuHost'; TaskName = 'MacMakeover Shell - MenuHost'; TimeoutSeconds = 12 },
+    @{ ProcessName = 'MacMakeover.MenuBar'; TaskName = 'MacMakeover Shell - MenuBar'; TimeoutSeconds = 12 },
+    @{ ProcessName = 'MacMakeover.Dock'; TaskName = 'MacMakeover Shell - Dock'; TimeoutSeconds = 12 },
+    @{ ProcessName = 'MacMakeover.Supervisor'; TaskName = 'MacMakeover Shell - Supervisor'; TimeoutSeconds = 90 }
+  )
+
+  foreach ($required in $liveRecoveryComponents) {
+    $instances = @(Get-Process -Name $required.ProcessName -ErrorAction SilentlyContinue |
       Where-Object { $_.SessionId -eq $sessionId })
     if ($instances.Count -ne 1) {
-      Add-Result "Live recovery prerequisite: $required" $false "Expected one process; found $($instances.Count)." 0
+      Add-Result "Live recovery prerequisite: $($required.ProcessName)" $false "Expected one process; found $($instances.Count)." 0
       $recoveryReady = $false
     }
-  }
-  foreach ($taskName in 'MacMakeover Shell - MenuHost', 'MacMakeover Shell - Supervisor') {
-    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+    $task = Get-ScheduledTask -TaskName $required.TaskName -ErrorAction SilentlyContinue
     if (-not $task -or $task.State -eq 'Disabled') {
-      Add-Result "Live recovery prerequisite: $taskName" $false 'Scheduled task is missing or disabled.' 0
+      Add-Result "Live recovery prerequisite: $($required.TaskName)" $false 'Scheduled task is missing or disabled.' 0
       $recoveryReady = $false
     }
   }
 
   if ($recoveryReady) {
     try {
-      $menuHostProcess = @(Get-Process -Name MacMakeover.MenuHost -ErrorAction SilentlyContinue |
-        Where-Object { $_.SessionId -eq $sessionId } | Select-Object -First 1)
-      $timer = [Diagnostics.Stopwatch]::StartNew()
-      $oldId = $menuHostProcess.Id
-      Stop-Process -Id $oldId -Force
-      $replacement = Wait-ForReplacement -ProcessName 'MacMakeover.MenuHost' -PreviousId $oldId -TimeoutSeconds 12
-      $timer.Stop()
-      $replacementId = if ($replacement) { $replacement.Id } else { 'none' }
-      Add-Result 'Supervisor recovers a crashed component' ($null -ne $replacement) "Automatic recovery only. Old PID $oldId; new PID $replacementId." $timer.Elapsed.TotalMilliseconds
+      # Force-stop one supervised component at a time and require a different PID.
+      $menuHostRecovered = Test-ForceStopAndRecover `
+        -ProcessName 'MacMakeover.MenuHost' `
+        -SessionId $sessionId `
+        -TimeoutSeconds 12 `
+        -ResultName 'Supervisor recovers crashed MacMakeover.MenuHost'
 
-      if ($replacement) {
-        $supervisor = @(Get-Process -Name MacMakeover.Supervisor -ErrorAction SilentlyContinue |
-          Where-Object { $_.SessionId -eq $sessionId } | Select-Object -First 1)
-        $timer = [Diagnostics.Stopwatch]::StartNew()
-        $oldId = $supervisor.Id
-        Stop-Process -Id $oldId -Force
-        $replacement = Wait-ForReplacement -ProcessName 'MacMakeover.Supervisor' -PreviousId $oldId -TimeoutSeconds 90
-        $timer.Stop()
-        $replacementId = if ($replacement) { $replacement.Id } else { 'none' }
-        Add-Result 'Scheduled watchdog recovers the Supervisor' ($null -ne $replacement) "Automatic recovery only. Old PID $oldId; new PID $replacementId." $timer.Elapsed.TotalMilliseconds
+      $menuBarRecovered = Test-ForceStopAndRecover `
+        -ProcessName 'MacMakeover.MenuBar' `
+        -SessionId $sessionId `
+        -TimeoutSeconds 12 `
+        -ResultName 'Supervisor recovers crashed MacMakeover.MenuBar'
 
-        if ($replacement) {
-          $menuHostProcess = @(Get-Process -Name MacMakeover.MenuHost -ErrorAction SilentlyContinue |
-            Where-Object { $_.SessionId -eq $sessionId } | Select-Object -First 1)
-          if ($menuHostProcess) {
-            $timer = [Diagnostics.Stopwatch]::StartNew()
-            $oldHostId = $menuHostProcess.Id
-            Stop-Process -Id $oldHostId -Force
-            $hostReplacement = Wait-ForReplacement -ProcessName 'MacMakeover.MenuHost' -PreviousId $oldHostId -TimeoutSeconds 12
-            $timer.Stop()
-            $hostReplacementId = if ($hostReplacement) { $hostReplacement.Id } else { 'none' }
-            Add-Result 'Recovered Supervisor resumes component monitoring' ($null -ne $hostReplacement) "Automatic recovery only. Old PID $oldHostId; new PID $hostReplacementId." $timer.Elapsed.TotalMilliseconds
-          } else {
-            Add-Result 'Recovered Supervisor resumes component monitoring' $false 'MenuHost was absent before the recovered Supervisor could be tested.' 0
+      $dockRecovered = Test-ForceStopAndRecover `
+        -ProcessName 'MacMakeover.Dock' `
+        -SessionId $sessionId `
+        -TimeoutSeconds 12 `
+        -ResultName 'Supervisor recovers crashed MacMakeover.Dock'
+
+      # MenuBar/Dock own work-area AppBars; prove reservations after both restarts.
+      if ($menuBarRecovered -and $dockRecovered) {
+        $profileScript = Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1'
+        $profileTimer = [Diagnostics.Stopwatch]::StartNew()
+        $profilePassed = $false
+        $profileDetail = 'Profile gate did not run.'
+        try {
+          Start-Sleep -Seconds 2
+          foreach ($attempt in 1..3) {
+            $null = & $profileScript 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              $profilePassed = $true
+              $profileDetail = "Test-NativeShellProfile.ps1 exit 0 after MenuBar/Dock recovery (attempt $attempt)."
+              break
+            }
+            $profileDetail = "Test-NativeShellProfile.ps1 exit $LASTEXITCODE after MenuBar/Dock recovery (attempt $attempt)."
+            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
           }
+        } catch {
+          $profileDetail = "Profile gate threw after MenuBar/Dock recovery: $($_.Exception.Message)"
         }
+        $profileTimer.Stop()
+        Add-Result 'Live recovery profile gate after MenuBar and Dock restart' $profilePassed $profileDetail $profileTimer.Elapsed.TotalMilliseconds
+      } else {
+        Add-Result 'Live recovery profile gate after MenuBar and Dock restart' $false 'Skipped because MenuBar or Dock recovery failed.' 0
+      }
+
+      if ($menuHostRecovered -and $menuBarRecovered -and $dockRecovered) {
+        $supervisorRecovered = Test-ForceStopAndRecover `
+          -ProcessName 'MacMakeover.Supervisor' `
+          -SessionId $sessionId `
+          -TimeoutSeconds 90 `
+          -ResultName 'Scheduled watchdog recovers MacMakeover.Supervisor'
+
+        if ($supervisorRecovered) {
+          $null = Test-ForceStopAndRecover `
+            -ProcessName 'MacMakeover.MenuHost' `
+            -SessionId $sessionId `
+            -TimeoutSeconds 12 `
+            -ResultName 'Recovered Supervisor resumes MacMakeover.MenuHost monitoring'
+        } else {
+          Add-Result 'Recovered Supervisor resumes MacMakeover.MenuHost monitoring' $false 'Skipped because Supervisor watchdog recovery failed.' 0
+        }
+      } else {
+        Add-Result 'Scheduled watchdog recovers MacMakeover.Supervisor' $false 'Skipped because a supervised component recovery failed.' 0
+        Add-Result 'Recovered Supervisor resumes MacMakeover.MenuHost monitoring' $false 'Skipped because a supervised component recovery failed.' 0
       }
     } finally {
       $restoreTimer = [Diagnostics.Stopwatch]::StartNew()
       $restored = Restore-LiveRecoveryTargets -SessionId $sessionId
       $restoreTimer.Stop()
-      Add-Result 'Live recovery cleanup leaves required components running' $restored 'Expected exactly one Supervisor and one MenuHost in the current session.' $restoreTimer.Elapsed.TotalMilliseconds
+      Add-Result 'Live recovery cleanup leaves required components running' $restored 'Expected exactly one MenuHost, MenuBar, Dock, and Supervisor in the current session. Missing tasks are started; duplicates are reported without killing.' $restoreTimer.Elapsed.TotalMilliseconds
     }
   }
 }

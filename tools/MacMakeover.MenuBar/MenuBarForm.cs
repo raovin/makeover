@@ -148,7 +148,9 @@ internal sealed class MenuBarForm : Form
     {
         if (!_preview && _taskbarCreatedMessage != 0 && message.Msg == _taskbarCreatedMessage)
         {
-            _appBarRegistered = false;
+            // Explorer recreated the taskbar. Clear registration only via ABM_REMOVE
+            // when we still believe we own one, then re-register.
+            if (_appBarRegistered) RemoveAppBar();
             RegisterAppBar();
         }
         if (_appBarCallback != 0 && message.Msg == _appBarCallback && message.WParam.ToInt32() == NativeMethods.AbnPosChanged)
@@ -158,13 +160,60 @@ internal sealed class MenuBarForm : Form
         base.WndProc(ref message);
     }
 
+    /// <summary>
+    /// Pure ABM_NEW acceptance: shell returns nonzero only when registration succeeded.
+    /// </summary>
+    internal static bool IsAppBarRegistrationAccepted(UIntPtr result) => result != UIntPtr.Zero;
+
+    /// <summary>
+    /// Pure startup-reassert follow-up after optional ABM_NEW retry. Avoids a second
+    /// PositionAppBar when RegisterAppBar already positioned a newly registered bar.
+    /// </summary>
+    internal enum StartupReassertFollowUp
+    {
+        /// <summary>Already registered before this iteration — one reassert PositionAppBar.</summary>
+        PositionAppBar,
+        /// <summary>RegisterAppBar just succeeded and already positioned once.</summary>
+        None,
+        /// <summary>Still unregistered — DPI-correct visible bounds only; never ABM_SETPOS.</summary>
+        ApplyVisibleBoundsOnly
+    }
+
+    /// <summary>
+    /// Decides the single follow-up action for one startup reassert iteration.
+    /// </summary>
+    internal static StartupReassertFollowUp DecideStartupReassertFollowUp(
+        bool wasRegistered,
+        bool isRegistered)
+    {
+        if (!isRegistered) return StartupReassertFollowUp.ApplyVisibleBoundsOnly;
+        if (wasRegistered) return StartupReassertFollowUp.PositionAppBar;
+        return StartupReassertFollowUp.None;
+    }
+
+    /// <summary>
+    /// Top-edge bar rectangle for a screen. Shared by reserved positioning and the
+    /// unregistered visible-only fallback (no AppBar messages involved).
+    /// </summary>
+    internal static Rectangle ComputeTopBarBounds(Rectangle screenBounds, int scaledHeight) =>
+        new(screenBounds.Left, screenBounds.Top, screenBounds.Width, Math.Max(1, scaledHeight));
+
     private void RegisterAppBar()
     {
         if (_appBarRegistered) return;
+        if (IsDisposed || !IsHandleCreated) return;
         _appBarCallback = NativeMethods.RegisterWindowMessage($"MacMakeover.MenuBar.{Handle}");
         var data = CreateAppBarData();
         data.CallbackMessage = _appBarCallback;
-        NativeMethods.SHAppBarMessage(NativeMethods.AbmNew, ref data);
+        var result = NativeMethods.SHAppBarMessage(NativeMethods.AbmNew, ref data);
+        if (!IsAppBarRegistrationAccepted(result))
+        {
+            AppLog.Write(
+                $"AppBar registration failed {_screen.DeviceName} handle={Handle} dpi={DeviceDpi}");
+            // Keep the form visually DPI-correct even without a work-area reservation.
+            ApplyVisibleTopBarBounds();
+            return;
+        }
         _appBarRegistered = true;
         PositionAppBar();
         AppLog.Write($"Registered appbar {_screen.DeviceName} bounds={Bounds} dpi={DeviceDpi}");
@@ -174,14 +223,15 @@ internal sealed class MenuBarForm : Form
     {
         if (!_appBarRegistered || IsDisposed) return;
         var height = Scale(LogicalHeight);
+        var desired = ComputeTopBarBounds(_screen.Bounds, height);
         var data = CreateAppBarData();
         data.Edge = NativeMethods.AbeTop;
         data.Bounds = new NativeMethods.Rect
         {
-            Left = _screen.Bounds.Left,
-            Top = _screen.Bounds.Top,
-            Right = _screen.Bounds.Right,
-            Bottom = _screen.Bounds.Top + height
+            Left = desired.Left,
+            Top = desired.Top,
+            Right = desired.Right,
+            Bottom = desired.Bottom
         };
         NativeMethods.SHAppBarMessage(NativeMethods.AbmQueryPos, ref data);
         data.Bounds.Top = _screen.Bounds.Top;
@@ -189,6 +239,16 @@ internal sealed class MenuBarForm : Form
         NativeMethods.SHAppBarMessage(NativeMethods.AbmSetPos, ref data);
         var bounds = data.Bounds.ToRectangle();
         ApplyNativeBounds(bounds);
+    }
+
+    /// <summary>
+    /// Unregistered bars only: set DPI-correct visible form bounds without ABM_SETPOS.
+    /// Safe when reservation cannot be established; does not claim shell work area.
+    /// </summary>
+    private void ApplyVisibleTopBarBounds()
+    {
+        if (_appBarRegistered || IsDisposed || !IsHandleCreated) return;
+        ApplyNativeBounds(ComputeTopBarBounds(_screen.Bounds, Scale(LogicalHeight)));
     }
 
     private void ApplyNativeBounds(Rectangle bounds)
@@ -612,12 +672,8 @@ internal sealed class MenuBarForm : Form
         _ => "\uF384"
     };
 
-    private static string FormatRate(long bytesPerSecond)
-    {
-        if (bytesPerSecond >= 1024L * 1024L) return $"{bytesPerSecond / 1024d / 1024d:0.0}M";
-        if (bytesPerSecond >= 1024L) return $"{bytesPerSecond / 1024d:0}K";
-        return $"{bytesPerSecond}B";
-    }
+    private static string FormatRate(long bytesPerSecond) =>
+        SystemStateProvider.FormatNetworkRate(bytesPerSecond);
 
     private void OnMouseMove(object? sender, MouseEventArgs e)
     {
@@ -718,13 +774,43 @@ internal sealed class MenuBarForm : Form
 
     private async Task ReassertAppBarAfterStartupAsync()
     {
+        // Bounded startup reassert only (1s and 4s). Unregistered bars retry ABM_NEW here;
+        // do not add a resident recovery timer or Dock-style retry loop.
         foreach (var delay in new[] { 1000, 4000 })
         {
             await Task.Delay(delay);
-            if (IsDisposed || !IsHandleCreated || !_appBarRegistered) return;
-            PositionAppBar();
+            if (IsDisposed || !IsHandleCreated) return;
+
+            var wasRegistered = _appBarRegistered;
+            if (!wasRegistered)
+            {
+                RegisterAppBar();
+                if (!_appBarRegistered)
+                {
+                    AppLog.Write(
+                        $"Startup reassert could not register appbar {_screen.DeviceName} handle={Handle} dpi={DeviceDpi}");
+                }
+            }
+
+            // Exactly one position path per iteration:
+            // - already registered → one reassert PositionAppBar
+            // - newly registered → RegisterAppBar already positioned once (None)
+            // - still unregistered → visible DPI bounds only, never ABM_SETPOS
+            switch (DecideStartupReassertFollowUp(wasRegistered, _appBarRegistered))
+            {
+                case StartupReassertFollowUp.PositionAppBar:
+                    PositionAppBar();
+                    break;
+                case StartupReassertFollowUp.ApplyVisibleBoundsOnly:
+                    ApplyVisibleTopBarBounds();
+                    break;
+            }
+
             EnsureTopmost();
-            AppLog.Write($"Reasserted appbar {_screen.DeviceName} bounds={Bounds}");
+            AppLog.Write(
+                _appBarRegistered
+                    ? $"Reasserted appbar {_screen.DeviceName} bounds={Bounds}"
+                    : $"Applied visible top-bar bounds without reservation {_screen.DeviceName} bounds={Bounds}");
         }
     }
 
