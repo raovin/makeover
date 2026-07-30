@@ -1,6 +1,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
-  [int]$Tolerance = 4
+  [int]$Tolerance = 4,
+  [string]$TitlePattern = ''
 )
 
 Set-StrictMode -Version Latest
@@ -79,6 +80,7 @@ $candidates = New-Object System.Collections.Generic.List[object]
   $className = $classBuilder.ToString()
 
   if ([string]::IsNullOrWhiteSpace($title)) { return $true }
+  if (-not [string]::IsNullOrWhiteSpace($TitlePattern) -and $title -notmatch $TitlePattern) { return $true }
   if ($title -match '^(Dock/Taskbar|Fancy Toolbar|Flyouts|Apple Menu|Control Center|Network|Bluetooth|Tooltip|Windows Input Experience)$') { return $true }
   if ($className -in @("Shell_TrayWnd", "Progman", "WorkerW", "Tauri Window")) { return $true }
 

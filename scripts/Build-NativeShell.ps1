@@ -56,12 +56,39 @@ if ($claudePackage) {
   }
 }
 
+$executables = @(
+  'MacMakeover.MenuBar.exe',
+  'MacMakeover.MenuHost.exe',
+  'MacMakeover.Dock.exe',
+  'AwakeAndAvailable.exe',
+  'MacMakeover.Supervisor.exe'
+)
+$manifestExecutables = [ordered]@{}
+foreach ($exe in $executables) {
+  $exePath = Join-Path $Destination $exe
+  if (Test-Path -LiteralPath $exePath) {
+    $manifestExecutables[$exe] = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash
+  }
+}
+foreach ($exe in $executables) {
+  if (-not $manifestExecutables.Contains($exe)) {
+    throw "Native-shell publish is incomplete; cannot create deployment manifest without $exe."
+  }
+}
+$manifestObj = [ordered]@{
+  generatedAt = (Get-Date).ToString('o')
+  executables = $manifestExecutables
+}
+$manifestPath = Join-Path $Destination 'deployment-manifest.json'
+[System.IO.File]::WriteAllText($manifestPath, ($manifestObj | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+
 $required = @(
   'MacMakeover.MenuBar.exe',
   'MacMakeover.MenuHost.exe',
   'MacMakeover.Dock.exe',
   'AwakeAndAvailable.exe',
   'MacMakeover.Supervisor.exe',
+  'deployment-manifest.json',
   'native-taskbar-pins.json',
   'Assets\apple-mark.png',
   'Assets\Fonts\Manrope-Regular.ttf',

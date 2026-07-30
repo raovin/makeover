@@ -26,6 +26,37 @@ if ($menuHost.Count -ne 1) { $failures.Add("Expected one MenuHost process; found
 if ($dock.Count -ne 1) { $failures.Add("Expected one Dock process; found $($dock.Count).") }
 if ($supervisor.Count -ne 1) { $failures.Add("Expected one native-shell supervisor process; found $($supervisor.Count).") }
 if ($awake.Count -ne 1) { $failures.Add("Expected one Awake & Available process; found $($awake.Count).") }
+
+$manifestPath = Join-Path $deploymentRoot 'deployment-manifest.json'
+$manifestExecutables = @(
+  'MacMakeover.MenuBar.exe',
+  'MacMakeover.MenuHost.exe',
+  'MacMakeover.Dock.exe',
+  'AwakeAndAvailable.exe',
+  'MacMakeover.Supervisor.exe'
+)
+$manifestHashes = @{}
+if (-not (Test-Path -LiteralPath $manifestPath)) {
+  $failures.Add('Missing deployment manifest: deployment-manifest.json')
+} else {
+  try {
+    $manifestData = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -AsHashtable
+    if ($manifestData.executables -isnot [System.Collections.IDictionary]) {
+      $failures.Add('deployment-manifest.json is missing the executables hash object.')
+    } else {
+      $manifestHashes = $manifestData.executables
+      foreach ($executable in $manifestExecutables) {
+        if (-not $manifestHashes.Contains($executable) -or
+            [string]::IsNullOrWhiteSpace([string]$manifestHashes[$executable])) {
+          $failures.Add("deployment-manifest.json is missing a SHA256 hash for $executable.")
+        }
+      }
+    }
+  } catch {
+    $failures.Add("Failed to parse deployment manifest: $($_.Exception.Message)")
+  }
+}
+
 foreach ($processDefinition in @(
     @{ Name = 'MenuBar'; Processes = $menuBar; Executable = 'MacMakeover.MenuBar.exe' }
     @{ Name = 'MenuHost'; Processes = $menuHost; Executable = 'MacMakeover.MenuHost.exe' }
@@ -33,9 +64,18 @@ foreach ($processDefinition in @(
     @{ Name = 'Supervisor'; Processes = $supervisor; Executable = 'MacMakeover.Supervisor.exe' }
     @{ Name = 'Awake & Available'; Processes = $awake; Executable = 'AwakeAndAvailable.exe' }
   )) {
-  if ($processDefinition.Processes.Count -eq 1 -and
-      $processDefinition.Processes[0].Path -ne (Join-Path $deploymentRoot $processDefinition.Executable)) {
-    $failures.Add("$($processDefinition.Name) is running outside the managed deployment: $($processDefinition.Processes[0].Path)")
+  if ($processDefinition.Processes.Count -eq 1) {
+    $procPath = $processDefinition.Processes[0].Path
+    $expectedPath = Join-Path $deploymentRoot $processDefinition.Executable
+    if ($procPath -ne $expectedPath) {
+      $failures.Add("$($processDefinition.Name) is running outside the managed deployment: $procPath")
+    } elseif ($manifestHashes.Contains($processDefinition.Executable)) {
+      $runningHash = (Get-FileHash -LiteralPath $procPath -Algorithm SHA256).Hash
+      $expectedExeHash = $manifestHashes[$processDefinition.Executable]
+      if ($runningHash -ne $expectedExeHash) {
+        $failures.Add("$($processDefinition.Name) running executable hash ($runningHash) does not match deployment manifest ($expectedExeHash).")
+      }
+    }
   }
 }
 if ($seelen.Count) { $failures.Add('Seelen is still running alongside the native shell.') }
@@ -48,6 +88,7 @@ foreach ($required in @(
     'MacMakeover.Dock.exe',
     'AwakeAndAvailable.exe',
     'MacMakeover.Supervisor.exe',
+    'deployment-manifest.json',
     'native-taskbar-pins.json',
     'Assets\apple-mark.png',
     'Assets\Fonts\Manrope-Regular.ttf',
@@ -56,8 +97,15 @@ foreach ($required in @(
     'Assets\Fonts\OFL-Manrope.txt',
     'Assets\Fonts\OFL-JetBrainsMono.txt'
   )) {
-  if (-not (Test-Path -LiteralPath (Join-Path $deploymentRoot $required))) {
+  $deployedFilePath = Join-Path $deploymentRoot $required
+  if (-not (Test-Path -LiteralPath $deployedFilePath)) {
     $failures.Add("Missing deployed file: $required")
+  } elseif ($manifestHashes.Contains($required)) {
+    $actualDeployedHash = (Get-FileHash -LiteralPath $deployedFilePath -Algorithm SHA256).Hash
+    $expectedHash = $manifestHashes[$required]
+    if ($actualDeployedHash -ne $expectedHash) {
+      $failures.Add("Deployed file hash mismatch for ${required}: expected ${expectedHash}, found ${actualDeployedHash}")
+    }
   }
 }
 
@@ -348,6 +396,27 @@ if ($visibleDockWindows.Count -lt [Windows.Forms.Screen]::AllScreens.Count) {
   $failures.Add("Expected one visible topmost dock per display; found $($visibleDockWindows.Count).")
 }
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DockProfileDpiProbe {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct NativePoint { public int X; public int Y; }
+  [DllImport("user32.dll")]
+  public static extern IntPtr MonitorFromPoint(NativePoint pt, uint flags);
+  [DllImport("shcore.dll")]
+  public static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+  public static int GetDpi(int centerX, int centerY) {
+    try {
+      var pt = new NativePoint { X = centerX, Y = centerY };
+      var mon = MonitorFromPoint(pt, 2);
+      if (mon != IntPtr.Zero && GetDpiForMonitor(mon, 0, out var dpiX, out _) == 0 && dpiX >= 96) return (int)dpiX;
+    } catch {}
+    return 0;
+  }
+}
+'@
+
 foreach ($screen in [Windows.Forms.Screen]::AllScreens) {
   if ($screen.WorkingArea.Top -le $screen.Bounds.Top) {
     $failures.Add("$($screen.DeviceName) has no reserved top menu-bar work area.")
@@ -355,9 +424,21 @@ foreach ($screen in [Windows.Forms.Screen]::AllScreens) {
   if ($screen.WorkingArea.Bottom -ge $screen.Bounds.Bottom) {
     $failures.Add("$($screen.DeviceName) has no reserved bottom dock work area.")
   }
+  $centerX = $screen.Bounds.Left + [int]($screen.Bounds.Width / 2)
+  $centerY = $screen.Bounds.Top + [int]($screen.Bounds.Height / 2)
+  $dpi = [DockProfileDpiProbe]::GetDpi($centerX, $centerY)
+  if ($dpi -lt 96) {
+    $failures.Add("Could not determine monitor DPI for $($screen.DeviceName); exact Dock reservation cannot be verified.")
+    continue
+  }
+  $dpiScale = [Math]::Max(1.0, $dpi / 96.0)
+  $screenFloor = if ($screen.Primary) { 1.0 } else { 1.5 }
+  $visualScale = [Math]::Max($dpiScale, $screenFloor)
+  $expectedReservation = [int][Math]::Round(48 * $visualScale) + [int][Math]::Round(8 * $visualScale)
+
   $bottomReservation = $screen.Bounds.Bottom - $screen.WorkingArea.Bottom
-  if ($bottomReservation -lt 56) {
-    $failures.Add("$($screen.DeviceName) reserves only $bottomReservation px at the bottom; 56 px is required to keep maximized windows clear of the dock.")
+  if ($bottomReservation -ne $expectedReservation) {
+    $failures.Add("$($screen.DeviceName) reserves $bottomReservation px at the bottom; exact expected reservation is $expectedReservation px based on Dock scaling policy.")
   }
 }
 

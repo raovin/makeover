@@ -5,13 +5,16 @@ param(
   [switch]$IncludeLiveRecovery,
   [switch]$SkipPerformanceSmoke,
   [string]$DeploymentRoot = (Join-Path $env:LOCALAPPDATA 'MacMakeover\bin'),
-  [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'qa\regression')
+  [string]$OutputDirectory = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+  $OutputDirectory = Join-Path $repoRoot 'qa\regression'
+}
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $evidencePath = Join-Path $OutputDirectory "$stamp-native-shell-regression.json"

@@ -6,6 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>MacMakeover.MenuBar</AssemblyName>
+    <Product>Vesper Shell</Product>
+    <AssemblyTitle>Vesper Menu Bar</AssemblyTitle>
+    <Description>Vesper Shell Menu Bar</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>

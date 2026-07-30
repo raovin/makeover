@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>MacMakeover.Supervisor</AssemblyName>
     <RootNamespace>MacMakeover.Supervisor</RootNamespace>
+    <Product>Vesper Shell</Product>
+    <AssemblyTitle>Vesper Supervisor</AssemblyTitle>
+    <Description>Vesper Shell Supervisor</Description>
     <PublishSingleFile>true</PublishSingleFile>
     <Version>1.0.0</Version>
   </PropertyGroup>

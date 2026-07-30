@@ -6,5 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>MacMakeover.MenuHost</AssemblyName>
+    <Product>Vesper Shell</Product>
+    <AssemblyTitle>Vesper Menu Host</AssemblyTitle>
+    <Description>Vesper Shell Menu Host</Description>
   </PropertyGroup>
 </Project>

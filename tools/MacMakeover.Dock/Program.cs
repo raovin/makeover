@@ -108,6 +108,9 @@ internal static class DockRegressionTests
         {
             Environment.SetEnvironmentVariable("MACMAKEOVER_DOCK_PIN_STATE", pinStatePath);
             File.Copy(Environment.ProcessPath!, probePath, true);
+            if (!TestAppBarGeometryHelpers()) return 5;
+            if (!TestAppBarRecoveryPolicy()) return 6;
+            if (!TestDockWindowTitle()) return 7;
             if (!TestDynamicApp(probePath)) return 2;
             if (!TestPinnedApp(probePath)) return 3;
             return 0;
@@ -138,6 +141,7 @@ internal static class DockRegressionTests
         using var menu = DockForm.BuildContextMenu(item);
         if (!HasCommands(menu, "Open", "Pin to Dock", "Close All Windows")) return false;
         if (item.IsPinned || !item.CanPin || !item.CanClose) return false;
+        if (!TestContextMenuLifetime(item)) return false;
 
         menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Pin to Dock").PerformClick();
         var persisted = PinnedApp.Load()
@@ -157,6 +161,36 @@ internal static class DockRegressionTests
         if (!WaitUntil(() => !NativeMethods.IsIconic(snapshot.Windows[0]), TimeSpan.FromSeconds(2))) return false;
         menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Close All Windows").PerformClick();
         return probe.WaitForExit(3000);
+    }
+
+    private static bool TestContextMenuLifetime(DockItem item)
+    {
+        using var owner = new Form
+        {
+            ShowInTaskbar = false,
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(-30000, -30000),
+            Size = new Size(10, 10)
+        };
+        owner.Show();
+
+        Exception? threadException = null;
+        ThreadExceptionEventHandler handler = (_, args) => threadException = args.Exception;
+        Application.ThreadException += handler;
+        try
+        {
+            var menu = DockForm.BuildContextMenu(item);
+            DockForm.DisposeAfterClose(owner, menu);
+            menu.Show(owner, Point.Empty);
+            menu.Close(ToolStripDropDownCloseReason.ItemClicked);
+            var disposed = WaitUntil(() => menu.IsDisposed, TimeSpan.FromSeconds(2));
+            if (!disposed) menu.Dispose();
+            return disposed && threadException is null;
+        }
+        finally
+        {
+            Application.ThreadException -= handler;
+        }
     }
 
     private static bool TestPinnedApp(string probePath)
@@ -225,6 +259,70 @@ internal static class DockRegressionTests
             .Select(item => item.Text)
             .ToArray();
         return expected.All(label => labels.Contains(label, StringComparer.Ordinal));
+    }
+
+    private static bool TestAppBarGeometryHelpers()
+    {
+        var monitor = new Rectangle(-1920, 0, 1920, 1080);
+        const int gap = 84;
+        var proposed = AppBarGeometry.ProposeBottomEdge(monitor, gap);
+        if (proposed.Left != monitor.Left || proposed.Right != monitor.Right) return false;
+        if (proposed.Bottom != monitor.Bottom || proposed.Top != monitor.Bottom - gap) return false;
+
+        // QUERYPOS can shrink the proposal; reassert the exact requested height from the bottom.
+        var afterQuery = proposed;
+        afterQuery.Top = afterQuery.Bottom - 40;
+        var reasserted = AppBarGeometry.ReassertBottomHeight(afterQuery, gap);
+        if (reasserted.Bottom != monitor.Bottom || reasserted.Top != monitor.Bottom - gap) return false;
+
+        var window = AppBarGeometry.ToWindowRectangle(reasserted);
+        return window.Left == monitor.Left &&
+               window.Width == monitor.Width &&
+               window.Top == monitor.Bottom - gap &&
+               window.Height == gap;
+    }
+
+    private static bool TestAppBarRecoveryPolicy()
+    {
+        if (AppBarRecoveryPolicy.NextBackoffMs(0) != 500) return false;
+        if (AppBarRecoveryPolicy.NextBackoffMs(1) != 1000) return false;
+        if (AppBarRecoveryPolicy.NextBackoffMs(2) != 2000) return false;
+        if (AppBarRecoveryPolicy.NextBackoffMs(10) != AppBarRecoveryPolicy.MaxBackoffMs) return false;
+
+        // Unregistered always registers; success must not imply a free remove.
+        if (AppBarRecoveryPolicy.DecideUnregistered() != AppBarRecoveryAction.Register) return false;
+        if (AppBarRecoveryPolicy.DecideMismatch(1, removeUsedThisCycle: false) != AppBarRecoveryAction.Position) return false;
+        if (AppBarRecoveryPolicy.DecideMismatch(AppBarRecoveryPolicy.SingleRemoveAtAttempt, removeUsedThisCycle: false)
+            != AppBarRecoveryAction.RemoveThenRegister) return false;
+        // Second remove in the same cycle is forbidden even at the remove attempt index.
+        if (AppBarRecoveryPolicy.DecideMismatch(AppBarRecoveryPolicy.SingleRemoveAtAttempt, removeUsedThisCycle: true)
+            != AppBarRecoveryAction.Position) return false;
+        if (AppBarRecoveryPolicy.DecideMismatch(AppBarRecoveryPolicy.MaxMismatchAttemptsPerCycle, removeUsedThisCycle: true)
+            != AppBarRecoveryAction.Position) return false;
+
+        if (!AppBarRecoveryPolicy.ShouldContinue(registered: false, reservationMatches: true)) return false;
+        if (!AppBarRecoveryPolicy.ShouldContinue(registered: true, reservationMatches: false)) return false;
+        if (AppBarRecoveryPolicy.ShouldContinue(registered: true, reservationMatches: true)) return false;
+        if (AppBarRecoveryPolicy.ShouldEnterBackoff(AppBarRecoveryPolicy.MaxMismatchAttemptsPerCycle - 1)) return false;
+        if (!AppBarRecoveryPolicy.ShouldEnterBackoff(AppBarRecoveryPolicy.MaxMismatchAttemptsPerCycle)) return false;
+
+        // Continuous mismatch: at most one remove/register per cycle, then reachable exponential backoff.
+        // Cycle counters are NOT reset by successful re-registration (the original thrash defect).
+        var simulation = AppBarRecoveryPolicy.SimulateContinuousMismatch(cycles: 3);
+        if (simulation.RemovesPerCycle.Count != 3) return false;
+        if (simulation.RemovesPerCycle.Any(count => count != 1)) return false;
+        if (simulation.TotalRemoves != 3) return false;
+        if (simulation.BackoffMs is not [500, 1000, 2000]) return false;
+        // Within a cycle, mismatch attempts climb to the cap even across a successful re-register.
+        if (simulation.PeakCycleMismatchAttempts.Any(peak => peak != AppBarRecoveryPolicy.MaxMismatchAttemptsPerCycle))
+            return false;
+        return true;
+    }
+
+    private static bool TestDockWindowTitle()
+    {
+        return DockForm.WindowTitle(preview: false) == "Vesper Dock" &&
+               DockForm.WindowTitle(preview: true) == "Vesper Dock Preview";
     }
 
     private static bool WaitUntil(Func<bool> predicate, TimeSpan timeout)
@@ -364,20 +462,180 @@ internal sealed class DockContext : ApplicationContext
     }
 }
 
+internal enum AppBarRecoveryAction
+{
+    None,
+    Position,
+    Register,
+    RemoveThenRegister
+}
+
+internal readonly record struct AppBarMismatchSimulation(
+    IReadOnlyList<int> RemovesPerCycle,
+    IReadOnlyList<int> PeakCycleMismatchAttempts,
+    IReadOnlyList<int> BackoffMs)
+{
+    public int TotalRemoves => RemovesPerCycle.Sum();
+}
+
+/// <summary>
+/// Pure AppBar rectangle helpers. These encode the documented bottom-edge proposal
+/// sequence without calling SHAppBarMessage, so headless tests can cover geometry only.
+/// </summary>
+internal static class AppBarGeometry
+{
+    public static NativeMethods.Rect ProposeBottomEdge(Rectangle monitorBounds, int height)
+    {
+        var safeHeight = Math.Max(1, height);
+        return new NativeMethods.Rect
+        {
+            Left = monitorBounds.Left,
+            Top = monitorBounds.Bottom - safeHeight,
+            Right = monitorBounds.Right,
+            Bottom = monitorBounds.Bottom
+        };
+    }
+
+    public static NativeMethods.Rect ReassertBottomHeight(NativeMethods.Rect afterQuery, int height)
+    {
+        var safeHeight = Math.Max(1, height);
+        afterQuery.Top = afterQuery.Bottom - safeHeight;
+        return afterQuery;
+    }
+
+    public static Rectangle ToWindowRectangle(NativeMethods.Rect bounds)
+    {
+        var width = Math.Max(1, bounds.Right - bounds.Left);
+        var height = Math.Max(1, bounds.Bottom - bounds.Top);
+        return new Rectangle(bounds.Left, bounds.Top, width, height);
+    }
+}
+
+/// <summary>
+/// Pure recovery decisions for AppBar registration. Cycle mismatch attempts are
+/// monotonic and survive successful re-registration; remove/register is limited to
+/// once per cycle so continuous mismatch reaches exponential backoff.
+/// </summary>
+internal static class AppBarRecoveryPolicy
+{
+    public const int MaxMismatchAttemptsPerCycle = 6;
+    public const int SingleRemoveAtAttempt = 3;
+    public const int MinBackoffMs = 500;
+    public const int MaxBackoffMs = 8000;
+    public const int VerifyIntervalMs = 300;
+    public const int PostRemoveRegisterDelayMs = 200;
+
+    public static int NextBackoffMs(int failureStreak)
+    {
+        var shift = Math.Clamp(failureStreak, 0, 4);
+        return Math.Min(MaxBackoffMs, MinBackoffMs << shift);
+    }
+
+    public static AppBarRecoveryAction DecideUnregistered() => AppBarRecoveryAction.Register;
+
+    /// <param name="cycleMismatchAttempts">
+    /// Monotonic mismatch count within the current cycle (already incremented for this step).
+    /// Must not be reset by a successful ABM_NEW inside the same cycle.
+    /// </param>
+    /// <param name="removeUsedThisCycle">
+    /// True after the single permitted RemoveThenRegister for this cycle.
+    /// </param>
+    public static AppBarRecoveryAction DecideMismatch(int cycleMismatchAttempts, bool removeUsedThisCycle)
+    {
+        if (!removeUsedThisCycle && cycleMismatchAttempts == SingleRemoveAtAttempt)
+            return AppBarRecoveryAction.RemoveThenRegister;
+        return AppBarRecoveryAction.Position;
+    }
+
+    public static bool ShouldContinue(bool registered, bool reservationMatches) =>
+        !registered || !reservationMatches;
+
+    public static bool ShouldEnterBackoff(int cycleMismatchAttempts) =>
+        cycleMismatchAttempts >= MaxMismatchAttemptsPerCycle;
+
+    public static string FormatStatus(string phase, int detail = 0) =>
+        detail == 0 ? phase : $"{phase}:{detail}";
+
+    /// <summary>
+    /// Deterministic continuous-mismatch simulation (register always succeeds).
+    /// Shows bounded remove frequency and reachable exponential backoff — not Win32 coverage.
+    /// </summary>
+    public static AppBarMismatchSimulation SimulateContinuousMismatch(int cycles)
+    {
+        var removesPerCycle = new List<int>(cycles);
+        var peaks = new List<int>(cycles);
+        var backoffs = new List<int>(cycles);
+        var registered = true;
+        var failureStreak = 0;
+
+        for (var cycle = 0; cycle < cycles; cycle++)
+        {
+            var cycleMismatchAttempts = 0;
+            var removeUsedThisCycle = false;
+            var removes = 0;
+
+            while (true)
+            {
+                if (!registered)
+                {
+                    // Successful re-registration must leave cycleMismatchAttempts untouched.
+                    _ = DecideUnregistered();
+                    registered = true;
+                    continue;
+                }
+
+                cycleMismatchAttempts++;
+                var action = DecideMismatch(cycleMismatchAttempts, removeUsedThisCycle);
+                if (action == AppBarRecoveryAction.RemoveThenRegister)
+                {
+                    removes++;
+                    removeUsedThisCycle = true;
+                    registered = false;
+                    continue;
+                }
+
+                if (ShouldEnterBackoff(cycleMismatchAttempts))
+                {
+                    removesPerCycle.Add(removes);
+                    peaks.Add(cycleMismatchAttempts);
+                    // First exhausted cycle backs off at streak 0 (500ms); then streak rises.
+                    backoffs.Add(NextBackoffMs(failureStreak));
+                    failureStreak++;
+                    // Next cycle starts after backoff: cycle counters reset, failureStreak keeps rising.
+                    break;
+                }
+            }
+        }
+
+        return new AppBarMismatchSimulation(removesPerCycle, peaks, backoffs);
+    }
+}
+
+internal enum AppBarShellEvent
+{
+    PosChanged,
+    TaskbarCreated,
+    DpiChanged
+}
+
 internal sealed class WorkAreaGapForm : Form
 {
     private const int LogicalGap = 8;
-    private const int ReservationAnchorSize = 1;
     private const int WmNcHitTest = 0x0084;
     private static readonly IntPtr HtTransparent = new(-1);
     private readonly Screen _screen;
     private readonly uint _callbackMessage;
     private readonly uint _taskbarCreatedMessage;
-    private readonly System.Windows.Forms.Timer _settleTimer = new() { Interval = 500 };
+    private readonly System.Windows.Forms.Timer _recoveryTimer = new() { Interval = AppBarRecoveryPolicy.VerifyIntervalMs };
     private bool _registered;
-    private bool _positionPending;
-    private int _remainingSettleAttempts;
+    private bool _operationPending;
+    private bool _removeUsedThisCycle;
+    private int _cycleMismatchAttempts;
     private int _stableSettleSamples;
+    private int _failureStreak;
+
+    /// <summary>Last recovery outcome for diagnostics; not a Win32 integration assertion surface.</summary>
+    internal string LastRecoveryStatus { get; private set; } = AppBarRecoveryPolicy.FormatStatus("idle");
 
     public WorkAreaGapForm(Screen screen)
     {
@@ -391,14 +649,17 @@ internal sealed class WorkAreaGapForm : Form
         TopMost = false;
         Enabled = false;
         Opacity = 0;
-        Location = new Point(screen.Bounds.Left, screen.Bounds.Bottom - 1);
-        Size = new Size(ReservationAnchorSize, ReservationAnchorSize);
-        _settleTimer.Tick += (_, _) => SettlePosition();
+        // Initial bounds match the expected bottom-edge reservation; AppBar SETPOS owns the final rect.
+        var initialGap = ExpectedReservation(DeviceDpi);
+        var initial = AppBarGeometry.ProposeBottomEdge(screen.Bounds, initialGap);
+        Bounds = AppBarGeometry.ToWindowRectangle(initial);
+        _recoveryTimer.Tick += (_, _) => OnRecoveryTick();
         Shown += (_, _) =>
         {
             RegisterAndPosition();
-            BeginSettle();
+            StartRecoveryCycle();
         };
+        DpiChanged += (_, _) => QueueShellEvent(AppBarShellEvent.DpiChanged);
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -423,13 +684,20 @@ internal sealed class WorkAreaGapForm : Form
 
     private void RegisterAndPosition()
     {
-        if (!_registered)
-        {
-            var registration = CreateAppBarData();
-            _registered = NativeMethods.SHAppBarMessage(NativeMethods.AbmNew, ref registration) != UIntPtr.Zero;
-            if (!_registered) return;
-        }
+        if (!TryRegister()) return;
         PositionAppBar();
+    }
+
+    private bool TryRegister()
+    {
+        if (_registered) return true;
+        if (IsDisposed || !IsHandleCreated) return false;
+        var registration = CreateAppBarData();
+        _registered = NativeMethods.SHAppBarMessage(NativeMethods.AbmNew, ref registration) != UIntPtr.Zero;
+        LastRecoveryStatus = _registered
+            ? AppBarRecoveryPolicy.FormatStatus("registered")
+            : AppBarRecoveryPolicy.FormatStatus("register-failed", _failureStreak + 1);
+        return _registered;
     }
 
     private void PositionAppBar()
@@ -439,32 +707,27 @@ internal sealed class WorkAreaGapForm : Form
             NativeMethods.DpiAwarenessContextPerMonitorAwareV2);
         try
         {
-            var data = CreateAppBarData();
-            var targetDpi = DisplayScale.DpiFor(_screen, DeviceDpi);
-            var visualScale = DisplayScale.For(_screen, targetDpi);
-            var visualDockHeight = (int)Math.Round(48 * visualScale);
             // Hidden taskbar windows remain alive for Explorer ownership but no longer
             // reserve work area on current Windows builds. Own the full dock height and
             // breathing room here so maximized applications can never cover the dock.
-            var gap = visualDockHeight + (int)Math.Round(LogicalGap * visualScale);
-            data.Bounds = new NativeMethods.Rect
-            {
-                Left = _screen.Bounds.Left,
-                Top = _screen.Bounds.Top,
-                Right = _screen.Bounds.Right,
-                Bottom = _screen.Bounds.Bottom
-            };
+            var gap = ExpectedReservation();
+            var data = CreateAppBarData();
+            // Documented bottom-edge AppBar sequence: propose the actual edge rectangle,
+            // reassert the exact requested height after QUERYPOS, then SETPOS and match HWND.
+            data.Bounds = AppBarGeometry.ProposeBottomEdge(_screen.Bounds, gap);
             NativeMethods.SHAppBarMessage(NativeMethods.AbmQueryPos, ref data);
-            data.Bounds.Top = data.Bounds.Bottom - gap;
+            data.Bounds = AppBarGeometry.ReassertBottomHeight(data.Bounds, gap);
             NativeMethods.SHAppBarMessage(NativeMethods.AbmSetPos, ref data);
+            var window = AppBarGeometry.ToWindowRectangle(data.Bounds);
             NativeMethods.SetWindowPos(
                 Handle,
                 NativeMethods.HwndBottom,
-                data.Bounds.Left,
-                data.Bounds.Bottom - ReservationAnchorSize,
-                ReservationAnchorSize,
-                ReservationAnchorSize,
+                window.Left,
+                window.Top,
+                window.Width,
+                window.Height,
                 NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+            LastRecoveryStatus = AppBarRecoveryPolicy.FormatStatus("positioned", gap);
         }
         finally
         {
@@ -479,13 +742,12 @@ internal sealed class WorkAreaGapForm : Form
     {
         if (_taskbarCreatedMessage != 0 && message.Msg == _taskbarCreatedMessage)
         {
-            _registered = false;
-            QueuePosition(register: true);
+            QueueShellEvent(AppBarShellEvent.TaskbarCreated);
         }
         else if (_callbackMessage != 0 && message.Msg == _callbackMessage &&
                  message.WParam.ToInt32() == NativeMethods.AbnPosChanged)
         {
-            QueuePosition(register: false);
+            QueueShellEvent(AppBarShellEvent.PosChanged);
         }
         if (message.Msg == WmNcHitTest)
         {
@@ -495,93 +757,190 @@ internal sealed class WorkAreaGapForm : Form
         base.WndProc(ref message);
     }
 
-    private void QueuePosition(bool register)
+    private void QueueShellEvent(AppBarShellEvent shellEvent)
     {
-        if (_positionPending || IsDisposed) return;
-        _positionPending = true;
+        // Coalesce overlapping shell/DPI work onto a single UI-queue operation.
+        if (_operationPending || IsDisposed) return;
+        _operationPending = true;
         try
         {
             BeginInvoke(new Action(() =>
             {
-                _positionPending = false;
-                if (register)
-                {
-                    RegisterAndPosition();
-                    BeginSettle();
-                }
-                else
-                {
-                    PositionAppBar();
-                }
+                _operationPending = false;
+                if (IsDisposed) return;
+                HandleShellEvent(shellEvent);
             }));
+        }
+        catch (ObjectDisposedException)
+        {
+            // ObjectDisposedException : InvalidOperationException — catch concrete first.
+            _operationPending = false;
         }
         catch (InvalidOperationException)
         {
-            _positionPending = false;
+            _operationPending = false;
         }
     }
 
-    private void BeginSettle()
+    private void HandleShellEvent(AppBarShellEvent shellEvent)
     {
-        _remainingSettleAttempts = 20;
-        _stableSettleSamples = 0;
-        _settleTimer.Start();
+        switch (shellEvent)
+        {
+            case AppBarShellEvent.TaskbarCreated:
+                // Explorer recreated the taskbar. Only clear registration after a real ABM_REMOVE
+                // when we still believe we own one — never mark false without REMOVE while registered.
+                if (_registered) TryRemove();
+                RegisterAndPosition();
+                StartRecoveryCycle();
+                break;
+            case AppBarShellEvent.DpiChanged:
+                // Expected reservation height changed; reassert geometry and start a fresh cycle.
+                if (_registered) PositionAppBar();
+                else RegisterAndPosition();
+                StartRecoveryCycle();
+                break;
+            default:
+                if (_registered) PositionAppBar();
+                else RegisterAndPosition();
+                EnsureRecoveryRunning();
+                break;
+        }
     }
 
-    private void SettlePosition()
+    /// <summary>
+    /// Begin a new recovery cycle. Resets cycle-local counters only; failureStreak
+    /// clears solely after two stable matching samples.
+    /// </summary>
+    private void StartRecoveryCycle()
     {
-        if (IsDisposed || !_registered)
+        if (IsDisposed) return;
+        _cycleMismatchAttempts = 0;
+        _removeUsedThisCycle = false;
+        _stableSettleSamples = 0;
+        ScheduleRecovery(AppBarRecoveryPolicy.VerifyIntervalMs);
+    }
+
+    private void EnsureRecoveryRunning()
+    {
+        if (IsDisposed || _recoveryTimer.Enabled) return;
+        StartRecoveryCycle();
+    }
+
+    private void ScheduleRecovery(int delayMs)
+    {
+        if (IsDisposed) return;
+        _recoveryTimer.Stop();
+        _recoveryTimer.Interval = Math.Max(50, delayMs);
+        _recoveryTimer.Start();
+    }
+
+    private void OnRecoveryTick()
+    {
+        if (IsDisposed)
         {
-            _settleTimer.Stop();
+            _recoveryTimer.Stop();
             return;
         }
 
-        var expectedReservation = ExpectedReservation();
-        var actualReservation = _screen.Bounds.Bottom - _screen.WorkingArea.Bottom;
-        if (actualReservation == expectedReservation)
+        // Never permanently give up solely because registration is false.
+        // Successful re-registration must NOT reset _cycleMismatchAttempts (thrash defect).
+        if (!_registered)
         {
-            if (++_stableSettleSamples >= 2) _settleTimer.Stop();
+            if (!TryRegister())
+            {
+                LastRecoveryStatus = AppBarRecoveryPolicy.FormatStatus("register-failed", _failureStreak + 1);
+                var registerBackoff = AppBarRecoveryPolicy.NextBackoffMs(_failureStreak);
+                _failureStreak++;
+                ScheduleRecovery(registerBackoff);
+                return;
+            }
+            PositionAppBar();
+            _stableSettleSamples = 0;
+            ScheduleRecovery(AppBarRecoveryPolicy.VerifyIntervalMs);
+            return;
+        }
+
+        if (ActualReservation() == ExpectedReservation())
+        {
+            if (++_stableSettleSamples >= 2)
+            {
+                // Only stable match resets cycle counters and failure streak.
+                _failureStreak = 0;
+                _cycleMismatchAttempts = 0;
+                _removeUsedThisCycle = false;
+                LastRecoveryStatus = AppBarRecoveryPolicy.FormatStatus("stable");
+                _recoveryTimer.Stop();
+                return;
+            }
+            ScheduleRecovery(AppBarRecoveryPolicy.VerifyIntervalMs);
             return;
         }
 
         _stableSettleSamples = 0;
-        if (_remainingSettleAttempts % 2 == 0) ReRegisterAppBar();
-        else PositionAppBar();
-        if (--_remainingSettleAttempts <= 0) _settleTimer.Stop();
+        _cycleMismatchAttempts++;
+        var action = AppBarRecoveryPolicy.DecideMismatch(_cycleMismatchAttempts, _removeUsedThisCycle);
+
+        if (action == AppBarRecoveryAction.RemoveThenRegister)
+        {
+            TryRemove();
+            _removeUsedThisCycle = true;
+            // Never terminate immediately after ABM_REMOVE: next tick registers via !_registered.
+            LastRecoveryStatus = AppBarRecoveryPolicy.FormatStatus("removed-pending-register", _cycleMismatchAttempts);
+            ScheduleRecovery(AppBarRecoveryPolicy.PostRemoveRegisterDelayMs);
+            return;
+        }
+
+        PositionAppBar();
+        LastRecoveryStatus = AppBarRecoveryPolicy.FormatStatus("reposition", _cycleMismatchAttempts);
+
+        if (AppBarRecoveryPolicy.ShouldEnterBackoff(_cycleMismatchAttempts))
+        {
+            // End of cycle: reset cycle-local counters only; streak drives exponential backoff.
+            var cycleBackoff = AppBarRecoveryPolicy.NextBackoffMs(_failureStreak);
+            _failureStreak++;
+            _cycleMismatchAttempts = 0;
+            _removeUsedThisCycle = false;
+            LastRecoveryStatus = AppBarRecoveryPolicy.FormatStatus("backoff", _failureStreak);
+            ScheduleRecovery(cycleBackoff);
+            return;
+        }
+
+        ScheduleRecovery(AppBarRecoveryPolicy.VerifyIntervalMs);
     }
 
     public void EnsureReserved()
     {
-        if (!_registered || _settleTimer.Enabled || IsDisposed) return;
-        var actualReservation = _screen.Bounds.Bottom - _screen.WorkingArea.Bottom;
-        if (actualReservation != ExpectedReservation()) BeginSettle();
+        if (IsDisposed || _recoveryTimer.Enabled) return;
+        if (AppBarRecoveryPolicy.ShouldContinue(_registered, ActualReservation() == ExpectedReservation()))
+            StartRecoveryCycle();
     }
 
-    private int ExpectedReservation()
+    private int ActualReservation() => _screen.Bounds.Bottom - _screen.WorkingArea.Bottom;
+
+    private int ExpectedReservation() => ExpectedReservation(DeviceDpi);
+
+    private int ExpectedReservation(int fallbackDpi)
     {
-        var targetDpi = DisplayScale.DpiFor(_screen, DeviceDpi);
+        var targetDpi = DisplayScale.DpiFor(_screen, fallbackDpi);
         var visualScale = DisplayScale.For(_screen, targetDpi);
         return (int)Math.Round(48 * visualScale) +
                (int)Math.Round(LogicalGap * visualScale);
     }
 
-    private void ReRegisterAppBar()
+    private void TryRemove()
     {
-        if (_registered && IsHandleCreated)
-        {
-            var removal = CreateAppBarData();
-            NativeMethods.SHAppBarMessage(NativeMethods.AbmRemove, ref removal);
-            _registered = false;
-        }
-        RegisterAndPosition();
+        if (!_registered || !IsHandleCreated) return;
+        var removal = CreateAppBarData();
+        NativeMethods.SHAppBarMessage(NativeMethods.AbmRemove, ref removal);
+        _registered = false;
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _settleTimer.Stop();
-            _settleTimer.Dispose();
+            _recoveryTimer.Stop();
+            _recoveryTimer.Dispose();
         }
         if (_registered && IsHandleCreated)
         {
@@ -610,13 +969,19 @@ internal sealed class DockForm : Form
     private Rectangle _frame;
     private float _visualScale = 1F;
     private int _hoveredItem = -1;
+    private int _refreshInFlight;
+    private int _refreshQueued;
+    private int _refreshGeneration;
+
+    internal static string WindowTitle(bool preview) =>
+        preview ? "Vesper Dock Preview" : "Vesper Dock";
 
     public DockForm(Screen screen, IReadOnlyList<PinnedApp> apps, bool preview, bool previewHover)
     {
         _screen = screen;
         _preview = preview;
         _pinnedApps = apps;
-        if (preview) Text = "MacMakeover Dock Preview";
+        Text = WindowTitle(preview);
         AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
@@ -783,9 +1148,25 @@ internal sealed class DockForm : Form
         else if (e.Button == MouseButtons.Right)
         {
             var menu = BuildContextMenu(item);
-            menu.Closed += (_, _) => menu.Dispose();
+            DisposeAfterClose(this, menu);
             menu.Show(this, e.Location);
         }
+    }
+
+    internal static void DisposeAfterClose(Control dispatcher, ContextMenuStrip menu)
+    {
+        menu.Closed += (_, _) =>
+        {
+            if (dispatcher.IsDisposed || !dispatcher.IsHandleCreated) return;
+            try
+            {
+                dispatcher.BeginInvoke(new Action(menu.Dispose));
+            }
+            catch (InvalidOperationException)
+            {
+                // The owning Dock is already shutting down.
+            }
+        };
     }
 
     internal static ContextMenuStrip BuildContextMenu(DockItem item)
@@ -831,6 +1212,7 @@ internal sealed class DockForm : Form
 
     private void ReloadPins()
     {
+        Interlocked.Increment(ref _refreshGeneration);
         foreach (var item in _items) item.Dispose();
         _items.Clear();
         _pinnedItems.Clear();
@@ -869,47 +1251,124 @@ internal sealed class DockForm : Form
 
     private void RefreshDockState()
     {
-        var visualChanged = false;
-        var runningProcesses = SnapshotProcesses();
-        foreach (var item in _pinnedItems)
+        if (IsDisposed) return;
+        if (Interlocked.CompareExchange(ref _refreshInFlight, 1, 0) != 0)
         {
-            visualChanged |= item.RefreshPinnedState(runningProcesses);
+            Interlocked.Exchange(ref _refreshQueued, 1);
+            return;
         }
 
-        var layoutChanged = false;
-        var snapshots = RunningAppSnapshot.Capture(_pinnedApps);
-        var currentKeys = new HashSet<string>(snapshots.Select(snapshot => snapshot.Key), StringComparer.OrdinalIgnoreCase);
-        foreach (var staleKey in _runningItems.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
-        {
-            var stale = _runningItems[staleKey];
-            _runningItems.Remove(staleKey);
-            _items.Remove(stale);
-            stale.Dispose();
-            layoutChanged = true;
-        }
+        Interlocked.Exchange(ref _refreshQueued, 0);
+        var pinnedApps = _pinnedApps;
+        var generation = Volatile.Read(ref _refreshGeneration);
+        ThreadPool.QueueUserWorkItem(_ => CaptureDockState(pinnedApps, generation));
+    }
 
-        foreach (var snapshot in snapshots)
+    private void CaptureDockState(IReadOnlyList<PinnedApp> pinnedApps, int generation)
+    {
+        // _refreshInFlight is cleared exactly once: by ApplyDockState when marshal succeeds,
+        // or here when capture/marshal fails. Avoid check-then-BeginInvoke races with dispose.
+        var marshaledToUi = false;
+        try
         {
-            if (_runningItems.TryGetValue(snapshot.Key, out var existing))
+            var processes = SnapshotProcesses();
+            var snapshots = RunningAppSnapshot.Capture(pinnedApps);
+            try
             {
-                visualChanged |= existing.UpdateRunningApp(snapshot);
-                continue;
+                BeginInvoke(new Action(() => ApplyDockState(processes, snapshots, generation)));
+                marshaledToUi = true;
+            }
+            catch (ObjectDisposedException)
+            {
+                // Form disposed between capture and marshal.
+                // ObjectDisposedException : InvalidOperationException — catch concrete first.
+            }
+            catch (InvalidOperationException)
+            {
+                // Handle already gone / not created.
+            }
+        }
+        catch
+        {
+            // Capture failed; fall through to clear in-flight.
+        }
+        finally
+        {
+            if (!marshaledToUi)
+            {
+                Interlocked.Exchange(ref _refreshInFlight, 0);
+            }
+        }
+    }
+
+    private void ApplyDockState(
+        HashSet<string> runningProcesses,
+        IReadOnlyList<RunningAppSnapshot> snapshots,
+        int generation)
+    {
+        try
+        {
+            if (IsDisposed) return;
+            if (generation != Volatile.Read(ref _refreshGeneration))
+            {
+                // Pin reload or display rebuild invalidated this snapshot; request a fresh one.
+                Interlocked.Exchange(ref _refreshQueued, 1);
+                return;
             }
 
-            var item = new DockItem(snapshot, IconSize);
-            _runningItems.Add(snapshot.Key, item);
-            _items.Add(item);
-            layoutChanged = true;
-        }
+            var visualChanged = false;
+            foreach (var item in _pinnedItems)
+            {
+                visualChanged |= item.RefreshPinnedState(runningProcesses);
+            }
 
-        if (layoutChanged) PositionDock();
-        else if (visualChanged) Invalidate();
+            var layoutChanged = false;
+            var currentKeys = new HashSet<string>(snapshots.Select(snapshot => snapshot.Key), StringComparer.OrdinalIgnoreCase);
+            foreach (var staleKey in _runningItems.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
+            {
+                var stale = _runningItems[staleKey];
+                _runningItems.Remove(staleKey);
+                _items.Remove(stale);
+                stale.Dispose();
+                layoutChanged = true;
+            }
+
+            foreach (var snapshot in snapshots)
+            {
+                if (_runningItems.TryGetValue(snapshot.Key, out var existing))
+                {
+                    visualChanged |= existing.UpdateRunningApp(snapshot);
+                    continue;
+                }
+
+                var item = new DockItem(snapshot, IconSize);
+                _runningItems.Add(snapshot.Key, item);
+                _items.Add(item);
+                layoutChanged = true;
+            }
+
+            if (layoutChanged) PositionDock();
+            else if (visualChanged) Invalidate();
+        }
+        catch (ObjectDisposedException)
+        {
+            // UI tore down after marshal; still clear in-flight in finally.
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _refreshInFlight, 0);
+            if (!IsDisposed && Interlocked.Exchange(ref _refreshQueued, 0) == 1)
+            {
+                RefreshDockState();
+            }
+        }
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            Interlocked.Increment(ref _refreshGeneration);
             DockPinStore.Changed -= OnPinsChanged;
             _stateTimer.Dispose();
             _toolTip.Dispose();

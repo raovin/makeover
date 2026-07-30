@@ -1,6 +1,6 @@
-# mac-makeover
+# Vesper Shell (mac-makeover)
 
-A macOS-inspired Windows 11 shell that keeps Windows in charge of productivity.
+Vesper Shell is a macOS-inspired Windows 11 desktop shell that keeps Windows in charge of productivity.
 
 The production profile uses an owned native menu bar, small native menu panels,
 and a no-activation native dock. The retired Seelen UI

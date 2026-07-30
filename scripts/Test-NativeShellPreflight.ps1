@@ -16,6 +16,7 @@ foreach ($required in @(
     (Join-Path $DeploymentRoot 'MacMakeover.Dock.exe'),
     (Join-Path $DeploymentRoot 'AwakeAndAvailable.exe'),
     (Join-Path $DeploymentRoot 'MacMakeover.Supervisor.exe'),
+    (Join-Path $DeploymentRoot 'deployment-manifest.json'),
     (Join-Path $DeploymentRoot 'native-taskbar-pins.json'),
     (Join-Path $DeploymentRoot 'Assets\apple-mark.png'),
     (Join-Path $DeploymentRoot 'Assets\Fonts\Manrope-Regular.ttf'),
@@ -256,6 +257,50 @@ if ($profileSource -match '\.Verbs\(' -or $pinTestSource -match '\.Verbs\(' -or
 if ($profileSource -notmatch "Write-Host \('PASS: native shell is coherent[\s\S]*?exit 0") {
   $failures.Add('A passing live-profile check does not explicitly return exit code zero.')
 }
+foreach ($projectFile in @(
+    'tools\MacMakeover.Dock\MacMakeover.Dock.csproj',
+    'tools\MacMakeover.MenuBar\MacMakeover.MenuBar.csproj',
+    'tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj',
+    'tools\MacMakeover.Supervisor\MacMakeover.Supervisor.csproj'
+  )) {
+  $projContent = Get-Content -LiteralPath (Join-Path $repoRoot $projectFile) -Raw
+  if ($projContent -notmatch '<Product>Vesper Shell</Product>' -or
+      $projContent -notmatch '<AssemblyTitle>' -or
+      $projContent -notmatch '<Description>') {
+    $failures.Add("$projectFile is missing Vesper Shell assembly metadata.")
+  }
+}
+if ($dockSource -notmatch '_refreshInFlight' -or
+    $dockSource -notmatch '_refreshQueued' -or
+    $dockSource -notmatch '_refreshGeneration') {
+  $failures.Add('Dock no longer implements async single-flight refresh state.')
+}
+if ($buildSource -notmatch 'deployment-manifest\.json' -or
+    $prepareSource -notmatch 'deployment-manifest\.json' -or
+    $profileSource -notmatch 'deployment-manifest\.json' -or
+    $buildSource -notmatch 'Get-FileHash' -or
+    $buildSource -notmatch 'SHA256' -or
+    $profileSource -notmatch 'Get-FileHash' -or
+    $profileSource -notmatch 'manifestHashes\.Contains') {
+  $failures.Add('Deployment SHA256 manifest generation or profile verification is missing.')
+}
+foreach ($manifestExecutable in @(
+    'MacMakeover.MenuBar.exe',
+    'MacMakeover.MenuHost.exe',
+    'MacMakeover.Dock.exe',
+    'AwakeAndAvailable.exe',
+    'MacMakeover.Supervisor.exe'
+  )) {
+  if ($buildSource -notmatch [regex]::Escape($manifestExecutable) -or
+      $profileSource -notmatch [regex]::Escape($manifestExecutable)) {
+    $failures.Add("Deployment integrity checks no longer cover $manifestExecutable.")
+  }
+}
+if ($profileSource -notmatch 'Round\(48 \* \$visualScale\)' -or
+    $profileSource -notmatch 'Round\(8 \* \$visualScale\)' -or
+    $profileSource -notmatch '\$screen\.Primary\) \{ 1\.0 \} else \{ 1\.5 \}') {
+  $failures.Add('Profile verifier does not assert exact expected bottom reservation based on Dock scaling policy.')
+}
 if ($promoteSource -notmatch 'Restore-InteractiveNativeShell' -or
     $promoteSource -notmatch 'Get-Process explorer.*Stop-Process' -or
     $promoteSource -notmatch 'Explorer was restored, but the custom shell could not be restarted' -or
@@ -337,14 +382,12 @@ if ($dockSource -notmatch '--export-icons' -or $dockSource -notmatch '--preview-
   $failures.Add('Dock no longer exposes the icon-export and hover-preview paths used by visual release QA.')
 }
 if ($dockSource -notmatch 'LogicalGap = 8' -or
-    $dockSource -notmatch 'var gap = visualDockHeight \+ \(int\)Math\.Round\(LogicalGap \* visualScale\)' -or
-    $dockSource -match 'visualDockHeight - nativeDockHeight' -or
+    $dockSource -notmatch 'ExpectedReservation' -or
     $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmNew' -or
     $dockSource -notmatch 'SHAppBarMessage\(NativeMethods\.AbmRemove' -or
     $dockSource -notmatch 'NativeMethods\.AbnPosChanged' -or
     $dockSource -notmatch 'RegisterWindowMessage\("TaskbarCreated"\)' -or
-    $dockSource -notmatch 'expectedReservation' -or
-    $dockSource -notmatch '_remainingSettleAttempts = 20' -or
+    $dockSource -notmatch 'LogicalGap \* visualScale' -or
     $dockSource -notmatch 'gapForm\.EnsureReserved\(\)') {
   $failures.Add('Dock no longer owns the approved reversible 8 px work-area gap reservation.')
 }
@@ -353,10 +396,8 @@ if ($dockSource -notmatch 'dispatcher\.InvokeRequired' -or
   $failures.Add('Dock display changes are no longer marshalled and deduplicated on the UI thread.')
 }
 if ($dockSource -match 'class DockBackdropForm' -or
-    $workAreaSource -notmatch 'ReservationAnchorSize = 1' -or
     $workAreaSource -notmatch 'Opacity = 0' -or
     $workAreaSource -match 'WallpaperSlice\.Draw' -or
-    $workAreaSource -notmatch 'data\.Bounds\.Left,\s*data\.Bounds\.Bottom - ReservationAnchorSize,\s*ReservationAnchorSize,\s*ReservationAnchorSize' -or
     $dockSource -notmatch 'WsExLayered' -or
     $dockSource -notmatch 'WsExTransparent' -or
     $dockSource -notmatch 'Region = new Region\(path\)' -or
@@ -424,6 +465,6 @@ if ($failures.Count) {
   exit 1
 }
 
-Write-Host ("PASS: native-shell preflight is ready. {0} display(s); {1} native pinned shortcuts." -f `
+Write-Host ("PASS: native-shell static/staged preflight is ready. {0} display(s); {1} native pinned shortcuts." -f `
     $screens.Count,
     $nativePins.Count)

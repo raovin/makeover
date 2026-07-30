@@ -171,6 +171,7 @@ foreach ($required in @(
     'MacMakeover.Dock.exe',
     'AwakeAndAvailable.exe',
     'MacMakeover.Supervisor.exe',
+    'deployment-manifest.json',
     'native-taskbar-pins.json',
     'Assets\apple-mark.png',
     'Assets\Fonts\Manrope-Regular.ttf',
@@ -193,6 +194,24 @@ Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, MacMake
 if ($artifactRoot -ne $deploymentRoot) {
   New-Item -ItemType Directory -Force -Path $deploymentRoot | Out-Null
   Copy-Item -Path (Join-Path $artifactRoot '*') -Destination $deploymentRoot -Recurse -Force
+}
+
+$manifestFile = Join-Path $deploymentRoot 'deployment-manifest.json'
+if (-not (Test-Path -LiteralPath $manifestFile)) {
+  throw 'Deployed directory is missing deployment-manifest.json.'
+}
+$manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json -AsHashtable
+$manifestExecutables = $manifest.executables
+foreach ($exeName in @('MacMakeover.MenuBar.exe', 'MacMakeover.MenuHost.exe', 'MacMakeover.Dock.exe', 'AwakeAndAvailable.exe', 'MacMakeover.Supervisor.exe')) {
+  $deployedPath = Join-Path $deploymentRoot $exeName
+  if (-not (Test-Path -LiteralPath $deployedPath)) {
+    throw "Deployed executable missing: $exeName"
+  }
+  $actualHash = (Get-FileHash -LiteralPath $deployedPath -Algorithm SHA256).Hash
+  $expectedHash = $manifestExecutables[$exeName]
+  if ($actualHash -ne $expectedHash) {
+    throw "Deployed file $exeName hash mismatch. Expected $expectedHash, got $actualHash."
+  }
 }
 
 & (Join-Path $PSScriptRoot 'Install-AppleMenuHandler.ps1')
