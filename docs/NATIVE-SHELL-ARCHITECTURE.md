@@ -90,6 +90,14 @@ and simultaneous hosted apps each receive one item. Slot spacing contracts only 
 needed to keep a busy dock inside the current display.
 `--snapshot-running <path>` exposes the live classification as JSON for regression QA.
 
+The built-in File Explorer item is a special case: `explorer.exe` also owns the
+desktop shell, and its process `MainWindowHandle` is not necessarily a folder
+window. The Dock filters Explorer activation and closure to visible current-session
+`CabinetWClass`/`ExploreWClass` windows, ignoring `Progman`/`WorkerW`; when none can
+be activated it launches `%WINDIR%\explorer.exe` directly. The blank target of a
+user-pinned `File Explorer.lnk` and the `Microsoft.Windows.Explorer` AppID are not
+reliable launch sources. See [Known Quirks](NATIVE-SHELL-KNOWN-QUIRKS.md).
+
 Windows' native taskbar windows remain alive for Explorer ownership but are visually
 hidden while the dock runs. Hidden taskbars no longer retain work-area reservations
 on current Windows builds, so a transparent `WorkAreaGapForm` AppBar owns the full

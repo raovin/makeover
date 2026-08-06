@@ -57,6 +57,8 @@ The post-restart regression analysis and current acceptance boundary are in
 The Wi-Fi outage, memory analysis, Windows repair, rollback material, and firmware
 follow-up are recorded in
 [System Reliability Audit](docs/SYSTEM-RELIABILITY-AUDIT-2026-07-22.md).
+Platform-specific failure modes and the recovery runbook are recorded in
+[Known Quirks](docs/NATIVE-SHELL-KNOWN-QUIRKS.md).
 
 ## Install Or Upgrade
 
