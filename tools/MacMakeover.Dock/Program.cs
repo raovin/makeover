@@ -111,6 +111,7 @@ internal static class DockRegressionTests
             if (!TestAppBarGeometryHelpers()) return 5;
             if (!TestAppBarRecoveryPolicy()) return 6;
             if (!TestDockWindowTitle()) return 7;
+            if (!TestFileExplorerActivationPolicy()) return 8;
             if (!TestDynamicApp(probePath)) return 2;
             if (!TestPinnedApp(probePath)) return 3;
             return 0;
@@ -323,6 +324,138 @@ internal static class DockRegressionTests
     {
         return DockForm.WindowTitle(preview: false) == "Vesper Dock" &&
                DockForm.WindowTitle(preview: true) == "Vesper Dock Preview";
+    }
+
+    /// <summary>
+    /// Headless coverage for File Explorer dock clicks: folder-window classification must
+    /// exclude the shell desktop MainWindowHandle, and launch must use %WINDIR%\explorer.exe
+    /// (never shell:AppsFolder AppId). Does not start Explorer or touch production pin state.
+    /// </summary>
+    private static bool TestFileExplorerActivationPolicy()
+    {
+        if (!PinnedApp.IsExplorerFolderClass("CabinetWClass")) return false;
+        if (!PinnedApp.IsExplorerFolderClass("ExploreWClass")) return false;
+        if (PinnedApp.IsExplorerFolderClass("Progman")) return false;
+        if (PinnedApp.IsExplorerFolderClass("WorkerW")) return false;
+        if (PinnedApp.IsExplorerFolderClass("Shell_TrayWnd")) return false;
+        if (PinnedApp.IsExplorerFolderClass(string.Empty)) return false;
+
+        // Construct an in-memory pin; do not load or mutate the production pin file.
+        var explorer = new PinnedApp
+        {
+            Name = "File Explorer",
+            Patterns = ["Microsoft.Windows.Explorer", "File Explorer.lnk"],
+            AppId = "Microsoft.Windows.Explorer",
+            ProcessNames = ["explorer"],
+            Shortcut = Path.Combine(Path.GetTempPath(), "File Explorer.lnk")
+        };
+
+        var launch = explorer.CreateLaunchStartInfo();
+        if (launch is null || !launch.UseShellExecute) return false;
+        var expected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        if (!string.Equals(launch.FileName, expected, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!string.Equals(launch.FileName, PinnedApp.FileExplorerExecutablePath, StringComparison.OrdinalIgnoreCase)) return false;
+        if (launch.FileName.Contains("shell:AppsFolder", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!string.IsNullOrEmpty(launch.Arguments)) return false;
+
+        // Other apps keep their normal launch target resolution (ExecutablePath / AppId).
+        var notepad = new PinnedApp
+        {
+            Name = "Notepad",
+            Patterns = [],
+            ExecutablePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "notepad.exe"),
+            ProcessNames = ["notepad"]
+        };
+        var notepadLaunch = notepad.CreateLaunchStartInfo();
+        if (notepadLaunch is null ||
+            !string.Equals(notepadLaunch.FileName, notepad.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var packaged = new PinnedApp
+        {
+            Name = "Packaged App",
+            AppId = "Contoso.DemoApp",
+            Patterns = [],
+            ProcessNames = []
+        };
+        var packagedLaunch = packaged.CreateLaunchStartInfo();
+        if (packagedLaunch is null ||
+            !string.Equals(packagedLaunch.FileName, "shell:AppsFolder\\Contoso.DemoApp", StringComparison.Ordinal) ||
+            !packagedLaunch.UseShellExecute)
+        {
+            return false;
+        }
+
+        // Live selection against the always-present shell explorer process: every activation
+        // candidate must be a real folder window; Progman/WorkerW shell desktop surfaces must not.
+        // Read-only — never launches Explorer or mutates production pins.
+        var activationWindows = explorer.ClosableWindows().ToHashSet();
+        foreach (var window in activationWindows)
+        {
+            if (!PinnedApp.IsExplorerFolderWindow(window)) return false;
+            var className = RunningAppSnapshot.WindowClass(window);
+            if (className is not ("CabinetWClass" or "ExploreWClass")) return false;
+        }
+
+        var currentSessionId = Process.GetCurrentProcess().SessionId;
+        var explorerProcessIds = new HashSet<uint>();
+        foreach (var process in Process.GetProcessesByName("explorer"))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.SessionId == currentSessionId)
+                        explorerProcessIds.Add((uint)process.Id);
+                }
+                catch (InvalidOperationException) { }
+            }
+        }
+        if (explorerProcessIds.Count == 0) return false;
+
+        // Progman/WorkerW always exist under the shell explorer process and must never activate.
+        // Also reject any non-folder explorer HWND (including MainWindowHandle helpers) if selected.
+        var shellDesktopSeen = false;
+        var nonFolderSelected = false;
+        NativeMethods.EnumWindows((window, _) =>
+        {
+            NativeMethods.GetWindowThreadProcessId(window, out var processId);
+            if (!explorerProcessIds.Contains(processId)) return true;
+            var className = RunningAppSnapshot.WindowClass(window);
+            if (className is "Progman" or "WorkerW")
+            {
+                shellDesktopSeen = true;
+                if (activationWindows.Contains(window)) nonFolderSelected = true;
+            }
+            else if (!PinnedApp.IsExplorerFolderClass(className) && activationWindows.Contains(window))
+            {
+                nonFolderSelected = true;
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        foreach (var process in Process.GetProcessesByName("explorer"))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.SessionId != currentSessionId) continue;
+                    var main = process.MainWindowHandle;
+                    if (main == IntPtr.Zero) continue;
+                    if (!PinnedApp.IsExplorerFolderClass(RunningAppSnapshot.WindowClass(main)) &&
+                        activationWindows.Contains(main))
+                    {
+                        return false;
+                    }
+                }
+                catch (InvalidOperationException) { }
+            }
+        }
+
+        return shellDesktopSeen && !nonFolderSelected;
     }
 
     private static bool WaitUntil(Func<bool> predicate, TimeSpan timeout)
@@ -1929,20 +2062,95 @@ internal sealed class PinnedApp
 
     public bool MatchesProcess(string processName) => ProcessNames.Contains(processName, StringComparer.OrdinalIgnoreCase);
 
+    internal bool IsFileExplorer => Name.Equals("File Explorer", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True for real folder windows only — not the shell desktop (Progman/WorkerW).</summary>
+    internal static bool IsExplorerFolderClass(string className) =>
+        className is "CabinetWClass" or "ExploreWClass";
+
+    internal static bool IsExplorerFolderWindow(IntPtr window) =>
+        window != IntPtr.Zero &&
+        RunningAppSnapshot.IsTaskbarWindow(window) &&
+        IsExplorerFolderClass(RunningAppSnapshot.WindowClass(window));
+
+    /// <summary>Explicit Windows Explorer executable; never shell:AppsFolder AppId.</summary>
+    internal static string FileExplorerExecutablePath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+
     public void ActivateOrLaunch()
     {
+        if (IsFileExplorer)
+        {
+            // explorer.exe's MainWindowHandle is the shell desktop (empty title), not a folder.
+            // Only activate visible taskbar CabinetWClass/ExploreWClass windows.
+            if (TryActivateWindows(ClosableWindows())) return;
+            var launch = CreateLaunchStartInfo();
+            if (launch is not null) Process.Start(launch);
+            return;
+        }
+
         foreach (var processName in ProcessNames)
         {
             foreach (var process in Process.GetProcessesByName(processName))
             {
-                if (process.MainWindowHandle == IntPtr.Zero) continue;
-                if (NativeMethods.IsIconic(process.MainWindowHandle)) NativeMethods.ShowWindow(process.MainWindowHandle, NativeMethods.SwRestore);
-                if (NativeMethods.SetForegroundWindow(process.MainWindowHandle)) return;
+                using (process)
+                {
+                    try
+                    {
+                        var window = process.MainWindowHandle;
+                        if (window == IntPtr.Zero || !NativeMethods.IsWindow(window)) continue;
+                        if (NativeMethods.IsIconic(window))
+                        {
+                            NativeMethods.ShowWindow(window, NativeMethods.SwRestore);
+                            if (!NativeMethods.IsWindow(window)) continue;
+                        }
+                        if (NativeMethods.SetForegroundWindow(window)) return;
+                    }
+                    catch (InvalidOperationException) { }
+                }
             }
         }
+        var startInfo = CreateLaunchStartInfo();
+        if (startInfo is not null) Process.Start(startInfo);
+    }
+
+    /// <summary>
+    /// Launch target without starting a process. File Explorer always resolves to
+    /// %WINDIR%\explorer.exe so a blank TaskBar .lnk / AppId path cannot no-op the click.
+    /// </summary>
+    internal ProcessStartInfo? CreateLaunchStartInfo()
+    {
+        if (IsFileExplorer)
+        {
+            return new ProcessStartInfo(FileExplorerExecutablePath) { UseShellExecute = true };
+        }
+
         var target = ExecutablePath ?? Shortcut ?? (AppId is null ? null : $"shell:AppsFolder\\{AppId}");
-        if (target is null) return;
-        Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        if (target is null) return null;
+        return new ProcessStartInfo(target) { UseShellExecute = true };
+    }
+
+    /// <summary>
+    /// Restore + foreground each candidate. Skips handles that disappear mid-loop so a race
+    /// cannot abort activation; returns true only after a successful SetForegroundWindow.
+    /// </summary>
+    internal static bool TryActivateWindows(IEnumerable<IntPtr> windows)
+    {
+        foreach (var window in windows)
+        {
+            try
+            {
+                if (window == IntPtr.Zero || !NativeMethods.IsWindow(window)) continue;
+                if (NativeMethods.IsIconic(window))
+                {
+                    NativeMethods.ShowWindow(window, NativeMethods.SwRestore);
+                    if (!NativeMethods.IsWindow(window)) continue;
+                }
+                if (NativeMethods.SetForegroundWindow(window)) return true;
+            }
+            catch (InvalidOperationException) { }
+        }
+        return false;
     }
 
     public bool Close()
@@ -1950,14 +2158,23 @@ internal sealed class PinnedApp
         var succeeded = false;
         foreach (var window in ClosableWindows())
         {
-            succeeded |= NativeMethods.PostMessage(window, NativeMethods.WmClose, IntPtr.Zero, IntPtr.Zero);
+            try
+            {
+                if (!NativeMethods.IsWindow(window)) continue;
+                succeeded |= NativeMethods.PostMessage(window, NativeMethods.WmClose, IntPtr.Zero, IntPtr.Zero);
+            }
+            catch (InvalidOperationException) { }
         }
         return succeeded;
     }
 
     public bool HasClosableWindows() => ClosableWindows().Length > 0;
 
-    private IntPtr[] ClosableWindows()
+    /// <summary>
+    /// Current-session taskbar windows for this pin. File Explorer is restricted to
+    /// CabinetWClass/ExploreWClass so the shell desktop is never treated as a folder window.
+    /// </summary>
+    internal IntPtr[] ClosableWindows()
     {
         var processIds = new HashSet<uint>();
         var currentSessionId = Process.GetCurrentProcess().SessionId;
@@ -1980,14 +2197,20 @@ internal sealed class PinnedApp
         var windows = new List<IntPtr>();
         NativeMethods.EnumWindows((window, _) =>
         {
-            NativeMethods.GetWindowThreadProcessId(window, out var processId);
-            if (processIds.Contains(processId) &&
-                RunningAppSnapshot.IsTaskbarWindow(window) &&
-                (!Name.Equals("File Explorer", StringComparison.OrdinalIgnoreCase) ||
-                 RunningAppSnapshot.WindowClass(window) is "CabinetWClass" or "ExploreWClass"))
+            try
             {
-                windows.Add(window);
+                NativeMethods.GetWindowThreadProcessId(window, out var processId);
+                if (!processIds.Contains(processId) || !NativeMethods.IsWindow(window)) return true;
+                if (IsFileExplorer)
+                {
+                    if (IsExplorerFolderWindow(window)) windows.Add(window);
+                }
+                else if (RunningAppSnapshot.IsTaskbarWindow(window))
+                {
+                    windows.Add(window);
+                }
             }
+            catch (InvalidOperationException) { }
             return true;
         }, IntPtr.Zero);
         return windows.ToArray();
@@ -2005,10 +2228,9 @@ internal sealed class PinnedApp
             }
             catch (ArgumentException) { }
         }
-        if (Name.Equals("File Explorer", StringComparison.OrdinalIgnoreCase))
+        if (IsFileExplorer)
         {
-            var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
-            return LoadFileIcon(explorer, size);
+            return LoadFileIcon(FileExplorerExecutablePath, size);
         }
         if (AppId is not null)
         {

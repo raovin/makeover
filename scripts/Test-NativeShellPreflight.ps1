@@ -137,6 +137,16 @@ if ($dockSource -notmatch 'process\.SessionId == currentSessionId' -or
     $dockSource -notmatch 'PostMessage\(window, NativeMethods\.WmClose') {
   $failures.Add('Dock window closure is not restricted to safe current-session taskbar windows.')
 }
+if ($dockSource -notmatch 'IsExplorerFolderClass' -or
+    $dockSource -notmatch 'IsExplorerFolderWindow' -or
+    $dockSource -notmatch 'FileExplorerExecutablePath' -or
+    $dockSource -notmatch 'CreateLaunchStartInfo' -or
+    $dockSource -notmatch 'TryActivateWindows' -or
+    $dockSource -notmatch 'TestFileExplorerActivationPolicy' -or
+    $dockSource -notmatch 'SpecialFolder\.Windows\), "explorer\.exe"' -or
+    $dockSource -match 'shell:AppsFolder\\Microsoft\.Windows\.Explorer') {
+  $failures.Add('File Explorer dock clicks must activate CabinetWClass/ExploreWClass windows or launch %WINDIR%\explorer.exe, never the shell desktop MainWindowHandle or shell:AppsFolder AppId.')
+}
 if ($buildSource -notmatch 'AwakeAndAvailable\\AwakeAndAvailable\.csproj' -or
     $buildSource -notmatch 'MacMakeover\.Supervisor\\MacMakeover\.Supervisor\.csproj' -or
     $taskSource -notmatch "TaskName = 'MacMakeover Shell - Awake'" -or
