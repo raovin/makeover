@@ -72,6 +72,17 @@ The live-recovery suite must finish with exactly one instance of each component
 and a passing `Test-NativeShellProfile.ps1` work-area gate. It reports duplicates
 instead of silently killing them.
 
+## Visual QA Capture Path
+
+On this machine, GDI-based `CopyFromScreen` captures can omit topmost or
+non-activating overlay windows even when the window is visible, receives pointer
+hit-tests, and renders correctly through `PrintWindow`. That can produce a false
+missing Dock diagnosis.
+
+Use a physical screenshot or a compositor-aware capture such as Windows Desktop
+Duplication for acceptance screenshots. Do not mark the Dock or Menu Bar missing
+from a GDI capture alone.
+
 ## Evidence Boundary
 
 The latest promoted-build acceptance established:
