@@ -22,7 +22,9 @@ internal enum TelemetryKind
     Memory,
     Network,
     Codex,
-    Claude
+    Claude,
+    Grok,
+    Antigravity
 }
 
 internal sealed record TelemetrySegment(TelemetryKind Kind, string Text);
@@ -419,7 +421,9 @@ internal sealed class MenuBarForm : Form
                 new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0} GB"),
                 new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"),
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
-                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
+                new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
+                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
             },
             new[]
             {
@@ -427,25 +431,33 @@ internal sealed class MenuBarForm : Form
                 new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0}G"),
                 new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"),
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
-                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
+                new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
+                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
             },
             new[]
             {
                 new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
                 new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}G"),
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
-                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
+                new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
+                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
             },
             new[]
             {
                 new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
-                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
+                new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
+                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
             },
             new[]
             {
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
-                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
+                new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
+                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
             }
         };
         var battery = PowerSourceLabel(snapshot);
@@ -551,6 +563,12 @@ internal sealed class MenuBarForm : Form
             case TelemetryKind.Claude:
                 DrawClaudeMark(graphics, icon, pen);
                 break;
+            case TelemetryKind.Grok:
+                DrawGrokMark(graphics, icon, pen);
+                break;
+            case TelemetryKind.Antigravity:
+                DrawAntigravityMark(graphics, icon, pen);
+                break;
         }
 
         var textRect = new Rectangle(icon.Right + Scale(3), area.Top, area.Right - icon.Right - Scale(3), area.Height);
@@ -605,6 +623,40 @@ internal sealed class MenuBarForm : Form
         }
         var dot = ScaleValue(1.25F);
         graphics.FillEllipse(Brushes.White, center.X - dot / 2F, center.Y - dot / 2F, dot, dot);
+    }
+
+    private void DrawGrokMark(Graphics graphics, Rectangle icon, Pen pen)
+    {
+        // A compact orbit-and-slash mark that remains distinct from the knot and spark.
+        var orbit = Rectangle.Inflate(icon, -Scale(1), -Scale(1));
+        graphics.DrawEllipse(pen, orbit);
+        graphics.DrawLine(
+            pen,
+            icon.Left + Scale(2),
+            icon.Bottom - Scale(1),
+            icon.Right - Scale(1),
+            icon.Top + Scale(2));
+        graphics.DrawLine(
+            pen,
+            icon.Left + Scale(5),
+            icon.Top + Scale(5),
+            icon.Right - Scale(1),
+            icon.Bottom - Scale(1));
+    }
+
+    private void DrawAntigravityMark(Graphics graphics, Rectangle icon, Pen pen)
+    {
+        // An original rising-chevron/orbit mark for the compact AGY CLI label.
+        var top = new Point(icon.Left + icon.Width / 2, icon.Top + Scale(1));
+        var left = new Point(icon.Left + Scale(1), icon.Bottom - Scale(2));
+        var right = new Point(icon.Right - Scale(1), icon.Bottom - Scale(2));
+        graphics.DrawLine(pen, left, top);
+        graphics.DrawLine(pen, top, right);
+        graphics.DrawArc(
+            pen,
+            new Rectangle(icon.Left, icon.Top + Scale(4), icon.Width, Scale(6)),
+            18,
+            144);
     }
 
     private void DrawTelemetrySeparator(Graphics graphics, int x)

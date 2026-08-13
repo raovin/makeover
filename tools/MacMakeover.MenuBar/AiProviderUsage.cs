@@ -30,11 +30,15 @@ internal sealed record AiProviderUsageValue(
 
 internal sealed record AiProviderUsageSnapshot(
     AiProviderUsageValue Codex,
-    AiProviderUsageValue Claude)
+    AiProviderUsageValue Claude,
+    AiProviderUsageValue Grok,
+    AiProviderUsageValue Antigravity)
 {
     public static AiProviderUsageSnapshot Empty { get; } = new(
         AiProviderUsageValue.Unavailable("No fresh Codex allowance data"),
-        AiProviderUsageValue.Unavailable("Claude Code has no supported noninteractive allowance source"));
+        AiProviderUsageValue.Unavailable("Claude Code has no supported noninteractive allowance source"),
+        AiProviderUsageValue.Unavailable("No fresh Grok allowance data"),
+        AiProviderUsageValue.Unavailable("Antigravity quota requires sign-in and a per-model display policy"));
 }
 
 internal readonly record struct ProviderUsageSample(
@@ -74,11 +78,15 @@ internal static class AiProviderUsagePolicy
         AiProviderUsageSnapshot previous,
         ProviderUsageReadResult codex,
         ProviderUsageReadResult claude,
+        ProviderUsageReadResult grok,
+        ProviderUsageReadResult antigravity,
         DateTimeOffset nowUtc)
     {
         return new(
             ApplyResult(previous.Codex, codex, nowUtc, "Codex allowance data unavailable"),
-            ApplyResult(previous.Claude, claude, nowUtc, "Claude allowance data unavailable"));
+            ApplyResult(previous.Claude, claude, nowUtc, "Claude allowance data unavailable"),
+            ApplyResult(previous.Grok, grok, nowUtc, "Grok allowance data unavailable"),
+            ApplyResult(previous.Antigravity, antigravity, nowUtc, "Antigravity allowance data unavailable"));
     }
 
     internal static AiProviderUsageValue ExpireIfNeeded(
@@ -461,11 +469,267 @@ internal sealed class CodexUsageReader : IProviderUsageReader
     }
 }
 
+internal static class GrokUsageParser
+{
+    private const string WeeklyPeriodType = "USAGE_PERIOD_TYPE_WEEKLY";
+
+    internal static bool TryParseWeeklySample(
+        string json,
+        DateTimeOffset nowUtc,
+        out ProviderUsageSample sample)
+    {
+        sample = default;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (!IsResponse(root, 2) ||
+                !root.TryGetProperty("result", out var result) ||
+                result.ValueKind != JsonValueKind.Object ||
+                !result.TryGetProperty("config", out var config) ||
+                config.ValueKind != JsonValueKind.Object ||
+                !config.TryGetProperty("creditUsagePercent", out var usage) ||
+                usage.ValueKind != JsonValueKind.Number ||
+                !usage.TryGetDouble(out var usagePercent) ||
+                double.IsNaN(usagePercent) ||
+                double.IsInfinity(usagePercent) ||
+                !config.TryGetProperty("currentPeriod", out var period) ||
+                period.ValueKind != JsonValueKind.Object ||
+                !period.TryGetProperty("type", out var periodType) ||
+                periodType.ValueKind != JsonValueKind.String ||
+                !string.Equals(periodType.GetString(), WeeklyPeriodType, StringComparison.Ordinal) ||
+                !period.TryGetProperty("end", out var end) ||
+                end.ValueKind != JsonValueKind.String ||
+                !DateTimeOffset.TryParse(
+                    end.GetString(),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal,
+                    out var resetAtUtc) ||
+                resetAtUtc <= nowUtc)
+            {
+                return false;
+            }
+
+            sample = new(
+                AiProviderUsagePolicy.ClampUsedPercent((int)Math.Floor(usagePercent)),
+                resetAtUtc.ToUniversalTime(),
+                AiProviderUsagePolicy.WeeklyWindowMinutes);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool IsResponse(JsonElement root, int expectedId) =>
+        root.TryGetProperty("id", out var id) &&
+        id.ValueKind == JsonValueKind.Number &&
+        id.TryGetInt32(out var requestId) &&
+        requestId == expectedId;
+}
+
+internal sealed class GrokUsageReader : IProviderUsageReader
+{
+    private const string InitializeRequest =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{\"fs\":{\"readTextFile\":false,\"writeTextFile\":false},\"terminal\":false},\"_meta\":{\"startupHints\":{\"nonInteractive\":true,\"skipGitStatus\":true,\"skipProjectLayout\":true},\"clientType\":\"mac-makeover-menu-bar\",\"clientVersion\":\"1.0\"}}}";
+    private const string BillingRequest =
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"_x.ai/billing\",\"params\":{}}";
+
+    public async Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
+    {
+        var executable = FindOnPath("grok.cmd") ??
+                         FindOnPath("grok.ps1") ??
+                         FindOnPath("grok.exe");
+        if (executable is null)
+        {
+            return ProviderUsageReadResult.Unavailable(
+                "Grok CLI not found; install Grok Build and sign in");
+        }
+
+        using var process = new Process { StartInfo = BuildStartInfo(executable) };
+        try
+        {
+            if (!process.Start())
+            {
+                return ProviderUsageReadResult.Unavailable("Grok agent could not start");
+            }
+        }
+        catch
+        {
+            return ProviderUsageReadResult.Unavailable("Grok agent could not start");
+        }
+
+        // The agent owns its authenticated session. Drain diagnostics without
+        // retaining or logging credential-adjacent output.
+        _ = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await SendAsync(process, InitializeRequest, cancellationToken).ConfigureAwait(false);
+            if (!await WaitForSuccessfulResponseAsync(process, 1, cancellationToken).ConfigureAwait(false))
+            {
+                return ProviderUsageReadResult.Unavailable("Grok agent initialization failed");
+            }
+
+            await SendAsync(process, BillingRequest, cancellationToken).ConfigureAwait(false);
+            while (true)
+            {
+                var line = await process.StandardOutput.ReadLineAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                if (line is null) break;
+                if (GrokUsageParser.TryParseWeeklySample(line, DateTimeOffset.UtcNow, out var sample))
+                {
+                    return ProviderUsageReadResult.Fresh(sample);
+                }
+
+                if (IsErrorResponse(line, 2))
+                {
+                    return ProviderUsageReadResult.Unavailable(
+                        "Grok agent did not return weekly allowance data");
+                }
+            }
+
+            return ProviderUsageReadResult.Unavailable(
+                "Grok agent closed before returning allowance data");
+        }
+        catch (OperationCanceledException)
+        {
+            return ProviderUsageReadResult.Unavailable("Grok allowance request timed out");
+        }
+        catch
+        {
+            return ProviderUsageReadResult.Unavailable("Grok allowance request failed");
+        }
+        finally
+        {
+            try { process.StandardInput.Close(); } catch { }
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch { }
+            try { process.WaitForExit(1000); } catch { }
+        }
+    }
+
+    internal static ProcessStartInfo BuildStartInfo(string executablePath)
+    {
+        var extension = Path.GetExtension(executablePath);
+        var startInfo = new ProcessStartInfo
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Environment.CurrentDirectory
+        };
+
+        if (extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".bat", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+            startInfo.Arguments = $"/d /s /c \"\"{executablePath}\" agent stdio\"";
+        }
+        else if (extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = "pwsh.exe";
+            startInfo.ArgumentList.Add("-NoLogo");
+            startInfo.ArgumentList.Add("-NoProfile");
+            startInfo.ArgumentList.Add("-NonInteractive");
+            startInfo.ArgumentList.Add("-ExecutionPolicy");
+            startInfo.ArgumentList.Add("Bypass");
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(executablePath);
+            startInfo.ArgumentList.Add("agent");
+            startInfo.ArgumentList.Add("stdio");
+        }
+        else
+        {
+            startInfo.FileName = executablePath;
+            startInfo.ArgumentList.Add("agent");
+            startInfo.ArgumentList.Add("stdio");
+        }
+
+        return startInfo;
+    }
+
+    private static async Task<bool> WaitForSuccessfulResponseAsync(
+        Process process,
+        int expectedId,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var line = await process.StandardOutput.ReadLineAsync(cancellationToken)
+                .ConfigureAwait(false);
+            if (line is null) return false;
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                var root = document.RootElement;
+                if (!GrokUsageParser.IsResponse(root, expectedId)) continue;
+                return !root.TryGetProperty("error", out _);
+            }
+            catch (JsonException)
+            {
+                // Ignore non-protocol startup output and continue to the response.
+            }
+        }
+    }
+
+    private static bool IsErrorResponse(string json, int expectedId)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            return GrokUsageParser.IsResponse(root, expectedId) &&
+                   root.TryGetProperty("error", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task SendAsync(
+        Process process,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        await process.StandardInput.WriteLineAsync(message).ConfigureAwait(false);
+        await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string? FindOnPath(string fileName)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var cleanDirectory = directory.Trim().Trim('"');
+            if (cleanDirectory.Length == 0) continue;
+            var candidate = Path.Combine(cleanDirectory, fileName);
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
+    }
+}
+
 internal sealed class ClaudeUsageReader : IProviderUsageReader
 {
     public Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken) =>
         Task.FromResult(ProviderUsageReadResult.Unavailable(
             "Claude Code has no supported noninteractive weekly allowance endpoint"));
+}
+
+internal sealed class AntigravityUsageReader : IProviderUsageReader
+{
+    public Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(ProviderUsageReadResult.Unavailable(
+            "Antigravity is signed out and exposes model-specific interactive quotas"));
 }
 
 internal sealed class AiProviderUsageCoordinator : IDisposable
@@ -474,6 +738,8 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
     private readonly System.Threading.Timer _timer;
     private readonly IProviderUsageReader _codexReader;
     private readonly IProviderUsageReader _claudeReader;
+    private readonly IProviderUsageReader _grokReader;
+    private readonly IProviderUsageReader _antigravityReader;
     private readonly CancellationTokenSource _lifetime = new();
     private AiProviderUsageSnapshot _snapshot = AiProviderUsageSnapshot.Empty;
     private int _refreshing;
@@ -482,10 +748,14 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
 
     public AiProviderUsageCoordinator(
         IProviderUsageReader? codexReader = null,
-        IProviderUsageReader? claudeReader = null)
+        IProviderUsageReader? claudeReader = null,
+        IProviderUsageReader? grokReader = null,
+        IProviderUsageReader? antigravityReader = null)
     {
         _codexReader = codexReader ?? new CodexUsageReader();
         _claudeReader = claudeReader ?? new ClaudeUsageReader();
+        _grokReader = grokReader ?? new GrokUsageReader();
+        _antigravityReader = antigravityReader ?? new AntigravityUsageReader();
         _timer = new System.Threading.Timer(_ => _ = RefreshAsync(), null,
             Timeout.Infinite, Timeout.Infinite);
     }
@@ -500,7 +770,9 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
                 var expired = _snapshot with
                 {
                     Codex = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Codex, nowUtc),
-                    Claude = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Claude, nowUtc)
+                    Claude = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Claude, nowUtc),
+                    Grok = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Grok, nowUtc),
+                    Antigravity = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Antigravity, nowUtc)
                 };
                 _snapshot = expired;
                 return expired;
@@ -531,7 +803,13 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
             timeout.CancelAfter(TimeSpan.FromSeconds(AiProviderUsagePolicy.RefreshTimeoutSeconds));
             var codexTask = ReadSafelyAsync(_codexReader, timeout.Token);
             var claudeTask = ReadSafelyAsync(_claudeReader, timeout.Token);
-            var results = await Task.WhenAll(codexTask, claudeTask).ConfigureAwait(false);
+            var grokTask = ReadSafelyAsync(_grokReader, timeout.Token);
+            var antigravityTask = ReadSafelyAsync(_antigravityReader, timeout.Token);
+            var results = await Task.WhenAll(
+                codexTask,
+                claudeTask,
+                grokTask,
+                antigravityTask).ConfigureAwait(false);
             if (_disposed) return;
 
             lock (_gate)
@@ -540,6 +818,8 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
                     _snapshot,
                     results[0],
                     results[1],
+                    results[2],
+                    results[3],
                     DateTimeOffset.UtcNow);
             }
         }

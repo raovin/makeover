@@ -180,6 +180,16 @@ internal static class Program
                     true,
                     64,
                     new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero),
+                    string.Empty),
+                new AiProviderUsageValue(
+                    true,
+                    36,
+                    new DateTimeOffset(2026, 8, 18, 13, 45, 0, TimeSpan.Zero),
+                    string.Empty),
+                new AiProviderUsageValue(
+                    true,
+                    7,
+                    new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero),
                     string.Empty))
         };
         var minuteA = new DateTime(2026, 7, 30, 14, 5, 10);
@@ -294,6 +304,28 @@ internal static class Program
                 {
                     AiUsage = baseline.AiUsage with
                     {
+                        Grok = baseline.AiUsage.Grok with { UsedPercent = 37 }
+                    }
+                }, minuteA) == tokenA)
+        {
+            return false;
+        }
+        if (SystemStateProvider.BuildRenderedNotificationToken(
+                baseline with
+                {
+                    AiUsage = baseline.AiUsage with
+                    {
+                        Antigravity = AiProviderUsageValue.Unavailable("test")
+                    }
+                }, minuteA) == tokenA)
+        {
+            return false;
+        }
+        if (SystemStateProvider.BuildRenderedNotificationToken(
+                baseline with
+                {
+                    AiUsage = baseline.AiUsage with
+                    {
                         Claude = AiProviderUsageValue.Unavailable("test")
                     }
                 }, minuteA) == tokenA)
@@ -361,12 +393,53 @@ internal static class Program
             """.Replace("__RESET__", expiredReset.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (CodexUsageParser.TryParseWeeklySample(expiredResponse, now, out _)) return false;
 
+        var grokResponse = """
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {
+                "config": {
+                  "creditUsagePercent": 36.9,
+                  "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-08-11T13:45:00Z",
+                    "end": "2026-08-18T13:45:00Z"
+                  }
+                }
+              }
+            }
+            """;
+        if (!GrokUsageParser.TryParseWeeklySample(grokResponse, now, out var grokSample) ||
+            grokSample.UsedPercent != 36 ||
+            grokSample.WindowDurationMinutes != AiProviderUsagePolicy.WeeklyWindowMinutes ||
+            grokSample.WindowResetAtUtc != new DateTimeOffset(2026, 8, 18, 13, 45, 0, TimeSpan.Zero))
+        {
+            return false;
+        }
+        if (GrokUsageParser.TryParseWeeklySample(
+                grokResponse.Replace("USAGE_PERIOD_TYPE_WEEKLY", "USAGE_PERIOD_TYPE_MONTHLY"),
+                now,
+                out _))
+        {
+            return false;
+        }
+        if (GrokUsageParser.TryParseWeeklySample(
+                grokResponse.Replace("2026-08-18T13:45:00Z", "2026-08-13T11:59:00Z"),
+                now,
+                out _))
+        {
+            return false;
+        }
+
         var current = new AiProviderUsageValue(true, 60, now.AddHours(2), string.Empty);
-        var previous = new AiProviderUsageSnapshot(current, AiProviderUsageValue.Unavailable("test"));
+        var unavailable = AiProviderUsageValue.Unavailable("test");
+        var previous = new AiProviderUsageSnapshot(current, unavailable, unavailable, unavailable);
         var retained = AiProviderUsagePolicy.ApplyResults(
             previous,
             ProviderUsageReadResult.Unavailable("offline"),
             ProviderUsageReadResult.Unavailable("unsupported"),
+            ProviderUsageReadResult.Unavailable("offline"),
+            ProviderUsageReadResult.Unavailable("signed out"),
             now.AddHours(1));
         if (!retained.Codex.Available || retained.Codex.UsedPercent != 60) return false;
 
@@ -374,15 +447,19 @@ internal static class Program
             previous,
             ProviderUsageReadResult.Unavailable("offline"),
             ProviderUsageReadResult.Unavailable("unsupported"),
+            ProviderUsageReadResult.Unavailable("offline"),
+            ProviderUsageReadResult.Unavailable("signed out"),
             now.AddHours(2));
         if (reset.Codex.Available || !AiProviderUsagePolicy.ExpireIfNeeded(current, now.AddHours(2)).RenderedText.Equals("\u2014", StringComparison.Ordinal))
             return false;
 
         var noReset = new AiProviderUsageValue(true, 20, null, string.Empty);
         var noResetResult = AiProviderUsagePolicy.ApplyResults(
-            new AiProviderUsageSnapshot(noReset, AiProviderUsageValue.Unavailable("test")),
+            new AiProviderUsageSnapshot(noReset, unavailable, unavailable, unavailable),
             ProviderUsageReadResult.Unavailable("offline"),
             ProviderUsageReadResult.Unavailable("unsupported"),
+            ProviderUsageReadResult.Unavailable("offline"),
+            ProviderUsageReadResult.Unavailable("signed out"),
             now.AddDays(1));
         return !noResetResult.Codex.Available &&
                current.RenderedText == "60%" &&
