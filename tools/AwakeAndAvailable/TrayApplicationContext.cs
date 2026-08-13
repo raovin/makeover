@@ -7,6 +7,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _trayIcon;
     private readonly Icon _activeIcon;
     private readonly Icon _inactiveIcon;
+    private readonly Form _menuAnchor;
     private readonly System.Windows.Forms.Timer _activityTimer;
     private readonly System.Windows.Forms.Timer _scheduleTimer;
     private readonly System.Windows.Forms.Timer _showMenuTimer;
@@ -44,6 +45,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _activeIcon = LoadEmbeddedIcon("AwakeAndAvailable.Assets.AwakeAndAvailable.ico") ??
             Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
         _inactiveIcon = LoadEmbeddedIcon("AwakeAndAvailable.Assets.AwakeAndAvailable-Inactive.ico") ?? _activeIcon;
+        _menuAnchor = new Form
+        {
+            AutoScaleMode = AutoScaleMode.None,
+            FormBorderStyle = FormBorderStyle.None,
+            ShowInTaskbar = false,
+            StartPosition = FormStartPosition.Manual,
+            Opacity = 0,
+            Size = new Size(1, 1)
+        };
         _trayIcon = new NotifyIcon
         {
             Icon = CurrentTrayIcon,
@@ -77,7 +87,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // Clicking the mirrored icon in MacMakeover's top bar first dismisses the
         // native menu, then signals this process. Do not immediately reopen it.
         if (DateTime.UtcNow - _lastMenuClosedUtc < TimeSpan.FromMilliseconds(600)) return;
-        menu.Show(Cursor.Position);
+        _menuAnchor.Location = Cursor.Position;
+        _menuAnchor.Show();
+        _menuAnchor.Activate();
+        menu.Show(_menuAnchor, Point.Empty);
     }
 
     private void RebuildMenu()
@@ -90,7 +103,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _menuRefreshPending = false;
-        var menu = new ContextMenuStrip();
+        var menu = new ContextMenuStrip { AutoClose = true };
 
         menu.Items.Add(new ToolStripMenuItem(StatusText) { Enabled = false });
         menu.Items.Add(new ToolStripMenuItem(ScheduleStatusText) { Enabled = false });
@@ -163,10 +176,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
             "Awake & Available", MessageBoxButtons.OK, MessageBoxIcon.Information);
         menu.Items.Add(about);
 
-        var closeMenu = new ToolStripMenuItem("Close menu    Esc");
-        closeMenu.Click += (_, _) => menu.Close(ToolStripDropDownCloseReason.ItemClicked);
-        menu.Items.Add(closeMenu);
-
         var quit = new ToolStripMenuItem("Quit Awake & Available");
         quit.Click += (_, _) => ExitThread();
         menu.Items.Add(quit);
@@ -193,6 +202,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private void OnMenuClosed(object? sender, ToolStripDropDownClosedEventArgs e)
     {
         _lastMenuClosedUtc = DateTime.UtcNow;
+        _menuAnchor.Hide();
 
         if (_isExiting)
         {
@@ -530,6 +540,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _trayIcon.Dispose();
+        _menuAnchor.Dispose();
         if (!ReferenceEquals(_inactiveIcon, _activeIcon)) _inactiveIcon.Dispose();
         _activeIcon.Dispose();
         _activityTimer.Dispose();
