@@ -112,6 +112,7 @@ internal static class DockRegressionTests
             if (!TestAppBarRecoveryPolicy()) return 6;
             if (!TestDockWindowTitle()) return 7;
             if (!TestFileExplorerActivationPolicy()) return 8;
+            if (!TestStaleSystemPinPolicy()) return 9;
             if (!TestDynamicApp(probePath)) return 2;
             if (!TestPinnedApp(probePath)) return 3;
             return 0;
@@ -456,6 +457,14 @@ internal static class DockRegressionTests
         }
 
         return shellDesktopSeen && !nonFolderSelected;
+    }
+
+    private static bool TestStaleSystemPinPolicy()
+    {
+        if (!PinnedApp.IsStaleSystemPin(new UserDockPin("Windows Input Experience", "TextInputHost", @"C:\Windows\TextInputHost.exe"))) return false;
+        if (!PinnedApp.IsStaleSystemPin(new UserDockPin("Windows App", "Windows365", @"C:\WindowsApps\Windows365.exe"))) return false;
+        if (PinnedApp.IsStaleSystemPin(new UserDockPin("Windows 365", "Windows365", @"C:\WindowsApps\Windows365.exe"))) return false;
+        return !PinnedApp.IsStaleSystemPin(new UserDockPin("Sublime Text", "sublime_text", @"C:\Apps\sublime_text.exe"));
     }
 
     private static bool WaitUntil(Func<bool> predicate, TimeSpan timeout)
@@ -2043,7 +2052,9 @@ internal sealed class PinnedApp
             };
         }).Where(app => !removed.Contains(app.Name));
         var added = state.Added
-            .Where(pin => !removed.Contains(pin.Name) && !string.IsNullOrWhiteSpace(pin.ExecutablePath))
+            .Where(pin => !IsStaleSystemPin(pin) &&
+                          !removed.Contains(pin.Name) &&
+                          !string.IsNullOrWhiteSpace(pin.ExecutablePath))
             .Select(pin => new PinnedApp
             {
                 Name = pin.Name,
@@ -2057,6 +2068,11 @@ internal sealed class PinnedApp
             .DistinctBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
+
+    internal static bool IsStaleSystemPin(UserDockPin pin) =>
+        pin.ProcessName.Equals("TextInputHost", StringComparison.OrdinalIgnoreCase) ||
+        pin.ProcessName.Equals("Windows365", StringComparison.OrdinalIgnoreCase) &&
+        pin.Name.Equals("Windows App", StringComparison.OrdinalIgnoreCase);
 
     public bool IsRunning(IReadOnlySet<string> processes) => ProcessNames.Any(processes.Contains);
 
