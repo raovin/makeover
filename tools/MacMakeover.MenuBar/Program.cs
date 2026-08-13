@@ -315,7 +315,7 @@ internal static class Program
                 {
                     AiUsage = baseline.AiUsage with
                     {
-                        Antigravity = AiProviderUsageValue.Unavailable("test")
+                        Gemini = AiProviderUsageValue.Unavailable("test")
                     }
                 }, minuteA) == tokenA)
         {
@@ -425,6 +425,55 @@ internal static class Program
         }
         if (GrokUsageParser.TryParseWeeklySample(
                 grokResponse.Replace("2026-08-18T13:45:00Z", "2026-08-13T11:59:00Z"),
+                now,
+                out _))
+        {
+            return false;
+        }
+
+        var geminiResponse = """
+            {
+              "status": "SUCCESS",
+              "command": {
+                "name": "usage",
+                "data": {
+                  "groups": [
+                    {
+                      "name": "Gemini Models",
+                      "buckets": [
+                        {
+                          "id": "gemini-weekly",
+                          "window": "weekly",
+                          "remaining_fraction": 0.9142135977745056,
+                          "reset_time": "2026-08-18T09:03:01Z"
+                        },
+                        {
+                          "id": "gemini-5h",
+                          "window": "5h",
+                          "remaining_fraction": 0.98,
+                          "reset_time": "2026-08-13T14:54:00Z"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+            """;
+        if (!GeminiUsageParser.TryParseWeeklySample(geminiResponse, now, out var geminiSample) ||
+            geminiSample.UsedPercent != 9 ||
+            new AiProviderUsageValue(
+                true,
+                geminiSample.UsedPercent,
+                geminiSample.WindowResetAtUtc,
+                string.Empty).RenderedText != "91%" ||
+            geminiSample.WindowDurationMinutes != AiProviderUsagePolicy.WeeklyWindowMinutes ||
+            geminiSample.WindowResetAtUtc != new DateTimeOffset(2026, 8, 18, 9, 3, 1, TimeSpan.Zero))
+        {
+            return false;
+        }
+        if (GeminiUsageParser.TryParseWeeklySample(
+                geminiResponse.Replace("Gemini Models", "Claude and GPT models"),
                 now,
                 out _))
         {

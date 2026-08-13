@@ -186,7 +186,7 @@ internal sealed class SystemStateProvider : IDisposable
             snapshot.AiUsage.Codex.RenderedToken,
             snapshot.AiUsage.Claude.RenderedToken,
             snapshot.AiUsage.Grok.RenderedToken,
-            snapshot.AiUsage.Antigravity.RenderedToken,
+            snapshot.AiUsage.Gemini.RenderedToken,
             localNow.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
     }
 

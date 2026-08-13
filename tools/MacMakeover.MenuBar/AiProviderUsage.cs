@@ -34,13 +34,13 @@ internal sealed record AiProviderUsageSnapshot(
     AiProviderUsageValue Codex,
     AiProviderUsageValue Claude,
     AiProviderUsageValue Grok,
-    AiProviderUsageValue Antigravity)
+    AiProviderUsageValue Gemini)
 {
     public static AiProviderUsageSnapshot Empty { get; } = new(
         AiProviderUsageValue.Unavailable("No fresh Codex allowance data"),
         AiProviderUsageValue.Unavailable("Claude Code has no supported noninteractive allowance source"),
         AiProviderUsageValue.Unavailable("No fresh Grok allowance data"),
-        AiProviderUsageValue.Unavailable("Antigravity quota requires sign-in and a per-model display policy"));
+        AiProviderUsageValue.Unavailable("No fresh Gemini allowance data"));
 }
 
 internal readonly record struct ProviderUsageSample(
@@ -81,14 +81,14 @@ internal static class AiProviderUsagePolicy
         ProviderUsageReadResult codex,
         ProviderUsageReadResult claude,
         ProviderUsageReadResult grok,
-        ProviderUsageReadResult antigravity,
+        ProviderUsageReadResult gemini,
         DateTimeOffset nowUtc)
     {
         return new(
             ApplyResult(previous.Codex, codex, nowUtc, "Codex allowance data unavailable"),
             ApplyResult(previous.Claude, claude, nowUtc, "Claude allowance data unavailable"),
             ApplyResult(previous.Grok, grok, nowUtc, "Grok allowance data unavailable"),
-            ApplyResult(previous.Antigravity, antigravity, nowUtc, "Antigravity allowance data unavailable"));
+            ApplyResult(previous.Gemini, gemini, nowUtc, "Gemini allowance data unavailable"));
     }
 
     internal static AiProviderUsageValue ExpireIfNeeded(
@@ -727,11 +727,183 @@ internal sealed class ClaudeUsageReader : IProviderUsageReader
             "Claude Code has no supported noninteractive weekly allowance endpoint"));
 }
 
-internal sealed class AntigravityUsageReader : IProviderUsageReader
+internal static class GeminiUsageParser
 {
-    public Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(ProviderUsageReadResult.Unavailable(
-            "Antigravity is signed out and exposes model-specific interactive quotas"));
+    internal static bool TryParseWeeklySample(
+        string json,
+        DateTimeOffset nowUtc,
+        out ProviderUsageSample sample)
+    {
+        sample = default;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("status", out var status) ||
+                status.ValueKind != JsonValueKind.String ||
+                !string.Equals(status.GetString(), "SUCCESS", StringComparison.Ordinal) ||
+                !root.TryGetProperty("command", out var command) ||
+                command.ValueKind != JsonValueKind.Object ||
+                !command.TryGetProperty("name", out var commandName) ||
+                commandName.ValueKind != JsonValueKind.String ||
+                !string.Equals(commandName.GetString(), "usage", StringComparison.Ordinal) ||
+                !command.TryGetProperty("data", out var data) ||
+                data.ValueKind != JsonValueKind.Object ||
+                !data.TryGetProperty("groups", out var groups) ||
+                groups.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var group in groups.EnumerateArray())
+            {
+                if (group.ValueKind != JsonValueKind.Object ||
+                    !group.TryGetProperty("name", out var groupName) ||
+                    groupName.ValueKind != JsonValueKind.String ||
+                    !string.Equals(groupName.GetString(), "Gemini Models", StringComparison.Ordinal) ||
+                    !group.TryGetProperty("buckets", out var buckets) ||
+                    buckets.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var bucket in buckets.EnumerateArray())
+                {
+                    if (bucket.ValueKind != JsonValueKind.Object ||
+                        !bucket.TryGetProperty("window", out var window) ||
+                        window.ValueKind != JsonValueKind.String ||
+                        !string.Equals(window.GetString(), "weekly", StringComparison.Ordinal) ||
+                        !bucket.TryGetProperty("remaining_fraction", out var remaining) ||
+                        remaining.ValueKind != JsonValueKind.Number ||
+                        !remaining.TryGetDouble(out var remainingFraction) ||
+                        double.IsNaN(remainingFraction) ||
+                        double.IsInfinity(remainingFraction) ||
+                        !bucket.TryGetProperty("reset_time", out var reset) ||
+                        reset.ValueKind != JsonValueKind.String ||
+                        !DateTimeOffset.TryParse(
+                            reset.GetString(),
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal,
+                            out var resetAtUtc) ||
+                        resetAtUtc <= nowUtc)
+                    {
+                        continue;
+                    }
+
+                    var remainingPercent = Math.Clamp(
+                        (int)Math.Floor(remainingFraction * 100D),
+                        0,
+                        100);
+                    sample = new(
+                        100 - remainingPercent,
+                        resetAtUtc.ToUniversalTime(),
+                        AiProviderUsagePolicy.WeeklyWindowMinutes);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+}
+
+internal sealed class GeminiUsageReader : IProviderUsageReader
+{
+    public async Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
+    {
+        var executable = FindAgyExecutable();
+        if (executable is null)
+        {
+            return ProviderUsageReadResult.Unavailable(
+                "Antigravity CLI not found; install AGY and sign in with Google");
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executable,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+        startInfo.ArgumentList.Add("--print");
+        startInfo.ArgumentList.Add("/usage");
+        startInfo.ArgumentList.Add("--output-format");
+        startInfo.ArgumentList.Add("json");
+        startInfo.ArgumentList.Add("--print-timeout");
+        startInfo.ArgumentList.Add("10s");
+
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start())
+            {
+                return ProviderUsageReadResult.Unavailable("Antigravity CLI could not start");
+            }
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            // Drain diagnostics without retaining or logging credential-adjacent output.
+            _ = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            var stdout = await stdoutTask.ConfigureAwait(false);
+            if (process.ExitCode != 0)
+            {
+                return ProviderUsageReadResult.Unavailable(
+                    "Antigravity CLI did not return Gemini quota data");
+            }
+
+            return GeminiUsageParser.TryParseWeeklySample(
+                stdout,
+                DateTimeOffset.UtcNow,
+                out var sample)
+                ? ProviderUsageReadResult.Fresh(sample)
+                : ProviderUsageReadResult.Unavailable(
+                    "Antigravity CLI did not return a fresh Gemini weekly quota");
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch { }
+            return ProviderUsageReadResult.Unavailable("Gemini quota request timed out");
+        }
+        catch
+        {
+            return ProviderUsageReadResult.Unavailable("Gemini quota request failed");
+        }
+        finally
+        {
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch { }
+        }
+    }
+
+    private static string? FindAgyExecutable()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var installed = Path.Combine(localAppData, "agy", "bin", "agy.exe");
+        if (File.Exists(installed)) return installed;
+
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(directory.Trim().Trim('"'), "agy.exe");
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
+    }
 }
 
 internal sealed class AiProviderUsageCoordinator : IDisposable
@@ -741,7 +913,7 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
     private readonly IProviderUsageReader _codexReader;
     private readonly IProviderUsageReader _claudeReader;
     private readonly IProviderUsageReader _grokReader;
-    private readonly IProviderUsageReader _antigravityReader;
+    private readonly IProviderUsageReader _geminiReader;
     private readonly CancellationTokenSource _lifetime = new();
     private AiProviderUsageSnapshot _snapshot = AiProviderUsageSnapshot.Empty;
     private int _refreshing;
@@ -752,12 +924,12 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
         IProviderUsageReader? codexReader = null,
         IProviderUsageReader? claudeReader = null,
         IProviderUsageReader? grokReader = null,
-        IProviderUsageReader? antigravityReader = null)
+        IProviderUsageReader? geminiReader = null)
     {
         _codexReader = codexReader ?? new CodexUsageReader();
         _claudeReader = claudeReader ?? new ClaudeUsageReader();
         _grokReader = grokReader ?? new GrokUsageReader();
-        _antigravityReader = antigravityReader ?? new AntigravityUsageReader();
+        _geminiReader = geminiReader ?? new GeminiUsageReader();
         _timer = new System.Threading.Timer(_ => _ = RefreshAsync(), null,
             Timeout.Infinite, Timeout.Infinite);
     }
@@ -774,7 +946,7 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
                     Codex = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Codex, nowUtc),
                     Claude = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Claude, nowUtc),
                     Grok = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Grok, nowUtc),
-                    Antigravity = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Antigravity, nowUtc)
+                    Gemini = AiProviderUsagePolicy.ExpireIfNeeded(_snapshot.Gemini, nowUtc)
                 };
                 _snapshot = expired;
                 return expired;
@@ -806,12 +978,12 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
             var codexTask = ReadSafelyAsync(_codexReader, timeout.Token);
             var claudeTask = ReadSafelyAsync(_claudeReader, timeout.Token);
             var grokTask = ReadSafelyAsync(_grokReader, timeout.Token);
-            var antigravityTask = ReadSafelyAsync(_antigravityReader, timeout.Token);
+            var geminiTask = ReadSafelyAsync(_geminiReader, timeout.Token);
             var results = await Task.WhenAll(
                 codexTask,
                 claudeTask,
                 grokTask,
-                antigravityTask).ConfigureAwait(false);
+                geminiTask).ConfigureAwait(false);
             if (_disposed) return;
 
             lock (_gate)

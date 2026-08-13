@@ -24,7 +24,7 @@ internal enum TelemetryKind
     Codex,
     Claude,
     Grok,
-    Antigravity
+    Gemini
 }
 
 internal sealed record TelemetrySegment(TelemetryKind Kind, string Text);
@@ -423,7 +423,7 @@ internal sealed class MenuBarForm : Form
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
                 new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
                 new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
-                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
+                new TelemetrySegment(TelemetryKind.Gemini, snapshot.AiUsage.Gemini.RenderedText)
             },
             new[]
             {
@@ -433,7 +433,7 @@ internal sealed class MenuBarForm : Form
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
                 new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
                 new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
-                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
+                new TelemetrySegment(TelemetryKind.Gemini, snapshot.AiUsage.Gemini.RenderedText)
             },
             new[]
             {
@@ -442,7 +442,7 @@ internal sealed class MenuBarForm : Form
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
                 new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
                 new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
-                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
+                new TelemetrySegment(TelemetryKind.Gemini, snapshot.AiUsage.Gemini.RenderedText)
             },
             new[]
             {
@@ -450,14 +450,14 @@ internal sealed class MenuBarForm : Form
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
                 new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
                 new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
-                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
+                new TelemetrySegment(TelemetryKind.Gemini, snapshot.AiUsage.Gemini.RenderedText)
             },
             new[]
             {
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
                 new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
                 new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
-                new TelemetrySegment(TelemetryKind.Antigravity, snapshot.AiUsage.Antigravity.RenderedText)
+                new TelemetrySegment(TelemetryKind.Gemini, snapshot.AiUsage.Gemini.RenderedText)
             }
         };
         var battery = PowerSourceLabel(snapshot);
@@ -566,8 +566,8 @@ internal sealed class MenuBarForm : Form
             case TelemetryKind.Grok:
                 DrawGrokMark(graphics, icon, pen);
                 break;
-            case TelemetryKind.Antigravity:
-                DrawAntigravityMark(graphics, icon, pen);
+            case TelemetryKind.Gemini:
+                DrawGeminiMark(graphics, icon, pen);
                 break;
         }
 
@@ -644,19 +644,24 @@ internal sealed class MenuBarForm : Form
             icon.Bottom - Scale(1));
     }
 
-    private void DrawAntigravityMark(Graphics graphics, Rectangle icon, Pen pen)
+    private void DrawGeminiMark(Graphics graphics, Rectangle icon, Pen pen)
     {
-        // An original rising-chevron/orbit mark for the compact AGY CLI label.
-        var top = new Point(icon.Left + icon.Width / 2, icon.Top + Scale(1));
-        var left = new Point(icon.Left + Scale(1), icon.Bottom - Scale(2));
-        var right = new Point(icon.Right - Scale(1), icon.Bottom - Scale(2));
-        graphics.DrawLine(pen, left, top);
-        graphics.DrawLine(pen, top, right);
-        graphics.DrawArc(
-            pen,
-            new Rectangle(icon.Left, icon.Top + Scale(4), icon.Width, Scale(6)),
-            18,
-            144);
+        // Compact four-point Gemini-style sparkle, drawn locally to remain crisp.
+        var centerX = icon.Left + icon.Width / 2F;
+        var centerY = icon.Top + icon.Height / 2F;
+        using var path = new GraphicsPath();
+        path.AddLines([
+            new PointF(centerX, icon.Top + Scale(1)),
+            new PointF(centerX + ScaleValue(1.25F), centerY - ScaleValue(1.25F)),
+            new PointF(icon.Right - Scale(1), centerY),
+            new PointF(centerX + ScaleValue(1.25F), centerY + ScaleValue(1.25F)),
+            new PointF(centerX, icon.Bottom - Scale(1)),
+            new PointF(centerX - ScaleValue(1.25F), centerY + ScaleValue(1.25F)),
+            new PointF(icon.Left + Scale(1), centerY),
+            new PointF(centerX - ScaleValue(1.25F), centerY - ScaleValue(1.25F)),
+            new PointF(centerX, icon.Top + Scale(1))
+        ]);
+        graphics.DrawPath(pen, path);
     }
 
     private void DrawTelemetrySeparator(Graphics graphics, int x)
