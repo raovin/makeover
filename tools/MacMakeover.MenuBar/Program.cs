@@ -71,6 +71,7 @@ internal static class Program
                DisplayRebuildSelfTest() &&
                TelemetryLayoutSelfTest() &&
                AppBarRegistrationSelfTest() &&
+               ProviderUsageSelfTest() &&
                RenderedNotificationTokenSelfTest() &&
                MenuBarForm.IsShowDesktopCorner(new Point(0, 0), new Size(1280, 20), 8) &&
                MenuBarForm.IsShowDesktopCorner(new Point(1279, 0), new Size(1280, 20), 8) &&
@@ -168,7 +169,18 @@ internal static class Program
             Connection = ConnectionKind.Wifi,
             ConnectionName = "Wi-Fi",
             ActiveApp = "Notepad",
-            TrayApps = trays
+            TrayApps = trays,
+            AiUsage = new AiProviderUsageSnapshot(
+                new AiProviderUsageValue(
+                    true,
+                    18,
+                    new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero),
+                    string.Empty),
+                new AiProviderUsageValue(
+                    true,
+                    64,
+                    new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero),
+                    string.Empty))
         };
         var minuteA = new DateTime(2026, 7, 30, 14, 5, 10);
         var minuteALater = new DateTime(2026, 7, 30, 14, 5, 59);
@@ -252,7 +264,129 @@ internal static class Program
             return false;
         }
 
+        // Provider values are integer paint values; reset metadata alone does not
+        // invalidate the bar, while an actually painted value or availability does.
+        var sameCodexValueNewWindow = baseline with
+        {
+            AiUsage = baseline.AiUsage with
+            {
+                Codex = baseline.AiUsage.Codex with
+                {
+                    WindowResetAtUtc = baseline.AiUsage.Codex.WindowResetAtUtc!.Value.AddDays(7)
+                }
+            }
+        };
+        if (SystemStateProvider.BuildRenderedNotificationToken(sameCodexValueNewWindow, minuteA) != tokenA)
+            return false;
+        if (SystemStateProvider.BuildRenderedNotificationToken(
+                baseline with
+                {
+                    AiUsage = baseline.AiUsage with
+                    {
+                        Codex = baseline.AiUsage.Codex with { UsedPercent = 19 }
+                    }
+                }, minuteA) == tokenA)
+        {
+            return false;
+        }
+        if (SystemStateProvider.BuildRenderedNotificationToken(
+                baseline with
+                {
+                    AiUsage = baseline.AiUsage with
+                    {
+                        Claude = AiProviderUsageValue.Unavailable("test")
+                    }
+                }, minuteA) == tokenA)
+        {
+            return false;
+        }
+
         return true;
+    }
+
+    private static bool ProviderUsageSelfTest()
+    {
+        var now = new DateTimeOffset(2026, 8, 13, 12, 0, 0, TimeSpan.Zero);
+        var weeklyReset = now.AddDays(4).ToUnixTimeSeconds();
+        var response = """
+            {
+              "id": 2,
+              "result": {
+                "rateLimits": {
+                  "primary": { "usedPercent": 18, "windowDurationMins": 300, "resetsAt": __RESET__ },
+                  "secondary": { "remainingPercent": 40, "windowDurationMins": 10080, "resetsAt": __RESET__ }
+                }
+              }
+            }
+            """.Replace("__RESET__", weeklyReset.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (!CodexUsageParser.TryParseWeeklySample(response, now, out var sample) ||
+            sample.UsedPercent != 60 ||
+            sample.WindowDurationMinutes != AiProviderUsagePolicy.WeeklyWindowMinutes ||
+            sample.WindowResetAtUtc != now.AddDays(4))
+        {
+            return false;
+        }
+
+        var mappedResponse = """
+            {
+              "id": 2,
+              "result": {
+                "rateLimits": { "primary": { "usedPercent": 1, "windowDurationMins": 300 } },
+                "rateLimitsByLimitId": {
+                  "codex": {
+                    "primary": { "usedPercent": 140, "windowDurationMins": 10080, "resetsAt": __RESET__ }
+                  }
+                }
+              }
+            }
+            """.Replace("__RESET__", weeklyReset.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (!CodexUsageParser.TryParseWeeklySample(mappedResponse, now, out var clamped) ||
+            clamped.UsedPercent != 100)
+        {
+            return false;
+        }
+
+        var remainingResponse = """
+            {"id":2,"result":{"rateLimits":{"primary":{"remainingPercent":140,"windowDurationMins":10080,"resetsAt":__RESET__}}}}
+            """.Replace("__RESET__", weeklyReset.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (!CodexUsageParser.TryParseWeeklySample(remainingResponse, now, out var remaining) ||
+            remaining.UsedPercent != 0)
+        {
+            return false;
+        }
+
+        var expiredReset = now.AddMinutes(-1).ToUnixTimeSeconds();
+        var expiredResponse = """
+            {"id":2,"result":{"rateLimits":{"primary":{"usedPercent":50,"windowDurationMins":10080,"resetsAt":__RESET__}}}}
+            """.Replace("__RESET__", expiredReset.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (CodexUsageParser.TryParseWeeklySample(expiredResponse, now, out _)) return false;
+
+        var current = new AiProviderUsageValue(true, 60, now.AddHours(2), string.Empty);
+        var previous = new AiProviderUsageSnapshot(current, AiProviderUsageValue.Unavailable("test"));
+        var retained = AiProviderUsagePolicy.ApplyResults(
+            previous,
+            ProviderUsageReadResult.Unavailable("offline"),
+            ProviderUsageReadResult.Unavailable("unsupported"),
+            now.AddHours(1));
+        if (!retained.Codex.Available || retained.Codex.UsedPercent != 60) return false;
+
+        var reset = AiProviderUsagePolicy.ApplyResults(
+            previous,
+            ProviderUsageReadResult.Unavailable("offline"),
+            ProviderUsageReadResult.Unavailable("unsupported"),
+            now.AddHours(2));
+        if (reset.Codex.Available || !AiProviderUsagePolicy.ExpireIfNeeded(current, now.AddHours(2)).RenderedText.Equals("\u2014", StringComparison.Ordinal))
+            return false;
+
+        var noReset = new AiProviderUsageValue(true, 20, null, string.Empty);
+        var noResetResult = AiProviderUsagePolicy.ApplyResults(
+            new AiProviderUsageSnapshot(noReset, AiProviderUsageValue.Unavailable("test")),
+            ProviderUsageReadResult.Unavailable("offline"),
+            ProviderUsageReadResult.Unavailable("unsupported"),
+            now.AddDays(1));
+        return !noResetResult.Codex.Available &&
+               current.RenderedText == "60%" &&
+               AiProviderUsageValue.Unavailable("test").RenderedText == "\u2014";
     }
 
     private static bool TelemetryLayoutSelfTest()

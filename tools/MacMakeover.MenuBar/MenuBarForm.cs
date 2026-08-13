@@ -20,7 +20,9 @@ internal enum TelemetryKind
 {
     Cpu,
     Memory,
-    Network
+    Network,
+    Codex,
+    Claude
 }
 
 internal sealed record TelemetrySegment(TelemetryKind Kind, string Text);
@@ -407,7 +409,7 @@ internal sealed class MenuBarForm : Form
     private void DrawCenter(Graphics graphics, SystemSnapshot snapshot, int leftEnd, int rightStart)
     {
         var available = rightStart - leftEnd - Scale(16);
-        if (available < Scale(220)) return;
+        if (available <= 0) return;
 
         var candidates = new[]
         {
@@ -415,18 +417,35 @@ internal sealed class MenuBarForm : Form
             {
                 new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
                 new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0} GB"),
-                new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}")
+                new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"),
+                new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
             },
             new[]
             {
                 new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
                 new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0}G"),
-                new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}")
+                new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"),
+                new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
             },
             new[]
             {
                 new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
-                new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}G")
+                new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}G"),
+                new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
+            },
+            new[]
+            {
+                new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
+                new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
+            },
+            new[]
+            {
+                new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
+                new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText)
             }
         };
         var battery = PowerSourceLabel(snapshot);
@@ -526,12 +545,66 @@ internal sealed class MenuBarForm : Form
                 graphics.DrawLine(pen, icon.Right - Scale(5), icon.Bottom - Scale(3), icon.Right - Scale(3), icon.Bottom - Scale(1));
                 graphics.DrawLine(pen, icon.Right - Scale(1), icon.Bottom - Scale(3), icon.Right - Scale(3), icon.Bottom - Scale(1));
                 break;
+            case TelemetryKind.Codex:
+                DrawCodexMark(graphics, icon, pen);
+                break;
+            case TelemetryKind.Claude:
+                DrawClaudeMark(graphics, icon, pen);
+                break;
         }
 
         var textRect = new Rectangle(icon.Right + Scale(3), area.Top, area.Right - icon.Right - Scale(3), area.Height);
         TextRenderer.DrawText(graphics, segment.Text, _smallFont, textRect, color,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
             TextFormatFlags.NoPadding);
+    }
+
+    private void DrawCodexMark(Graphics graphics, Rectangle icon, Pen pen)
+    {
+        // Small original knot mark: six overlapping loops remain legible at the
+        // same size as the surrounding CPU, memory, and network symbols.
+        var center = new PointF(icon.Left + icon.Width / 2F, icon.Top + icon.Height / 2F);
+        var loopOffset = ScaleValue(1.35F);
+        var loopWidth = ScaleValue(4.2F);
+        var loopHeight = ScaleValue(3.4F);
+        for (var index = 0; index < 6; index++)
+        {
+            var angle = -Math.PI / 2 + index * Math.PI / 3;
+            var loopCenter = new PointF(
+                center.X + (float)Math.Cos(angle) * loopOffset,
+                center.Y + (float)Math.Sin(angle) * loopOffset);
+            var loop = new RectangleF(
+                loopCenter.X - loopWidth / 2F,
+                loopCenter.Y - loopHeight / 2F,
+                loopWidth,
+                loopHeight);
+            using var transform = new Matrix();
+            transform.RotateAt((float)(angle * 180 / Math.PI + 90), loopCenter);
+            graphics.Transform = transform;
+            graphics.DrawEllipse(pen, loop);
+            graphics.ResetTransform();
+        }
+    }
+
+    private void DrawClaudeMark(Graphics graphics, Rectangle icon, Pen pen)
+    {
+        // Claude's compact mark is represented as an original six-ray spark.
+        var center = new PointF(icon.Left + icon.Width / 2F, icon.Top + icon.Height / 2F);
+        var inner = ScaleValue(1.1F);
+        var outer = ScaleValue(4.5F);
+        for (var index = 0; index < 6; index++)
+        {
+            var angle = -Math.PI / 2 + index * Math.PI / 3;
+            var start = new PointF(
+                center.X + (float)Math.Cos(angle) * inner,
+                center.Y + (float)Math.Sin(angle) * inner);
+            var end = new PointF(
+                center.X + (float)Math.Cos(angle) * outer,
+                center.Y + (float)Math.Sin(angle) * outer);
+            graphics.DrawLine(pen, start, end);
+        }
+        var dot = ScaleValue(1.25F);
+        graphics.FillEllipse(Brushes.White, center.X - dot / 2F, center.Y - dot / 2F, dot, dot);
     }
 
     private void DrawTelemetrySeparator(Graphics graphics, int x)

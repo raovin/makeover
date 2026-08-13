@@ -36,17 +36,19 @@ internal sealed record SystemSnapshot(
     ConnectionKind Connection,
     string ConnectionName,
     string ActiveApp,
-    IReadOnlyList<TrayAppSnapshot> TrayApps)
+    IReadOnlyList<TrayAppSnapshot> TrayApps,
+    AiProviderUsageSnapshot AiUsage)
 {
     public static SystemSnapshot Empty { get; } = new(
         0, 0, 0, 0, 0, 100, true, false, PowerModeKind.Balanced,
-        ConnectionKind.Offline, "Offline", "Finder", []);
+        ConnectionKind.Offline, "Offline", "Finder", [], AiProviderUsageSnapshot.Empty);
 }
 
 internal sealed class SystemStateProvider : IDisposable
 {
     private readonly object _gate = new();
     private readonly System.Threading.Timer _timer;
+    private readonly AiProviderUsageCoordinator _aiUsage = new();
     private readonly Dictionary<string, (long Received, long Sent)> _networkSamples = new();
     private SystemSnapshot _snapshot = SystemSnapshot.Empty;
     private DateTime _networkSampledAt = DateTime.UtcNow;
@@ -80,6 +82,7 @@ internal sealed class SystemStateProvider : IDisposable
     public void Start()
     {
         Poll();
+        _aiUsage.Start();
         // Keep the established telemetry cadence; Changed is suppressed when the
         // rendered notification token is unchanged so idle CPU stays flat.
         _timer.Change(1000, 1500);
@@ -103,6 +106,7 @@ internal sealed class SystemStateProvider : IDisposable
             var powerMode = ReadPowerMode(onAcPower);
             var activeApp = ReadActiveApp();
             var trayApps = TrayAppProvider.Capture();
+            var aiUsage = _aiUsage.Snapshot;
 
             var snapshot = new SystemSnapshot(
                 cpu,
@@ -117,7 +121,8 @@ internal sealed class SystemStateProvider : IDisposable
                 connection,
                 interfaceName,
                 activeApp,
-                trayApps);
+                trayApps,
+                aiUsage);
             var token = BuildRenderedNotificationToken(snapshot, DateTime.Now);
             var raiseChanged = false;
             lock (_gate)
@@ -155,7 +160,8 @@ internal sealed class SystemStateProvider : IDisposable
     /// Pure rendered-state token. Changed fires only when this token differs, so
     /// polling continues at the same cadence without full-bar invalidation on noise.
     /// Includes rendered CPU, rounded memory, FormatRate network buckets, battery/
-    /// power/connection/app/tray identities, and minute-resolution clock.
+    /// power/connection/app/tray identities, rendered provider values, and
+    /// minute-resolution clock.
     /// </summary>
     internal static string BuildRenderedNotificationToken(SystemSnapshot snapshot, DateTime localNow)
     {
@@ -177,6 +183,8 @@ internal sealed class SystemStateProvider : IDisposable
             snapshot.ConnectionName,
             snapshot.ActiveApp,
             trays,
+            snapshot.AiUsage.Codex.RenderedToken,
+            snapshot.AiUsage.Claude.RenderedToken,
             localNow.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
     }
 
@@ -432,5 +440,6 @@ internal sealed class SystemStateProvider : IDisposable
     {
         _disposed = true;
         _timer.Dispose();
+        _aiUsage.Dispose();
     }
 }
