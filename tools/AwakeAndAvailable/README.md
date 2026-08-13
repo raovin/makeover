@@ -57,7 +57,9 @@ Settings are stored in `%LOCALAPPDATA%\AwakeAndAvailable\settings.json`.
 
 ## Icon
 
-The current owl-and-presence app icon is stored in `Assets\awake-available.png`. It deliberately
-avoids lightning, battery, charging, and power-button imagery so the tray icon cannot be mistaken
-for a system power indicator. To regenerate the multi-resolution Windows icon after changing the
-master image, run `Scripts\create-icon.py` with Python and Pillow.
+The paired bird icons use a raised-wing pose while active and a tucked-wing pose while inactive.
+They deliberately avoid lightning, battery, charging, and power-button imagery so the tray icon
+cannot be mistaken for a system power indicator. Source artwork is stored in
+`Assets\bird-active-source.png` and `Assets\bird-inactive-source.png`. To regenerate both
+multi-resolution Windows icons and the actual-size preview, run `Scripts\create-icon.py` with
+Python and Pillow.

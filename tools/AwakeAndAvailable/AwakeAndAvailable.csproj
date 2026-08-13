@@ -12,4 +12,8 @@
     <PublishSingleFile>true</PublishSingleFile>
     <Version>1.1.0</Version>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\AwakeAndAvailable.ico" />
+    <EmbeddedResource Include="Assets\AwakeAndAvailable-Inactive.ico" />
+  </ItemGroup>
 </Project>

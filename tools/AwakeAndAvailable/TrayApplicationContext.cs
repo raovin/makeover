@@ -5,6 +5,8 @@ namespace AwakeAndAvailable;
 internal sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon _trayIcon;
+    private readonly Icon _activeIcon;
+    private readonly Icon _inactiveIcon;
     private readonly System.Windows.Forms.Timer _activityTimer;
     private readonly System.Windows.Forms.Timer _scheduleTimer;
     private readonly System.Windows.Forms.Timer _showMenuTimer;
@@ -39,9 +41,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _scheduleTimer = new System.Windows.Forms.Timer { Interval = 15_000 };
         _scheduleTimer.Tick += (_, _) => EvaluateSchedule();
 
+        _activeIcon = LoadEmbeddedIcon("AwakeAndAvailable.Assets.AwakeAndAvailable.ico") ??
+            Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+        _inactiveIcon = LoadEmbeddedIcon("AwakeAndAvailable.Assets.AwakeAndAvailable-Inactive.ico") ?? _activeIcon;
         _trayIcon = new NotifyIcon
         {
-            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application,
+            Icon = CurrentTrayIcon,
             Text = "Awake & Available",
             Visible = true
         };
@@ -172,6 +177,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (oldMenu is not null) oldMenu.Closed -= OnMenuClosed;
         oldMenu?.Dispose();
         _trayIcon.Text = StatusText.Length <= 63 ? StatusText : "Awake & Available";
+        _trayIcon.Icon = CurrentTrayIcon;
+    }
+
+    private Icon CurrentTrayIcon => _preventSleep || _teamsMode != TeamsActivityMode.Off
+        ? _activeIcon
+        : _inactiveIcon;
+
+    private static Icon? LoadEmbeddedIcon(string resourceName)
+    {
+        using var stream = typeof(TrayApplicationContext).Assembly.GetManifestResourceStream(resourceName);
+        return stream is null ? null : new Icon(stream);
     }
 
     private void OnMenuClosed(object? sender, ToolStripDropDownClosedEventArgs e)
@@ -514,6 +530,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _trayIcon.Dispose();
+        if (!ReferenceEquals(_inactiveIcon, _activeIcon)) _inactiveIcon.Dispose();
+        _activeIcon.Dispose();
         _activityTimer.Dispose();
         _scheduleTimer.Dispose();
         _showMenuTimer.Dispose();
