@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Win32;
 
 namespace MacMakeover.MenuBar;
 
@@ -63,6 +64,70 @@ internal sealed record ProviderUsageReadResult(
 internal interface IProviderUsageReader
 {
     Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken);
+}
+
+internal static class ProviderExecutableLocator
+{
+    internal static string? Find(string fileName)
+    {
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddPath(directories, Environment.GetEnvironmentVariable("PATH"));
+        AddPath(directories, ReadRegistryPath(Registry.CurrentUser, @"Environment"));
+        AddPath(
+            directories,
+            ReadRegistryPath(
+                Registry.LocalMachine,
+                @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"));
+
+        var npmPrefix = Environment.GetEnvironmentVariable("NPM_CONFIG_PREFIX");
+        if (!string.IsNullOrWhiteSpace(npmPrefix)) directories.Add(npmPrefix);
+        directories.Add(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "npm"));
+        directories.Add(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "agy",
+            "bin"));
+
+        foreach (var directory in directories)
+        {
+            try
+            {
+                var candidate = Path.Combine(directory, fileName);
+                if (File.Exists(candidate)) return candidate;
+            }
+            catch
+            {
+                // Ignore malformed or inaccessible PATH entries.
+            }
+        }
+
+        return null;
+    }
+
+    private static void AddPath(HashSet<string> directories, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var clean = Environment.ExpandEnvironmentVariables(directory.Trim().Trim('"'));
+            if (clean.Length > 0) directories.Add(clean);
+        }
+    }
+
+    private static string? ReadRegistryPath(RegistryKey hive, string subkey)
+    {
+        try
+        {
+            using var key = hive.OpenSubKey(subkey, writable: false);
+            return key?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames)
+                as string;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
 
 internal static class AiProviderUsagePolicy
@@ -268,9 +333,9 @@ internal sealed class CodexUsageReader : IProviderUsageReader
 
     public async Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
     {
-        var executable = FindOnPath("codex.cmd") ??
-                         FindOnPath("codex.ps1") ??
-                         FindOnPath("codex.exe");
+        var executable = ProviderExecutableLocator.Find("codex.cmd") ??
+                         ProviderExecutableLocator.Find("codex.ps1") ??
+                         ProviderExecutableLocator.Find("codex.exe");
         if (executable is null)
         {
             return ProviderUsageReadResult.Unavailable(
@@ -415,21 +480,6 @@ internal sealed class CodexUsageReader : IProviderUsageReader
         return startInfo;
     }
 
-    private static string? FindOnPath(string fileName)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var cleanDirectory = directory.Trim().Trim('"');
-            if (cleanDirectory.Length == 0) continue;
-            var candidate = Path.Combine(cleanDirectory, fileName);
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return null;
-    }
-
     private static async Task SendAsync(
         Process process,
         string message,
@@ -540,9 +590,9 @@ internal sealed class GrokUsageReader : IProviderUsageReader
 
     public async Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
     {
-        var executable = FindOnPath("grok.cmd") ??
-                         FindOnPath("grok.ps1") ??
-                         FindOnPath("grok.exe");
+        var executable = ProviderExecutableLocator.Find("grok.cmd") ??
+                         ProviderExecutableLocator.Find("grok.ps1") ??
+                         ProviderExecutableLocator.Find("grok.exe");
         if (executable is null)
         {
             return ProviderUsageReadResult.Unavailable(
@@ -704,20 +754,6 @@ internal sealed class GrokUsageReader : IProviderUsageReader
         await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static string? FindOnPath(string fileName)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var cleanDirectory = directory.Trim().Trim('"');
-            if (cleanDirectory.Length == 0) continue;
-            var candidate = Path.Combine(cleanDirectory, fileName);
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return null;
-    }
 }
 
 internal sealed class ClaudeUsageReader : IProviderUsageReader
@@ -894,15 +930,7 @@ internal sealed class GeminiUsageReader : IProviderUsageReader
         var installed = Path.Combine(localAppData, "agy", "bin", "agy.exe");
         if (File.Exists(installed)) return installed;
 
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var candidate = Path.Combine(directory.Trim().Trim('"'), "agy.exe");
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return null;
+        return ProviderExecutableLocator.Find("agy.exe");
     }
 }
 
