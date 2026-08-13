@@ -18,6 +18,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private bool _pulseFailureNotified;
     private bool _menuRefreshPending;
     private bool _isExiting;
+    private DateTime _lastMenuClosedUtc = DateTime.MinValue;
 
     internal TrayApplicationContext(EventWaitHandle showMenuEvent)
     {
@@ -49,7 +50,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _showMenuTimer.Tick += (_, _) =>
         {
             if (!_showMenuEvent.WaitOne(0)) return;
-            _trayIcon.ContextMenuStrip?.Show(Cursor.Position);
+            ToggleMenuAtCursor();
         };
 
         ApplyPowerState();
@@ -59,16 +60,27 @@ internal sealed class TrayApplicationContext : ApplicationContext
         ShowBalloon("Awake & Available is running", ScheduleStatusText);
     }
 
+    private void ToggleMenuAtCursor()
+    {
+        if (_trayIcon.ContextMenuStrip is not { } menu) return;
+        if (menu.Visible)
+        {
+            menu.Close(ToolStripDropDownCloseReason.CloseCalled);
+            return;
+        }
+
+        // Clicking the mirrored icon in MacMakeover's top bar first dismisses the
+        // native menu, then signals this process. Do not immediately reopen it.
+        if (DateTime.UtcNow - _lastMenuClosedUtc < TimeSpan.FromMilliseconds(600)) return;
+        menu.Show(Cursor.Position);
+    }
+
     private void RebuildMenu()
     {
         if (_isExiting) return;
         if (_trayIcon.ContextMenuStrip is { Visible: true } visibleMenu)
         {
-            if (!_menuRefreshPending)
-            {
-                _menuRefreshPending = true;
-                visibleMenu.Closed += OnMenuClosed;
-            }
+            _menuRefreshPending = true;
             return;
         }
 
@@ -146,20 +158,25 @@ internal sealed class TrayApplicationContext : ApplicationContext
             "Awake & Available", MessageBoxButtons.OK, MessageBoxIcon.Information);
         menu.Items.Add(about);
 
-        var quit = new ToolStripMenuItem("Exit Awake & Available");
+        var closeMenu = new ToolStripMenuItem("Close menu    Esc");
+        closeMenu.Click += (_, _) => menu.Close(ToolStripDropDownCloseReason.ItemClicked);
+        menu.Items.Add(closeMenu);
+
+        var quit = new ToolStripMenuItem("Quit Awake & Available");
         quit.Click += (_, _) => ExitThread();
         menu.Items.Add(quit);
+        menu.Closed += OnMenuClosed;
 
         var oldMenu = _trayIcon.ContextMenuStrip;
         _trayIcon.ContextMenuStrip = menu;
+        if (oldMenu is not null) oldMenu.Closed -= OnMenuClosed;
         oldMenu?.Dispose();
         _trayIcon.Text = StatusText.Length <= 63 ? StatusText : "Awake & Available";
     }
 
     private void OnMenuClosed(object? sender, ToolStripDropDownClosedEventArgs e)
     {
-        if (sender is ContextMenuStrip closedMenu)
-            closedMenu.Closed -= OnMenuClosed;
+        _lastMenuClosedUtc = DateTime.UtcNow;
 
         if (_isExiting)
         {
