@@ -113,11 +113,22 @@ internal static class TrayAppProvider
 
 internal sealed class TrayIconCache : IDisposable
 {
-    private readonly Dictionary<string, Image?> _images = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CacheEntry> _images = new(StringComparer.OrdinalIgnoreCase);
 
     public Image? Get(TrayAppSnapshot app)
     {
-        if (_images.TryGetValue(app.Key, out var cached)) return cached;
+        var sourceIdentity = GetSourceIdentity(app.ExecutablePath);
+        if (_images.TryGetValue(app.Key, out var cached))
+        {
+            if (cached.SourceIdentity.Equals(sourceIdentity, StringComparison.OrdinalIgnoreCase))
+            {
+                return cached.Image;
+            }
+
+            cached.Image?.Dispose();
+            _images.Remove(app.Key);
+        }
+
         Image? image = null;
         if (File.Exists(app.ExecutablePath))
         {
@@ -133,7 +144,7 @@ internal sealed class TrayIconCache : IDisposable
         // Use Windows' saved snapshot only when the executable has no icon of its own.
         if (image is not null)
         {
-            _images[app.Key] = image;
+            _images[app.Key] = new CacheEntry(sourceIdentity, image);
             return image;
         }
         try
@@ -149,15 +160,32 @@ internal sealed class TrayIconCache : IDisposable
         catch (ArgumentException) { }
         catch (IOException) { }
 
-        _images[app.Key] = image;
+        _images[app.Key] = new CacheEntry(sourceIdentity, image);
         return image;
+    }
+
+    internal static string GetSourceIdentity(string executablePath)
+    {
+        try
+        {
+            var file = new FileInfo(executablePath);
+            return file.Exists
+                ? $"{file.FullName}|{file.Length}|{file.LastWriteTimeUtc.Ticks}"
+                : executablePath;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return executablePath;
+        }
     }
 
     public void Dispose()
     {
-        foreach (var image in _images.Values) image?.Dispose();
+        foreach (var entry in _images.Values) entry.Image?.Dispose();
         _images.Clear();
     }
+
+    private sealed record CacheEntry(string SourceIdentity, Image? Image);
 }
 
 internal static class TrayAppLauncher
