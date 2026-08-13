@@ -13,12 +13,14 @@ internal sealed record AiProviderUsageValue(
     public static AiProviderUsageValue Unavailable(string reason) =>
         new(false, 0, null, reason);
 
+    public int RemainingPercent => AiProviderUsagePolicy.ClampUsedPercent(100 - UsedPercent);
+
     public string RenderedText => Available
-        ? $"{UsedPercent.ToString(CultureInfo.InvariantCulture)}%"
+        ? $"{RemainingPercent.ToString(CultureInfo.InvariantCulture)}%"
         : "\u2014";
 
     public string RenderedToken => Available
-        ? UsedPercent.ToString(CultureInfo.InvariantCulture)
+        ? RemainingPercent.ToString(CultureInfo.InvariantCulture)
         : "\u2014";
 
     internal bool CanRetainAt(DateTimeOffset nowUtc) =>

@@ -462,7 +462,7 @@ internal static class Program
             ProviderUsageReadResult.Unavailable("signed out"),
             now.AddDays(1));
         return !noResetResult.Codex.Available &&
-               current.RenderedText == "60%" &&
+               current.RenderedText == "40%" &&
                AiProviderUsageValue.Unavailable("test").RenderedText == "\u2014";
     }
 
