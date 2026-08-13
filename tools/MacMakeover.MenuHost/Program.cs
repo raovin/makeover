@@ -10,6 +10,7 @@ internal static class Program
 {
     private const string PipeName = "MacMakeover.MenuHost";
     private const string MutexName = "Local\\MacMakeover.MenuHost";
+    internal const int PipeServerCapacity = 8;
 
     [STAThread]
     private static void Main(string[] args)
@@ -94,9 +95,11 @@ internal static class Program
             var decisionMatrix =
                 MenuForm.ShouldDismissSystemSwitcher(true, TimeSpan.Zero, original, original, own) &&
                 !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(200), original, current, own) &&
-                MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, current, own) &&
+                !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, current, own) &&
                 !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, original, own) &&
-                !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, own, own);
+                !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, own, own) &&
+                MenuForm.SleepActionSelfTest() &&
+                PipeServerCapacity >= 2;
             if (!decisionMatrix) return 4;
             if (!interactiveAltTab) return 0;
 
@@ -159,15 +162,40 @@ internal static class Program
     {
         while (!context.IsDisposed)
         {
+            NamedPipeServerStream? server = null;
             try
             {
-                await using var server = new NamedPipeServerStream(
+                server = new NamedPipeServerStream(
                     PipeName,
                     PipeDirection.In,
-                    1,
+                    PipeServerCapacity,
                     PipeTransmissionMode.Byte,
                     PipeOptions.Asynchronous);
                 await server.WaitForConnectionAsync(context.Token).ConfigureAwait(false);
+                _ = HandlePipeClientAsync(server, context);
+                server = null;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch
+            {
+                await Task.Delay(150).ConfigureAwait(false);
+            }
+            finally
+            {
+                server?.Dispose();
+            }
+        }
+    }
+
+    private static async Task HandlePipeClientAsync(NamedPipeServerStream server, MenuContext context)
+    {
+        await using (server)
+        {
+            try
+            {
                 using var reader = new StreamReader(server, Encoding.UTF8, leaveOpen: true);
                 var command = await reader.ReadLineAsync(context.Token).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(command))
@@ -177,11 +205,11 @@ internal static class Program
             }
             catch (OperationCanceledException)
             {
-                return;
+                // The host is shutting down; the listener will cancel all clients.
             }
-            catch
+            catch (IOException exception)
             {
-                await Task.Delay(150).ConfigureAwait(false);
+                Log("Pipe client failed: " + exception.Message);
             }
         }
     }
@@ -207,7 +235,10 @@ internal sealed class MenuContext : ApplicationContext
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly Control _invoker = new();
+    private readonly object _commandGate = new();
+    private readonly Queue<string> _pendingCommands = new();
     private Form? _current;
+    private bool _commandDrainScheduled;
 
     public MenuContext()
     {
@@ -220,9 +251,46 @@ internal sealed class MenuContext : ApplicationContext
 
     public void Post(string command)
     {
-        if (_invoker.IsDisposed) return;
+        lock (_commandGate)
+        {
+            if (IsDisposed || _invoker.IsDisposed) return;
+            _pendingCommands.Enqueue(command);
+            if (_commandDrainScheduled) return;
+            _commandDrainScheduled = true;
+        }
+
         Program.Log("Post " + command);
-        _invoker.BeginInvoke(new Action(() => ShowCommand(command)));
+        try
+        {
+            _invoker.BeginInvoke(new Action(DrainCommands));
+        }
+        catch (ObjectDisposedException)
+        {
+            lock (_commandGate) _commandDrainScheduled = false;
+        }
+        catch (InvalidOperationException)
+        {
+            lock (_commandGate) _commandDrainScheduled = false;
+        }
+    }
+
+    private void DrainCommands()
+    {
+        while (true)
+        {
+            string command;
+            lock (_commandGate)
+            {
+                if (_pendingCommands.Count == 0)
+                {
+                    _commandDrainScheduled = false;
+                    return;
+                }
+                command = _pendingCommands.Dequeue();
+            }
+
+            ShowCommand(command);
+        }
     }
 
     private void ShowCommand(string command)
@@ -287,6 +355,11 @@ internal sealed class MenuContext : ApplicationContext
         if (disposing)
         {
             IsDisposed = true;
+            lock (_commandGate)
+            {
+                _pendingCommands.Clear();
+                _commandDrainScheduled = false;
+            }
             _cts.Cancel();
             _current?.Dispose();
             _invoker.Dispose();
@@ -537,7 +610,7 @@ internal sealed class MenuForm : Form
         form.AddSeparator();
         form.AddItem("Force Quit...", () => Start("taskmgr.exe"), "Ctrl+Shift+Esc");
         form.AddSeparator();
-        form.AddItem("Sleep...", () => Confirm("Sleep", "Put this PC to sleep now?", "rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
+        form.AddItem("Sleep...", ConfirmSleep);
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
         form.AddSeparator();
@@ -579,7 +652,7 @@ internal sealed class MenuForm : Form
         form.AddItem("Show Desktop", ToggleDesktop);
         form.AddSeparator();
         form.AddItem("Lock Screen", () => Start("rundll32.exe", "user32.dll,LockWorkStation"));
-        form.AddItem("Sleep...", () => Confirm("Sleep", "Put this PC to sleep now?", "rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"));
+        form.AddItem("Sleep...", ConfirmSleep);
         form.AddItem("Restart...", () => Confirm("Restart", "Restart this PC now?", "shutdown.exe", "/r /t 0"));
         form.AddItem("Shut Down...", () => Confirm("Shut Down", "Shut down this PC now?", "shutdown.exe", "/s /t 0"));
 
@@ -1250,7 +1323,7 @@ internal sealed class MenuForm : Form
                 foreground,
                 Handle))
         {
-            Program.Log($"Closing {Text}: {(altPressed ? "Alt/system switcher detected" : "foreground changed")}");
+            Program.Log($"Closing {Text}: Alt/system switcher detected");
             Close();
         }
     }
@@ -1262,12 +1335,10 @@ internal sealed class MenuForm : Form
         IntPtr foreground,
         IntPtr ownHandle)
     {
-        if (altPressed) return true;
-        if (age.TotalMilliseconds < 420) return false;
-        return foregroundAtShown != IntPtr.Zero &&
-               foreground != IntPtr.Zero &&
-               foreground != ownHandle &&
-               foreground != foregroundAtShown;
+        // A normal foreground change is not evidence of Alt+Tab. Outside-click
+        // dismissal remains owned by CloseAfterOutsideClick; this decision is only
+        // for an observed Alt-down/system-switcher transition.
+        return altPressed;
     }
 
     private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -1311,6 +1382,53 @@ internal sealed class MenuForm : Form
         if (MessageBox.Show(message, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
         {
             Start(fileName, arguments);
+        }
+    }
+
+    internal static bool SleepActionSelfTest()
+    {
+        var calls = 0;
+        var declined = ExecuteConfirmedSleep(
+            confirmed: false,
+            suspend: () =>
+            {
+                calls++;
+                return true;
+            });
+        var accepted = ExecuteConfirmedSleep(
+            confirmed: true,
+            suspend: () =>
+            {
+                calls++;
+                return true;
+            });
+        return !declined && accepted && calls == 1;
+    }
+
+    internal static bool ExecuteConfirmedSleep(bool confirmed, Func<bool> suspend)
+    {
+        if (!confirmed) return false;
+        return suspend();
+    }
+
+    private static void ConfirmSleep()
+    {
+        var confirmed = MessageBox.Show(
+            "Put this PC to sleep now?",
+            "Sleep",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning) == DialogResult.Yes;
+        if (!confirmed) return;
+
+        var suspended = ExecuteConfirmedSleep(
+            confirmed,
+            () => NativeMethods.SetSuspendState(
+                hibernate: false,
+                forceCritical: false,
+                disableWakeEvent: false));
+        if (!suspended)
+        {
+            Program.Log("SetSuspendState returned false; the PC was not suspended.");
         }
     }
 
@@ -1465,6 +1583,13 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetSuspendState(
+        bool hibernate,
+        bool forceCritical,
+        bool disableWakeEvent);
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);

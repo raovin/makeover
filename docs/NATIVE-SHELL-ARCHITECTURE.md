@@ -43,6 +43,13 @@ The current visual target is captured in
   easy to misclassify and was removed as a reliability risk.
 - Display changes rebuild one bar per active monitor.
 
+Display changes are debounced on the UI thread. Every old bar explicitly releases
+its AppBar with `ABM_REMOVE` while its HWND is still valid, then is synchronously
+closed and disposed before any replacement calls `ABM_NEW`. Repeated Windows display
+notifications therefore cannot overlap old and new reservations. Tray artwork prefers the current
+`NotifyIconSettings\IconSnapshot`; its content identity participates in the cache
+key, with a detached bitmap and executable icon fallback.
+
 There are no child controls, web views, plugin hosts, global mouse hooks, or
 synthetic window movers. Telemetry rejects overlapping samples.
 
@@ -61,6 +68,15 @@ Panels paint immediately. Wi-Fi and Bluetooth settle independently in under one
 second on the laptop; the slower brightness WMI probe cannot hold them up. The
 Core Audio self-test changes the master volume by four percentage points, reads it
 back, restores the original level, and verifies restoration.
+
+MenuHost keeps outside-click dismissal separate from system-switcher dismissal:
+an Alt-down observation closes a no-activate panel, while an ordinary foreground
+change with Alt up is not classified as Alt+Tab. Network and Bluetooth requests
+share an eight-instance named-pipe listener and are drained serially on the UI
+thread, so closely spaced commands replace panels deterministically instead of
+causing a host spawn/retry race. Sleep remains confirmation-gated and calls
+`SetSuspendState(hibernate: false, forceCritical: false, disableWakeEvent: false)`
+directly; it does not shell through `rundll32`.
 
 Show Desktop enumerates real visible application windows on every invocation.
 It therefore stays reversible when the user mixes the corners, Control Center,
@@ -112,6 +128,17 @@ Graceful shutdown removes the gap and restores every native taskbar.
 The dock has no custom task switcher, window mover, or Explorer injection. Windhawk's
 taskbar styler remains installed as rollback material, disabled with its service manual.
 
+Display notifications are debounced and handled on the WinForms UI thread. The
+old gap AppBars explicitly release `ABM_REMOVE` while their HWNDs are valid, then
+the dock forms are closed and disposed synchronously before the next monitor
+enumeration and replacement `ABM_NEW` calls. Shutdown uses the same bounded teardown path.
+
+The resident Supervisor waits until Explorer exists in its own interactive session
+before asking `schtasks.exe` to launch a component. It distinguishes launcher
+failures such as `0xC0000142` (`STATUS_DLL_INIT_FAILED`) from a successful task
+launch whose child is still absent, and applies bounded exponential retry backoff
+instead of polling every missing component every two seconds.
+
 ## Privilege Boundary
 
 This Azure AD profile rejects Explorer HKCU changes from an elevated process.
@@ -137,7 +164,7 @@ and `archive/seelen-ui/scripts/Restore-SeelenProfile.ps1`.
 
 ## Release Gates
 
-1. Build, PowerShell parsing, dock invariants, and real Core Audio test pass.
+1. Build, PowerShell parsing, dock invariants, Awake schedule verification, and real Core Audio test pass.
 2. Exactly one MenuBar, MenuHost, Dock, and managed Awake & Available process run;
    Seelen and YASB do not.
 3. Every monitor reserves both top and bottom work areas.

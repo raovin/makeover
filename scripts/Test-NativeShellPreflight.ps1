@@ -166,10 +166,17 @@ if ($menuBarSource -match 'TrayOverflow|Take\(3\)|Skip\(3\)' -or
     $menuBarSource -notmatch 'foreach \(var app in snapshot\.TrayApps\)') {
   $failures.Add('MenuBar must render every live notification-area app inline without an overflow control.')
 }
+$awakeDirectMenuShow = $awakeContextSource -match 'menu\.Show\(Cursor\.Position\)'
+$awakeAnchorMenuShow = $awakeContextSource -match 'menu\.Show\(\s*_menuAnchor\s*,\s*Point\.Empty\s*\)' -and
+    $awakeContextSource -match '_menuAnchor\.Show\(\)' -and
+    $awakeContextSource -match '_menuAnchor\.Activate\(\)'
 if ($awakeProgramSource -notmatch 'EventWaitHandle' -or
     $awakeProgramSource -notmatch 'showEvent\.Set\(\)' -or
-    $awakeContextSource -notmatch 'ContextMenuStrip\?\.Show\(Cursor\.Position\)') {
-  $failures.Add('Awake & Available no longer activates its existing tray menu when launched again.')
+    $awakeContextSource -notmatch 'ToggleMenuAtCursor\(\)' -or
+    (-not ($awakeDirectMenuShow -or $awakeAnchorMenuShow)) -or
+    $awakeContextSource -notmatch '_lastMenuClosedUtc' -or
+    $awakeContextSource -notmatch 'TimeSpan\.FromMilliseconds\(600\)') {
+  $failures.Add('Awake & Available no longer activates its existing tray menu through the guarded cursor toggle.')
 }
 if ($menuBarSource -match 'EnsureNativeDockZOrder|MonitorNativeDockAsync' -or
     $nativeSource -match 'IsBorderlessFullscreen|FindTaskbarFor') {
@@ -221,6 +228,22 @@ if ($menuBarProgramSource -notmatch 'AppBarRegistrationSelfTest' -or
     $menuBarProgramSource -notmatch 'StartupReassertFollowUp\.ApplyVisibleBoundsOnly' -or
     $menuBarProgramSource -notmatch 'ComputeTopBarBounds') {
   $failures.Add('MenuBar no longer self-tests ABM_NEW acceptance, single-position reassert follow-up, or visible top-bar bounds fallback.')
+}
+if ($menuBarProgramSource -notmatch 'DisplayRebuildPolicy' -or
+    $menuBarProgramSource -notmatch 'DebounceMilliseconds' -or
+    $menuBarProgramSource -notmatch 'DisposeBarsForRebuild' -or
+    $menuBarProgramSource -notmatch 'bar\.Close\(\)' -or
+    $menuBarProgramSource -notmatch 'bar\.Dispose\(\)' -or
+    $menuBarProgramSource -notmatch 'RebuildAfterDisplayChange' -or
+    $menuBarSource -notmatch 'ReleaseAppBarForDisplayRebuild') {
+  $failures.Add('MenuBar display changes are not debounced and synchronously torn down before replacement AppBars are created.')
+}
+if ($trayAppsSource -notmatch 'IconSnapshotIdentity' -or
+    $trayAppsSource -notmatch 'SHA256\.HashData' -or
+    $trayAppsSource -notmatch 'TryLoadIconSnapshot' -or
+    $trayAppsSource -notmatch 'BuildSourceIdentity' -or
+    $trayAppsSource -notmatch 'new Bitmap\(source\)') {
+  $failures.Add('MenuBar tray cache does not use NotifyIconSettings IconSnapshot content identity with detached image fallback.')
 }
 if ($systemStateSource -notmatch 'BuildRenderedNotificationToken' -or
     $systemStateSource -notmatch 'FormatNetworkRate' -or
@@ -293,6 +316,8 @@ if ($dockSource -notmatch '--regression-test' -or
     $regressionSource -notmatch 'Wait-ForReplacement' -or
     $regressionSource -notmatch "MacMakeover Shell - MenuBar" -or
     $regressionSource -notmatch "MacMakeover Shell - Dock" -or
+    $regressionSource -notmatch '--verify-schedule' -or
+    $regressionSource -notmatch 'Passed \(\\d\+\) schedule tests' -or
     $regressionSource -notmatch 'Test-NativeShellProfile\.ps1' -or
     $regressionSource -notmatch 'Supervisor recovers crashed MacMakeover\.MenuBar' -or
     $regressionSource -notmatch 'Supervisor recovers crashed MacMakeover\.Dock') {
@@ -439,9 +464,15 @@ if ($dockSource -notmatch 'LogicalGap = 8' -or
     $dockSource -notmatch 'gapForm\.EnsureReserved\(\)') {
   $failures.Add('Dock no longer owns the approved reversible 8 px work-area gap reservation.')
 }
-if ($dockSource -notmatch 'dispatcher\.InvokeRequired' -or
-    $dockSource -notmatch 'Interlocked\.Exchange\(ref _displayRebuildPending') {
-  $failures.Add('Dock display changes are no longer marshalled and deduplicated on the UI thread.')
+if ($dockSource -notmatch 'dispatcher!?\.InvokeRequired' -or
+    $dockSource -notmatch 'Interlocked\.Exchange\(ref _displayRebuildPending' -or
+    $dockSource -notmatch 'DockDisplayRebuildPolicy' -or
+    $dockSource -notmatch 'RebuildAfterDisplayChange' -or
+    $dockSource -notmatch 'DisposeFormsForRebuild' -or
+    $dockSource -notmatch 'ReleaseAppBarForDisplayRebuild' -or
+    $dockSource -notmatch 'gapForm\.Dispose\(\)' -or
+    $dockSource -notmatch 'form\.Dispose\(\)') {
+  $failures.Add('Dock display changes are no longer marshalled, debounced, and synchronously torn down before replacement AppBars are created.')
 }
 if ($dockSource -match 'class DockBackdropForm' -or
     $workAreaSource -notmatch 'Opacity = 0' -or
@@ -454,6 +485,27 @@ if ($dockSource -match 'class DockBackdropForm' -or
 }
 if ($dockSource -match 'RegisterHotKey|SetWindowsHookEx') {
   $failures.Add('Dock must not own global keyboard hooks.')
+}
+if ($supervisorSource -notmatch 'SupervisorRetryPolicy' -or
+    $supervisorSource -notmatch 'NextBackoffMs' -or
+    $supervisorSource -notmatch 'MaxBackoffMs' -or
+    $supervisorSource -notmatch 'IsExplorerRunningInCurrentSession' -or
+    $supervisorSource -notmatch 'LauncherFailure' -or
+    $supervisorSource -notmatch 'ChildStillAbsent' -or
+    $supervisorSource -notmatch '0xC0000142' -or
+    $supervisorSource -notmatch 'ExplorerProbeDelayMs') {
+  $failures.Add('Supervisor does not classify launcher versus child failures with bounded retry/backoff and interactive Explorer readiness.')
+}
+if ($menuHostSource -notmatch 'PipeServerCapacity = 8' -or
+    $menuHostSource -notmatch 'HandlePipeClientAsync' -or
+    $menuHostSource -notmatch 'DrainCommands' -or
+    $menuHostSource -notmatch 'return altPressed' -or
+    $menuHostSource -notmatch 'SetSuspendState' -or
+    $menuHostSource -notmatch 'hibernate: false' -or
+    $menuHostSource -notmatch 'forceCritical: false' -or
+    $menuHostSource -notmatch 'disableWakeEvent: false' -or
+    $menuHostSource -match 'powrprof\.dll,SetSuspendState') {
+  $failures.Add('MenuHost pipe serialization, Alt+Tab classification, or confirmation-gated native Sleep contract is incomplete.')
 }
 
 $hostPath = Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'
@@ -481,10 +533,10 @@ if (Test-Path -LiteralPath $menuBarPath) {
 
 $dockPath = Join-Path $DeploymentRoot 'MacMakeover.Dock.exe'
 if (Test-Path -LiteralPath $dockPath) {
-  $dockSelfTest = Start-Process -FilePath $dockPath -ArgumentList '--self-test' `
+  $dockSelfTest = Start-Process -FilePath $dockPath -ArgumentList '--regression-test' `
     -Wait -PassThru -WindowStyle Hidden
   if ($dockSelfTest.ExitCode -ne 0) {
-    $failures.Add("Dock manifest/icon self-test failed with exit code $($dockSelfTest.ExitCode).")
+    $failures.Add("Dock headless regression test failed with exit code $($dockSelfTest.ExitCode).")
   }
 }
 

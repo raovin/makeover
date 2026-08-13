@@ -46,6 +46,44 @@ Do not add a permanent Menu Bar recovery timer or copy the Dock's recovery loop
 into it. The Dock has a separate bounded recovery policy because its full-height
 reservation must repair dropped Explorer work-area state.
 
+Display hotplug notifications can arrive in bursts. Both surfaces debounce those
+notifications and tear down old forms on the UI thread before rebuilding. The
+teardown order is an explicit `ABM_REMOVE`/AppBar release while each old HWND is
+valid, then `Close`, then `Dispose`, before a replacement can call `ABM_NEW`. This
+is a lifecycle guarantee, not a visual-hardware assertion.
+
+## Supervisor launch retry
+
+The Supervisor is started by an interactive scheduled task and can wake before
+Explorer has created the user's shell. In that state it must wait and probe rather
+than repeatedly invoking `schtasks.exe`. Once Explorer exists in the Supervisor's
+session, a nonzero launcher exit is recorded as a launcher failure; a zero exit
+with no child is recorded as a child-state failure. Both use bounded exponential
+backoff, including the observed `0xC0000142 STATUS_DLL_INIT_FAILED` case. A running
+child clears the component's retry state.
+
+## Tray icon snapshots
+
+`NotifyIconSettings\IconSnapshot` is live tray artwork and can change while the
+executable path, size, and timestamp remain unchanged. MenuBar includes a SHA-256
+content identity for the snapshot in its per-key cache identity and prefers the
+snapshot over `ExtractAssociatedIcon`. Snapshot decoding copies into a detached
+bitmap before the registry stream is disposed; malformed or unavailable snapshots
+fall back to the executable icon.
+
+## MenuHost panel and Sleep contracts
+
+Outside-click dismissal is handled by the panel's pointer timer. The system
+switcher decision closes only when Alt is observed down; a normal foreground change
+with Alt up must not be labeled Alt+Tab. Named-pipe requests have bounded listener
+capacity and are serialized through one UI command drain, preserving independent
+Network and Bluetooth commands when they arrive close together.
+
+The Apple and Control Center Sleep actions retain their confirmation prompt and
+invoke native `PowrProf!SetSuspendState` with `hibernate=false`,
+`forceCritical=false`, and `disableWakeEvent=false`. Regression tests exercise the
+confirmation gate with a fake delegate and never call the suspend API.
+
 ## Deployment and Testing
 
 Run promotion from a normal interactive PowerShell window in the repository:
@@ -67,6 +105,10 @@ Supervisor, so run it only when a brief shell interruption is acceptable:
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-NativeShellRegression.ps1 `
   -IncludeInteractiveAltTab -IncludeLiveRecovery
 ```
+
+The nondisruptive suite also runs the staged Awake schedule contract. It invokes
+`AwakeAndAvailable.exe --verify-schedule <temporary-output-path>` and requires
+exit code zero plus a self-test output count matching every passing test line.
 
 The live-recovery suite must finish with exactly one instance of each component
 and a passing `Test-NativeShellProfile.ps1` work-area gate. It reports duplicates

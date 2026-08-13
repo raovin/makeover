@@ -61,6 +61,61 @@ function Invoke-CheckedProcess {
   return $exitCode -eq 0
 }
 
+function Invoke-AwakeScheduleCheck {
+  param(
+    [Parameter(Mandatory)][string]$FilePath,
+    [Parameter(Mandatory)][string]$Name,
+    [int]$TimeoutSeconds = 15
+  )
+
+  if (-not (Test-Path -LiteralPath $FilePath)) {
+    Add-Result $Name $false "Missing executable: $FilePath" 0
+    return
+  }
+
+  $outputPath = Join-Path ([IO.Path]::GetTempPath()) "MacMakeover-awake-schedule-$PID-$stamp.txt"
+  $timer = [Diagnostics.Stopwatch]::StartNew()
+  $process = $null
+  try {
+    $process = Start-Process -FilePath $FilePath `
+      -ArgumentList @('--verify-schedule', $outputPath) `
+      -PassThru -WindowStyle Hidden
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+      $process.Kill($true)
+      $process.WaitForExit()
+      $timer.Stop()
+      Add-Result $Name $false "Timed out after $TimeoutSeconds seconds." $timer.Elapsed.TotalMilliseconds
+      return
+    }
+
+    $exitCode = $process.ExitCode
+    $output = if (Test-Path -LiteralPath $outputPath) {
+      Get-Content -LiteralPath $outputPath -Raw
+    } else {
+      ''
+    }
+    $passedLine = [regex]::Match($output, '(?m)^Passed (\d+) schedule tests:')
+    $passedCount = if ($passedLine.Success) { [int]$passedLine.Groups[1].Value } else { 0 }
+    $checkLines = @($output -split "`r?`n" | Where-Object { $_ -match '^\s+✓ ' }).Count
+    $passed = $exitCode -eq 0 -and
+      $passedLine.Success -and
+      $passedCount -gt 0 -and
+      $passedCount -eq $checkLines -and
+      $output -notmatch '(?im)failed|exception'
+    $detail = "Exit code $exitCode; output reported $passedCount schedule tests and $checkLines passing lines."
+    $timer.Stop()
+    Add-Result $Name $passed $detail $timer.Elapsed.TotalMilliseconds
+  } catch {
+    $timer.Stop()
+    Add-Result $Name $false $_.Exception.Message $timer.Elapsed.TotalMilliseconds
+  } finally {
+    if ($process) { $process.Dispose() }
+    if (Test-Path -LiteralPath $outputPath) {
+      Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 function Wait-ForReplacement {
   param(
     [Parameter(Mandatory)][string]$ProcessName,
@@ -141,28 +196,49 @@ if (-not $SkipBuild) {
 }
 
 $releaseRoot = Join-Path $repoRoot 'tools'
+function Resolve-ReleaseExecutable {
+  param(
+    [Parameter(Mandatory)][string]$ComponentDirectory,
+    [Parameter(Mandatory)][string]$FileName
+  )
+
+  $candidates = @(
+    (Join-Path $releaseRoot "$ComponentDirectory\bin\Release\net10.0-windows\$FileName"),
+    (Join-Path $releaseRoot "$ComponentDirectory\bin\Release\net10.0-windows\win-x64\$FileName")
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+  }
+  return $candidates[0]
+}
+
+$releaseMenuHostPath = Resolve-ReleaseExecutable 'MacMakeover.MenuHost' 'MacMakeover.MenuHost.exe'
+$releaseMenuBarPath = Resolve-ReleaseExecutable 'MacMakeover.MenuBar' 'MacMakeover.MenuBar.exe'
+$releaseDockPath = Resolve-ReleaseExecutable 'MacMakeover.Dock' 'MacMakeover.Dock.exe'
+$releaseSupervisorPath = Resolve-ReleaseExecutable 'MacMakeover.Supervisor' 'MacMakeover.Supervisor.exe'
+$releaseAwakePath = Resolve-ReleaseExecutable 'AwakeAndAvailable' 'AwakeAndAvailable.exe'
 $checks = @(
   @{
     Name = 'Dock Open, Close, context menu, and dynamic application'
-    Path = Join-Path $releaseRoot 'MacMakeover.Dock\bin\Release\net10.0-windows\MacMakeover.Dock.exe'
+    Path = $releaseDockPath
     Args = @('--regression-test')
     Timeout = 20
   },
   @{
     Name = 'Menu bar mixed-DPI telemetry layout'
-    Path = Join-Path $releaseRoot 'MacMakeover.MenuBar\bin\Release\net10.0-windows\MacMakeover.MenuBar.exe'
+    Path = $releaseMenuBarPath
     Args = @('--self-test')
     Timeout = 15
   },
   @{
     Name = 'MenuHost Alt+Tab dismissal decision matrix'
-    Path = Join-Path $releaseRoot 'MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe'
+    Path = $releaseMenuHostPath
     Args = @('--regression-test')
     Timeout = 15
   },
   @{
     Name = 'Supervisor component manifest and session probe'
-    Path = Join-Path $releaseRoot 'MacMakeover.Supervisor\bin\Release\net10.0-windows\MacMakeover.Supervisor.exe'
+    Path = $releaseSupervisorPath
     Args = @('--self-test')
     Timeout = 15
   }
@@ -172,10 +248,16 @@ foreach ($check in $checks) {
   Invoke-CheckedProcess -Name $check.Name -FilePath $check.Path -ArgumentList $check.Args -TimeoutSeconds $check.Timeout | Out-Null
 }
 
+$stagedAwakePath = Join-Path $DeploymentRoot 'AwakeAndAvailable.exe'
+$awakePath = if (Test-Path -LiteralPath $stagedAwakePath) { $stagedAwakePath } else { $releaseAwakePath }
+Invoke-AwakeScheduleCheck `
+  -Name 'Awake schedule self-test is nondisruptive and complete' `
+  -FilePath $awakePath | Out-Null
+
 if ($IncludeInteractiveAltTab) {
   Invoke-CheckedProcess `
     -Name 'Alt+Tab closes a visible Apple panel' `
-    -FilePath (Join-Path $releaseRoot 'MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe') `
+    -FilePath $releaseMenuHostPath `
     -ArgumentList @('--alt-tab-regression-test') `
     -TimeoutSeconds 15 | Out-Null
 }

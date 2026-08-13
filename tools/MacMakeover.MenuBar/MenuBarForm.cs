@@ -277,6 +277,13 @@ internal sealed class MenuBarForm : Form
         _appBarRegistered = false;
     }
 
+    internal void ReleaseAppBarForDisplayRebuild()
+    {
+        // Release while the HWND is still valid; Close may destroy the handle before
+        // Dispose runs, so relying only on OnHandleDestroyed is not deterministic.
+        if (IsHandleCreated) RemoveAppBar();
+    }
+
     private void OnStateChanged(object? sender, EventArgs e)
     {
         if (IsDisposed || !IsHandleCreated) return;

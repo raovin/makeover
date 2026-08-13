@@ -67,6 +67,8 @@ internal static class Program
                SystemStateProvider.FriendlyAppName("acmeeditor", "Quarterly Plan.txt - Acme Editor") == "acmeeditor" &&
                SystemStateProvider.FriendlyAppName("ApplicationFrameHost", "Settings", "Application Frame Host") == "Settings" &&
                TrayAppProvider.ExpandExecutablePath("{F38BF404-1D43-42F2-9305-67DE0B28FC23}\\explorer.exe") == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe") &&
+               TrayIconCacheSelfTest() &&
+               DisplayRebuildSelfTest() &&
                TelemetryLayoutSelfTest() &&
                AppBarRegistrationSelfTest() &&
                RenderedNotificationTokenSelfTest() &&
@@ -75,6 +77,35 @@ internal static class Program
                !MenuBarForm.IsShowDesktopCorner(new Point(8, 0), new Size(1280, 20), 8) &&
                !MenuBarForm.IsShowDesktopCorner(new Point(1271, 8), new Size(1280, 20), 8);
     }
+
+    private static bool TrayIconCacheSelfTest()
+    {
+        var firstSnapshot = new byte[] { 0, 1, 2, 3, 4 };
+        var changedSnapshot = new byte[] { 0, 1, 2, 3, 5 };
+        var firstIdentity = TrayIconCache.GetIconSnapshotIdentity(firstSnapshot);
+        var changedIdentity = TrayIconCache.GetIconSnapshotIdentity(changedSnapshot);
+        var executableIdentity = TrayIconCache.GetSourceIdentity(
+            Path.Combine(Path.GetTempPath(), "MacMakeover", "missing-tray-app.exe"));
+        var firstSource = TrayIconCache.BuildSourceIdentity(executableIdentity, firstIdentity);
+        var changedSource = TrayIconCache.BuildSourceIdentity(executableIdentity, changedIdentity);
+
+        return firstIdentity.Length > 0 &&
+               !firstIdentity.Equals(changedIdentity, StringComparison.OrdinalIgnoreCase) &&
+               !firstSource.Equals(changedSource, StringComparison.OrdinalIgnoreCase) &&
+               TrayIconCache.ShouldRefresh(firstSource, changedSource) &&
+               !TrayIconCache.ShouldRefresh(firstSource, firstSource);
+    }
+
+    private static bool DisplayRebuildSelfTest() =>
+        DisplayRebuildPolicy.DebounceMilliseconds >= 100 &&
+        DisplayRebuildPolicy.ShouldHandleDisplayChange(disposed: false, dispatcherAvailable: true) &&
+        !DisplayRebuildPolicy.ShouldHandleDisplayChange(disposed: false, dispatcherAvailable: false) &&
+        !DisplayRebuildPolicy.ShouldHandleDisplayChange(disposed: true, dispatcherAvailable: true) &&
+        DisplayRebuildPolicy.IsUiThread(uiThreadId: 7, currentThreadId: 7) &&
+        !DisplayRebuildPolicy.IsUiThread(uiThreadId: 7, currentThreadId: 8) &&
+        DisplayRebuildPolicy.Decide(disposed: false, pending: false) == DisplayRebuildAction.Schedule &&
+        DisplayRebuildPolicy.Decide(disposed: true, pending: false) == DisplayRebuildAction.Ignore &&
+        DisplayRebuildPolicy.Decide(disposed: false, pending: true) == DisplayRebuildAction.Rebuild;
 
     private static bool AppBarRegistrationSelfTest()
     {
@@ -253,6 +284,12 @@ internal sealed class MenuBarContext : ApplicationContext
     private readonly string? _previewPower;
     private readonly SystemStateProvider _state = new();
     private readonly List<MenuBarForm> _bars = [];
+    private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
+    private readonly System.Windows.Forms.Timer _displayRebuildTimer = new()
+    {
+        Interval = DisplayRebuildPolicy.DebounceMilliseconds
+    };
+    private bool _displayRebuildPending;
     private bool _disposed;
 
     public MenuBarContext(bool preview, bool previewAll, string? previewPower)
@@ -261,23 +298,63 @@ internal sealed class MenuBarContext : ApplicationContext
         _previewAll = previewAll;
         _previewPower = previewPower;
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        _displayRebuildTimer.Tick += (_, _) => RebuildAfterDisplayChange();
         RebuildBars();
         _state.Start();
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
-        if (_disposed) return;
-        var dispatcher = _bars.FirstOrDefault();
-        if (dispatcher is { IsDisposed: false, IsHandleCreated: true } && dispatcher.InvokeRequired)
+        if (DisplayRebuildPolicy.Decide(_disposed, _displayRebuildPending) == DisplayRebuildAction.Ignore) return;
+        var dispatcher = _bars.FirstOrDefault(form => !form.IsDisposed && form.IsHandleCreated);
+        // During teardown the list is intentionally empty. The active rebuild
+        // enumerates current screens, so this concurrent notification is safely
+        // coalesced instead of touching the UI timer from SystemEvents' thread.
+        if (!DisplayRebuildPolicy.ShouldHandleDisplayChange(_disposed, dispatcher is not null)) return;
+        if (dispatcher!.InvokeRequired)
         {
-            try { dispatcher.BeginInvoke(new Action(() => OnDisplaySettingsChanged(sender, e))); }
+            try { dispatcher.BeginInvoke(new Action(ScheduleDisplayRebuild)); }
             catch (InvalidOperationException) { }
             return;
         }
-        foreach (var bar in _bars.ToArray()) bar.Close();
-        _bars.Clear();
+        ScheduleDisplayRebuild();
+    }
+
+    private void ScheduleDisplayRebuild()
+    {
+        if (!DisplayRebuildPolicy.IsUiThread(_uiThreadId, Environment.CurrentManagedThreadId) || _disposed) return;
+        _displayRebuildPending = true;
+        _displayRebuildTimer.Stop();
+        _displayRebuildTimer.Start();
+    }
+
+    private void RebuildAfterDisplayChange()
+    {
+        if (!DisplayRebuildPolicy.IsUiThread(_uiThreadId, Environment.CurrentManagedThreadId)) return;
+        _displayRebuildTimer.Stop();
+        if (DisplayRebuildPolicy.Decide(_disposed, _displayRebuildPending) != DisplayRebuildAction.Rebuild)
+        {
+            return;
+        }
+
+        _displayRebuildPending = false;
+        DisposeBarsForRebuild();
         RebuildBars();
+    }
+
+    private void DisposeBarsForRebuild()
+    {
+        // Explicit ABM_REMOVE happens in ReleaseAppBarForDisplayRebuild while each
+        // HWND is valid; Close and Dispose then complete synchronously on this UI
+        // thread before replacement bars can be shown.
+        var oldBars = _bars.ToArray();
+        _bars.Clear();
+        foreach (var bar in oldBars)
+        {
+            bar.ReleaseAppBarForDisplayRebuild();
+            if (!bar.IsDisposed) bar.Close();
+            if (!bar.IsDisposed) bar.Dispose();
+        }
     }
 
     private void RebuildBars()
@@ -300,12 +377,34 @@ internal sealed class MenuBarContext : ApplicationContext
         {
             _disposed = true;
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
-            foreach (var bar in _bars.ToArray()) bar.Dispose();
-            _bars.Clear();
+            _displayRebuildTimer.Stop();
+            _displayRebuildTimer.Dispose();
+            DisposeBarsForRebuild();
             _state.Dispose();
         }
         base.Dispose(disposing);
     }
+}
+
+internal enum DisplayRebuildAction
+{
+    Ignore,
+    Schedule,
+    Rebuild
+}
+
+internal static class DisplayRebuildPolicy
+{
+    internal const int DebounceMilliseconds = 200;
+
+    internal static bool ShouldHandleDisplayChange(bool disposed, bool dispatcherAvailable) =>
+        !disposed && dispatcherAvailable;
+
+    internal static bool IsUiThread(int uiThreadId, int currentThreadId) =>
+        uiThreadId == currentThreadId;
+
+    internal static DisplayRebuildAction Decide(bool disposed, bool pending) =>
+        disposed ? DisplayRebuildAction.Ignore : pending ? DisplayRebuildAction.Rebuild : DisplayRebuildAction.Schedule;
 }
 
 internal static class AppLog

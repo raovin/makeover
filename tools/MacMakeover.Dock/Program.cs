@@ -113,6 +113,7 @@ internal static class DockRegressionTests
             if (!TestDockWindowTitle()) return 7;
             if (!TestFileExplorerActivationPolicy()) return 8;
             if (!TestStaleSystemPinPolicy()) return 9;
+            if (!TestDisplayRebuildPolicy()) return 10;
             if (!TestDynamicApp(probePath)) return 2;
             if (!TestPinnedApp(probePath)) return 3;
             return 0;
@@ -327,6 +328,21 @@ internal static class DockRegressionTests
                DockForm.WindowTitle(preview: true) == "Vesper Dock Preview";
     }
 
+    private static bool TestDisplayRebuildPolicy()
+    {
+        return DockDisplayRebuildPolicy.DebounceMilliseconds >= 100 &&
+               DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: false, dispatcherAvailable: true) &&
+               !DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: false, dispatcherAvailable: false) &&
+               !DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: true, dispatcherAvailable: true) &&
+               DockDisplayRebuildPolicy.IsUiThread(uiThreadId: 7, currentThreadId: 7) &&
+               !DockDisplayRebuildPolicy.IsUiThread(uiThreadId: 7, currentThreadId: 8) &&
+               DockDisplayRebuildPolicy.ShouldSchedule(exiting: false) &&
+               !DockDisplayRebuildPolicy.ShouldSchedule(exiting: true) &&
+               DockDisplayRebuildPolicy.ShouldRebuild(exiting: false, rebuilding: false, pending: true) &&
+               !DockDisplayRebuildPolicy.ShouldRebuild(exiting: false, rebuilding: true, pending: true) &&
+               !DockDisplayRebuildPolicy.ShouldRebuild(exiting: true, rebuilding: false, pending: true);
+    }
+
     /// <summary>
     /// Headless coverage for File Explorer dock clicks: folder-window classification must
     /// exclude the shell desktop MainWindowHandle, and launch must use %WINDIR%\explorer.exe
@@ -489,6 +505,11 @@ internal sealed class DockContext : ApplicationContext
     private readonly List<WorkAreaGapForm> _gapForms = [];
     private readonly List<IntPtr> _taskbars = [];
     private readonly System.Windows.Forms.Timer _taskbarGuard = new() { Interval = 1500 };
+    private readonly System.Windows.Forms.Timer _displayRebuildTimer = new()
+    {
+        Interval = DockDisplayRebuildPolicy.DebounceMilliseconds
+    };
+    private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
     private readonly RegisteredWaitHandle _exitRegistration;
     private bool _rebuilding;
     private int _displayRebuildPending;
@@ -506,6 +527,7 @@ internal sealed class DockContext : ApplicationContext
             _taskbarGuard.Start();
         }
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
+        _displayRebuildTimer.Tick += (_, _) => RebuildAfterDisplayChange();
         BuildForms();
         _exitRegistration = ThreadPool.RegisterWaitForSingleObject(exit, (_, _) =>
         {
@@ -538,33 +560,73 @@ internal sealed class DockContext : ApplicationContext
 
     private void OnDisplayChanged(object? sender, EventArgs e)
     {
-        if (_exiting) return;
+        if (!DockDisplayRebuildPolicy.ShouldSchedule(_exiting)) return;
         var dispatcher = _forms.FirstOrDefault(form => form.IsHandleCreated && !form.IsDisposed);
-        if (dispatcher is not null && dispatcher.InvokeRequired)
+        // During teardown both form lists are intentionally empty. The active
+        // rebuild enumerates current screens, so coalesce this notification by
+        // ignoring it rather than touching the UI timer from SystemEvents' thread.
+        if (!DockDisplayRebuildPolicy.ShouldHandleDisplayChange(_exiting, dispatcher is not null)) return;
+        if (dispatcher!.InvokeRequired)
         {
             if (Interlocked.Exchange(ref _displayRebuildPending, 1) != 0) return;
             try
             {
-                dispatcher.BeginInvoke(new Action(() =>
-                {
-                    Interlocked.Exchange(ref _displayRebuildPending, 0);
-                    OnDisplayChanged(sender, e);
-                }));
+                dispatcher.BeginInvoke(new Action(ScheduleDisplayRebuild));
             }
             catch (InvalidOperationException) { Interlocked.Exchange(ref _displayRebuildPending, 0); }
             return;
         }
+        ScheduleDisplayRebuild();
+    }
+
+    private void ScheduleDisplayRebuild()
+    {
+        if (!DockDisplayRebuildPolicy.IsUiThread(_uiThreadId, Environment.CurrentManagedThreadId) ||
+            !DockDisplayRebuildPolicy.ShouldSchedule(_exiting)) return;
+        Interlocked.Exchange(ref _displayRebuildPending, 1);
+        _displayRebuildTimer.Stop();
+        _displayRebuildTimer.Start();
+    }
+
+    private void RebuildAfterDisplayChange()
+    {
+        if (!DockDisplayRebuildPolicy.IsUiThread(_uiThreadId, Environment.CurrentManagedThreadId)) return;
+        _displayRebuildTimer.Stop();
+        var pending = Interlocked.Exchange(ref _displayRebuildPending, 0) != 0;
+        if (!DockDisplayRebuildPolicy.ShouldRebuild(_exiting, _rebuilding, pending)) return;
+
         if (_rebuilding) return;
         _rebuilding = true;
         try
         {
-            foreach (var form in _forms.ToArray()) form.Close();
-            _forms.Clear();
-            foreach (var gapForm in _gapForms.ToArray()) gapForm.Close();
-            _gapForms.Clear();
+            DisposeFormsForRebuild();
             BuildForms();
         }
         finally { _rebuilding = false; }
+    }
+
+    private void DisposeFormsForRebuild()
+    {
+        // This method is called only on the WinForms UI thread. The explicit
+        // ABM_REMOVE above runs while each reservation HWND is valid; Close and
+        // Dispose then synchronously finish handle destruction before BuildForms
+        // can issue ABM_NEW for replacement monitors.
+        var oldGapForms = _gapForms.ToArray();
+        _gapForms.Clear();
+        foreach (var gapForm in oldGapForms)
+        {
+            gapForm.ReleaseAppBarForDisplayRebuild();
+            if (!gapForm.IsDisposed) gapForm.Close();
+            if (!gapForm.IsDisposed) gapForm.Dispose();
+        }
+
+        var oldForms = _forms.ToArray();
+        _forms.Clear();
+        foreach (var form in oldForms)
+        {
+            if (!form.IsDisposed) form.Close();
+            if (!form.IsDisposed) form.Dispose();
+        }
     }
 
     private void HideWindowsTaskbars()
@@ -597,11 +659,28 @@ internal sealed class DockContext : ApplicationContext
         _exitRegistration.Unregister(null);
         _taskbarGuard.Stop();
         _taskbarGuard.Dispose();
-        foreach (var form in _forms.ToArray()) form.Dispose();
-        foreach (var gapForm in _gapForms.ToArray()) gapForm.Dispose();
+        _displayRebuildTimer.Stop();
+        _displayRebuildTimer.Dispose();
+        DisposeFormsForRebuild();
         foreach (var taskbar in _taskbars) NativeMethods.ShowWindow(taskbar, NativeMethods.SwShow);
         base.ExitThreadCore();
     }
+}
+
+internal static class DockDisplayRebuildPolicy
+{
+    internal const int DebounceMilliseconds = 200;
+
+    internal static bool ShouldHandleDisplayChange(bool exiting, bool dispatcherAvailable) =>
+        !exiting && dispatcherAvailable;
+
+    internal static bool IsUiThread(int uiThreadId, int currentThreadId) =>
+        uiThreadId == currentThreadId;
+
+    internal static bool ShouldSchedule(bool exiting) => !exiting;
+
+    internal static bool ShouldRebuild(bool exiting, bool rebuilding, bool pending) =>
+        !exiting && !rebuilding && pending;
 }
 
 internal enum AppBarRecoveryAction
@@ -1075,6 +1154,13 @@ internal sealed class WorkAreaGapForm : Form
         var removal = CreateAppBarData();
         NativeMethods.SHAppBarMessage(NativeMethods.AbmRemove, ref removal);
         _registered = false;
+    }
+
+    internal void ReleaseAppBarForDisplayRebuild()
+    {
+        // Remove while the reservation HWND is still valid; Close can destroy the
+        // handle before Dispose runs, which would otherwise skip ABM_REMOVE.
+        if (IsHandleCreated) TryRemove();
     }
 
     protected override void Dispose(bool disposing)

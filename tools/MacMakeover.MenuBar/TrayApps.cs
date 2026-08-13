@@ -1,5 +1,6 @@
 using Microsoft.Win32;
 using System.Diagnostics;
+using System.Security.Cryptography;
 
 namespace MacMakeover.MenuBar;
 
@@ -7,7 +8,8 @@ internal sealed record TrayAppSnapshot(
     string Key,
     string Name,
     string ExecutablePath,
-    bool Promoted);
+    bool Promoted,
+    string IconSnapshotIdentity = "");
 
 internal static class TrayAppProvider
 {
@@ -22,7 +24,9 @@ internal static class TrayAppProvider
     {
         lock (Gate)
         {
-            if ((DateTime.UtcNow - _captureReadAt).TotalSeconds < 5) return _capture;
+            // Keep the registration identity live enough for an icon snapshot
+            // update to invalidate the per-form image cache promptly.
+            if ((DateTime.UtcNow - _captureReadAt).TotalSeconds < 2) return _capture;
             _captureReadAt = DateTime.UtcNow;
             var registrations = Registrations();
             var runningPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -48,7 +52,12 @@ internal static class TrayAppProvider
                 .Select(group => group.OrderByDescending(item => item.Promoted).First())
                 .OrderBy(item => item.Name.Equals("Awake & Available", StringComparison.OrdinalIgnoreCase) ? 0 : item.Promoted ? 1 : 2)
                 .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
-                .Select(item => new TrayAppSnapshot(item.Key, item.Name, item.ExecutablePath, item.Promoted))
+                .Select(item => new TrayAppSnapshot(
+                    item.Key,
+                    item.Name,
+                    item.ExecutablePath,
+                    item.Promoted,
+                    item.IconSnapshotIdentity))
                 .ToArray();
         }
     }
@@ -66,7 +75,7 @@ internal static class TrayAppProvider
     {
         lock (Gate)
         {
-            if ((DateTime.UtcNow - _registryReadAt).TotalSeconds < 15) return _registrations;
+            if ((DateTime.UtcNow - _registryReadAt).TotalSeconds < 2) return _registrations;
             _registryReadAt = DateTime.UtcNow;
             var registrations = new List<TrayRegistration>();
             try
@@ -83,11 +92,13 @@ internal static class TrayAppProvider
                     var processName = Path.GetFileNameWithoutExtension(executablePath);
                     if (string.IsNullOrWhiteSpace(processName) || IsShellOwned(processName)) continue;
                     var promoted = key?.GetValue("IsPromoted", 0) is int promotedValue && promotedValue != 0;
+                    var iconSnapshot = key?.GetValue("IconSnapshot") as byte[];
                     registrations.Add(new TrayRegistration(
                         keyName,
                         tooltip.Trim(),
                         executablePath,
-                        promoted));
+                        promoted,
+                        TrayIconCache.GetIconSnapshotIdentity(iconSnapshot)));
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -108,7 +119,8 @@ internal static class TrayAppProvider
         string Key,
         string Name,
         string ExecutablePath,
-        bool Promoted);
+        bool Promoted,
+        string IconSnapshotIdentity);
 }
 
 internal sealed class TrayIconCache : IDisposable
@@ -117,10 +129,12 @@ internal sealed class TrayIconCache : IDisposable
 
     public Image? Get(TrayAppSnapshot app)
     {
-        var sourceIdentity = GetSourceIdentity(app.ExecutablePath);
+        var sourceIdentity = BuildSourceIdentity(
+            GetSourceIdentity(app.ExecutablePath),
+            app.IconSnapshotIdentity);
         if (_images.TryGetValue(app.Key, out var cached))
         {
-            if (cached.SourceIdentity.Equals(sourceIdentity, StringComparison.OrdinalIgnoreCase))
+            if (!ShouldRefresh(cached.SourceIdentity, sourceIdentity))
             {
                 return cached.Image;
             }
@@ -129,39 +143,56 @@ internal sealed class TrayIconCache : IDisposable
             _images.Remove(app.Key);
         }
 
-        Image? image = null;
-        if (File.Exists(app.ExecutablePath))
+        // NotifyIconSettings stores the current tray artwork independently of the
+        // executable. Prefer it whenever present so an app can refresh its tray
+        // icon without changing the executable on disk.
+        var image = TryLoadIconSnapshot(app.Key);
+        if (image is null && File.Exists(app.ExecutablePath))
         {
             try
             {
                 using var icon = Icon.ExtractAssociatedIcon(app.ExecutablePath);
-                if (icon is not null) image = new Bitmap(icon.ToBitmap());
+                using var source = icon?.ToBitmap();
+                if (source is not null) image = new Bitmap(source);
             }
             catch (ArgumentException) { }
         }
 
-        // Some apps update their tray artwork independently of the executable.
-        // Use Windows' saved snapshot only when the executable has no icon of its own.
-        if (image is not null)
-        {
-            _images[app.Key] = new CacheEntry(sourceIdentity, image);
-            return image;
-        }
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey($@"Control Panel\NotifyIconSettings\{app.Key}");
-            if (key?.GetValue("IconSnapshot") is byte[] png && png.Length > 0)
-            {
-                using var stream = new MemoryStream(png);
-                using var source = Image.FromStream(stream);
-                image = new Bitmap(source);
-            }
-        }
-        catch (ArgumentException) { }
-        catch (IOException) { }
-
         _images[app.Key] = new CacheEntry(sourceIdentity, image);
         return image;
+    }
+
+    internal static bool ShouldRefresh(string cachedIdentity, string currentIdentity) =>
+        !cachedIdentity.Equals(currentIdentity, StringComparison.OrdinalIgnoreCase);
+
+    internal static string BuildSourceIdentity(string executableIdentity, string? iconSnapshotIdentity) =>
+        $"{executableIdentity}|IconSnapshot:{iconSnapshotIdentity ?? string.Empty}";
+
+    internal static string GetIconSnapshotIdentity(byte[]? snapshot)
+    {
+        if (snapshot is null || snapshot.Length == 0) return string.Empty;
+        return Convert.ToHexString(SHA256.HashData(snapshot));
+    }
+
+    private static Image? TryLoadIconSnapshot(string keyName)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey($@"Control Panel\NotifyIconSettings\{keyName}");
+            if (key?.GetValue("IconSnapshot") is not byte[] png || png.Length == 0) return null;
+            using var stream = new MemoryStream(png, writable: false);
+            using var source = Image.FromStream(
+                stream,
+                useEmbeddedColorManagement: false,
+                validateImageData: true);
+            // Image.FromStream retains the stream, so detach the returned bitmap
+            // before disposing both the registry byte[] owner and the stream.
+            return new Bitmap(source);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Security.SecurityException or OutOfMemoryException)
+        {
+            return null;
+        }
     }
 
     internal static string GetSourceIdentity(string executablePath)
