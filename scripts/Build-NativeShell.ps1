@@ -8,6 +8,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$liveDeploymentRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'MacMakeover\bin'))
+$resolvedDestination = [System.IO.Path]::GetFullPath($Destination)
+if ($resolvedDestination.Equals($liveDeploymentRoot, [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Build-NativeShell.ps1 refuses to publish directly over the running shell. Build to staging, then use the controlled deployment workflow so every component is restarted.'
+}
 $projects = @(
   (Join-Path $repoRoot 'tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj'),
   (Join-Path $repoRoot 'tools\MacMakeover.MenuBar\MacMakeover.MenuBar.csproj'),

@@ -8,6 +8,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly Icon _activeIcon;
     private readonly Icon _inactiveIcon;
     private readonly Form _menuAnchor;
+    private readonly MenuDismissalMonitor _menuDismissalMonitor;
     private readonly System.Windows.Forms.Timer _activityTimer;
     private readonly System.Windows.Forms.Timer _scheduleTimer;
     private readonly System.Windows.Forms.Timer _showMenuTimer;
@@ -54,12 +55,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Opacity = 0,
             Size = new Size(1, 1)
         };
+        _menuDismissalMonitor = new MenuDismissalMonitor(OnGlobalMouseDown);
         _trayIcon = new NotifyIcon
         {
             Icon = CurrentTrayIcon,
             Text = "Awake & Available",
             Visible = true
         };
+        PublishCurrentTrayIcon();
         _trayIcon.DoubleClick += (_, _) => TogglePreventSleep();
         _showMenuTimer = new System.Windows.Forms.Timer { Interval = 150 };
         _showMenuTimer.Tick += (_, _) =>
@@ -91,6 +94,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _menuAnchor.Show();
         _menuAnchor.Activate();
         menu.Show(_menuAnchor, Point.Empty);
+        if (!_menuDismissalMonitor.Start())
+            System.Diagnostics.Debug.WriteLine("Awake menu outside-click monitor could not be started.");
     }
 
     private void RebuildMenu()
@@ -186,12 +191,25 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (oldMenu is not null) oldMenu.Closed -= OnMenuClosed;
         oldMenu?.Dispose();
         _trayIcon.Text = StatusText.Length <= 63 ? StatusText : "Awake & Available";
-        _trayIcon.Icon = CurrentTrayIcon;
+        PublishCurrentTrayIcon();
     }
 
     private Icon CurrentTrayIcon => _preventSleep || _teamsMode != TeamsActivityMode.Off
         ? _activeIcon
         : _inactiveIcon;
+
+    private void PublishCurrentTrayIcon()
+    {
+        _trayIcon.Icon = CurrentTrayIcon;
+        try
+        {
+            TrayIconState.Publish(CurrentTrayIcon);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Debug.WriteLine("Could not publish current Awake tray icon: " + exception.Message);
+        }
+    }
 
     private static Icon? LoadEmbeddedIcon(string resourceName)
     {
@@ -202,6 +220,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private void OnMenuClosed(object? sender, ToolStripDropDownClosedEventArgs e)
     {
         _lastMenuClosedUtc = DateTime.UtcNow;
+        _menuDismissalMonitor.Stop();
         _menuAnchor.Hide();
 
         if (_isExiting)
@@ -211,6 +230,31 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         if (_menuRefreshPending) RebuildMenu();
+    }
+
+    private void OnGlobalMouseDown(Point screenPoint)
+    {
+        if (_trayIcon.ContextMenuStrip is not { IsDisposed: false, Visible: true } menu ||
+            IsInsideDropDown(menu, screenPoint) ||
+            !_menuAnchor.IsHandleCreated ||
+            _menuAnchor.IsDisposed)
+        {
+            return;
+        }
+
+        // WH_MOUSE_LL callbacks are dispatched to the thread that installed the
+        // hook, which is this WinForms UI thread. Close immediately so the normal
+        // ToolStrip auto-close path cannot dispose the menu before a queued
+        // callback runs.
+        menu.Close(ToolStripDropDownCloseReason.AppClicked);
+    }
+
+    private static bool IsInsideDropDown(ToolStripDropDown dropDown, Point screenPoint)
+    {
+        if (dropDown.Visible && dropDown.Bounds.Contains(screenPoint)) return true;
+        return dropDown.Items
+            .OfType<ToolStripMenuItem>()
+            .Any(item => item.DropDown.Visible && IsInsideDropDown(item.DropDown, screenPoint));
     }
 
     private ToolStripMenuItem CreateModeItem(string text, TeamsActivityMode mode)
@@ -540,6 +584,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         _trayIcon.Dispose();
+        _menuDismissalMonitor.Dispose();
         _menuAnchor.Dispose();
         if (!ReferenceEquals(_inactiveIcon, _activeIcon)) _inactiveIcon.Dispose();
         _activeIcon.Dispose();

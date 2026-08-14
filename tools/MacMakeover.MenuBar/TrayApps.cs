@@ -129,9 +129,11 @@ internal sealed class TrayIconCache : IDisposable
 
     public Image? Get(TrayAppSnapshot app)
     {
+        var liveIconPath = GetLiveIconPath(app);
+        var preferredIconPath = liveIconPath ?? app.ExecutablePath;
         var sourceIdentity = BuildSourceIdentity(
-            GetSourceIdentity(app.ExecutablePath),
-            app.IconSnapshotIdentity);
+            GetSourceIdentity(preferredIconPath),
+            liveIconPath is null ? app.IconSnapshotIdentity : string.Empty);
         if (_images.TryGetValue(app.Key, out var cached))
         {
             if (!ShouldRefresh(cached.SourceIdentity, sourceIdentity))
@@ -146,7 +148,7 @@ internal sealed class TrayIconCache : IDisposable
         // NotifyIconSettings stores the current tray artwork independently of the
         // executable. Prefer it whenever present so an app can refresh its tray
         // icon without changing the executable on disk.
-        var image = TryLoadIconSnapshot(app.Key);
+        var image = liveIconPath is null ? TryLoadIconSnapshot(app.Key) : TryLoadIconFile(liveIconPath);
         if (image is null && File.Exists(app.ExecutablePath))
         {
             try
@@ -160,6 +162,32 @@ internal sealed class TrayIconCache : IDisposable
 
         _images[app.Key] = new CacheEntry(sourceIdentity, image);
         return image;
+    }
+
+    private static string? GetLiveIconPath(TrayAppSnapshot app)
+    {
+        if (!Path.GetFileName(app.ExecutablePath).Equals("AwakeAndAvailable.exe", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "AwakeAndAvailable",
+            "current-tray.ico");
+        return File.Exists(path) ? path : null;
+    }
+
+    private static Image? TryLoadIconFile(string path)
+    {
+        try
+        {
+            using var icon = new Icon(path);
+            using var source = icon.ToBitmap();
+            return new Bitmap(source);
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     internal static bool ShouldRefresh(string cachedIdentity, string currentIdentity) =>
