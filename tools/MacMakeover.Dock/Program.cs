@@ -197,9 +197,17 @@ internal static class DockRegressionTests
         try
         {
             var menu = DockForm.BuildContextMenu(item);
-            DockForm.DisposeAfterClose(owner, menu);
+            var outsideClickMonitor = DockForm.DisposeAfterClose(owner, menu);
             menu.Show(owner, Point.Empty);
-            menu.Close(ToolStripDropDownCloseReason.ItemClicked);
+            var outsidePoint = new Point(menu.Right + 1, menu.Bottom + 1);
+            if (!outsideClickMonitor.IsActive ||
+                !ContextMenuOutsideClickMonitor.IsOutside(menu.Bounds, outsidePoint) ||
+                ContextMenuOutsideClickMonitor.IsOutside(menu.Bounds, menu.Bounds.Location))
+            {
+                menu.Dispose();
+                return false;
+            }
+            outsideClickMonitor.DismissAt(outsidePoint);
             var disposed = WaitUntil(() => menu.IsDisposed, TimeSpan.FromSeconds(2));
             if (!disposed) menu.Dispose();
             return disposed && threadException is null;
@@ -1406,10 +1414,12 @@ internal sealed class DockForm : Form
         }
     }
 
-    internal static void DisposeAfterClose(Control dispatcher, ContextMenuStrip menu)
+    internal static ContextMenuOutsideClickMonitor DisposeAfterClose(Control dispatcher, ContextMenuStrip menu)
     {
+        var outsideClickMonitor = new ContextMenuOutsideClickMonitor(dispatcher, menu);
         menu.Closed += (_, _) =>
         {
+            outsideClickMonitor.Dispose();
             if (dispatcher.IsDisposed || !dispatcher.IsHandleCreated) return;
             try
             {
@@ -1420,6 +1430,7 @@ internal sealed class DockForm : Form
                 // The owning Dock is already shutting down.
             }
         };
+        return outsideClickMonitor;
     }
 
     internal static ContextMenuStrip BuildContextMenu(DockItem item)
@@ -1711,6 +1722,76 @@ internal static class WallpaperSlice
             return wallpaper;
         }
         catch { return null; }
+    }
+}
+
+internal sealed class ContextMenuOutsideClickMonitor : IDisposable
+{
+    private readonly Control _dispatcher;
+    private readonly ContextMenuStrip _menu;
+    private readonly NativeMethods.LowLevelMouseProc _callback;
+    private IntPtr _hook;
+    private int _closeQueued;
+    private bool _disposed;
+
+    public ContextMenuOutsideClickMonitor(Control dispatcher, ContextMenuStrip menu)
+    {
+        _dispatcher = dispatcher;
+        _menu = menu;
+        _callback = OnMouseEvent;
+        _hook = NativeMethods.InstallLowLevelMouseHook(_callback);
+        _menu.Disposed += OnMenuDisposed;
+    }
+
+    internal static bool IsOutside(Rectangle menuBounds, Point point) =>
+        !menuBounds.Contains(point);
+
+    internal bool IsActive => _hook != IntPtr.Zero;
+
+    internal void DismissAt(Point point)
+    {
+        if (!_menu.Visible || !IsOutside(_menu.Bounds, point) ||
+            Interlocked.Exchange(ref _closeQueued, 1) != 0) return;
+        try
+        {
+            _dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!_menu.IsDisposed && _menu.Visible)
+                    _menu.Close(ToolStripDropDownCloseReason.AppClicked);
+            }));
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    private IntPtr OnMouseEvent(int code, IntPtr message, IntPtr data)
+    {
+        if (code >= 0 && IsMouseDown(message) && _menu.Visible)
+        {
+            var mouse = Marshal.PtrToStructure<NativeMethods.LowLevelMouseData>(data);
+            DismissAt(new Point(mouse.Point.X, mouse.Point.Y));
+        }
+        return NativeMethods.CallNextHookEx(_hook, code, message, data);
+    }
+
+    private static bool IsMouseDown(IntPtr message)
+    {
+        var value = message.ToInt32();
+        return value is NativeMethods.WmLButtonDown or
+            NativeMethods.WmRButtonDown or
+            NativeMethods.WmMButtonDown or
+            NativeMethods.WmXButtonDown;
+    }
+
+    private void OnMenuDisposed(object? sender, EventArgs args) => Dispose();
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _menu.Disposed -= OnMenuDisposed;
+        var hook = Interlocked.Exchange(ref _hook, IntPtr.Zero);
+        if (hook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(hook);
+        GC.KeepAlive(_callback);
     }
 }
 

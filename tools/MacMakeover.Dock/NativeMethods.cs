@@ -6,6 +6,11 @@ namespace MacMakeover.Dock;
 internal static class NativeMethods
 {
     public const int WmClose = 0x0010;
+    public const int WhMouseLl = 14;
+    public const int WmLButtonDown = 0x0201;
+    public const int WmRButtonDown = 0x0204;
+    public const int WmMButtonDown = 0x0207;
+    public const int WmXButtonDown = 0x020B;
     public const int WsExToolWindow = 0x80;
     public const int WsExAppWindow = 0x00040000;
     public const int WsExTransparent = 0x20;
@@ -85,11 +90,26 @@ internal static class NativeMethods
     public struct ShFileInfo { public IntPtr Icon; public int IconIndex; public uint Attributes; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string DisplayName; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)] public string TypeName; }
 
     public delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+    public delegate IntPtr LowLevelMouseProc(int code, IntPtr message, IntPtr data);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LowLevelMouseData
+    {
+        public NativePoint Point;
+        public uint MouseData;
+        public uint Flags;
+        public uint Time;
+        public IntPtr ExtraInfo;
+    }
 
     [DllImport("shell32.dll")] public static extern UIntPtr SHAppBarMessage(uint message, ref AppBarData data);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SHGetFileInfo(string path, uint attributes, out ShFileInfo info, uint size, uint flags);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)] public static extern void SHCreateItemFromParsingName(string path, IntPtr bindContext, ref Guid interfaceId, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory item);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+    [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int hook, LowLevelMouseProc callback, IntPtr module, uint threadId);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr window, StringBuilder className, int maxCount);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessage(string message);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
@@ -118,4 +138,8 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")] public static extern int GetObject(IntPtr handle, int size, out BitmapObject bitmap);
     [DllImport("gdi32.dll")] public static extern int GetDIBits(IntPtr deviceContext, IntPtr bitmap, uint firstScanLine, uint scanLineCount, IntPtr bits, ref BitmapInfo info, uint usage);
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetModuleHandle(string? moduleName);
+
+    public static IntPtr InstallLowLevelMouseHook(LowLevelMouseProc callback) =>
+        SetWindowsHookEx(WhMouseLl, callback, GetModuleHandle(null), 0);
 }
