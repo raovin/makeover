@@ -13,12 +13,18 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        if (args.Any(value => value.Equals("--probe-window", StringComparison.OrdinalIgnoreCase)))
+        var probeWindowArgument = Array.FindIndex(
+            args,
+            value => value.Equals("--probe-window", StringComparison.OrdinalIgnoreCase));
+        if (probeWindowArgument >= 0)
         {
+            var probeTitle = probeWindowArgument + 1 < args.Length
+                ? args[probeWindowArgument + 1]
+                : "MacMakeover Dynamic Dock Probe";
             ApplicationConfiguration.Initialize();
             Application.Run(new Form
             {
-                Text = "MacMakeover Dynamic Dock Probe",
+                Text = probeTitle,
                 StartPosition = FormStartPosition.Manual,
                 Location = new Point(-30000, -30000),
                 Size = new Size(320, 180),
@@ -136,13 +142,18 @@ internal static class DockRegressionTests
 
     private static bool TestDynamicApp(string probePath)
     {
-        using var probe = StartProbe(probePath);
-        var snapshot = WaitForSnapshot(probe);
+        using var probe = StartProbe(probePath, "MacMakeover Dock Probe One");
+        using var secondProbe = StartProbe(probePath, "MacMakeover Dock Probe Two");
+        var snapshot = WaitForSnapshot(probe, expectedWindows: 2);
         if (snapshot is null) return false;
 
         using var item = new DockItem(snapshot, 28);
         using var menu = DockForm.BuildContextMenu(item);
         if (!HasCommands(menu, "Open", "Pin to Dock", "Close All Windows")) return false;
+        var windowEntries = WindowEntries(menu);
+        if (windowEntries.Count != 2 ||
+            !windowEntries.Any(entry => entry.Text == "MacMakeover Dock Probe One") ||
+            !windowEntries.Any(entry => entry.Text == "MacMakeover Dock Probe Two")) return false;
         if (item.IsPinned || !item.CanPin || !item.CanClose) return false;
         if (!TestContextMenuLifetime(item)) return false;
 
@@ -158,12 +169,15 @@ internal static class DockRegressionTests
         }
         if (PinnedApp.Load().Any(app => app.MatchesProcess(snapshot.ProcessName))) return false;
 
-        NativeMethods.ShowWindow(snapshot.Windows[0], NativeMethods.SwMinimize);
-        if (!WaitUntil(() => NativeMethods.IsIconic(snapshot.Windows[0]), TimeSpan.FromSeconds(2))) return false;
-        menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Open").PerformClick();
-        if (!WaitUntil(() => !NativeMethods.IsIconic(snapshot.Windows[0]), TimeSpan.FromSeconds(2))) return false;
+        secondProbe.Refresh();
+        var secondWindow = secondProbe.MainWindowHandle;
+        NativeMethods.ShowWindow(secondWindow, NativeMethods.SwMinimize);
+        if (!WaitUntil(() => NativeMethods.IsIconic(secondWindow), TimeSpan.FromSeconds(2))) return false;
+        var secondEntry = windowEntries.Single(entry => entry.Text == "MacMakeover Dock Probe Two");
+        secondEntry.PerformClick();
+        if (!WaitUntil(() => !NativeMethods.IsIconic(secondWindow), TimeSpan.FromSeconds(2))) return false;
         menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Close All Windows").PerformClick();
-        return probe.WaitForExit(3000);
+        return probe.WaitForExit(3000) && secondProbe.WaitForExit(3000);
     }
 
     private static bool TestContextMenuLifetime(DockItem item)
@@ -213,6 +227,7 @@ internal static class DockRegressionTests
         using var item = new DockItem(pinned, 28);
         using var menu = DockForm.BuildContextMenu(item);
         if (!HasCommands(menu, "Open", "Remove from Dock", "Close All Windows")) return false;
+        if (WindowEntries(menu).Count != 1) return false;
         if (!item.IsPinned || item.CanPin || !item.CanClose) return false;
 
         NativeMethods.ShowWindow(snapshot.Windows[0], NativeMethods.SwMinimize);
@@ -223,12 +238,16 @@ internal static class DockRegressionTests
         return probe.WaitForExit(3000);
     }
 
-    private static Process StartProbe(string probePath)
+    private static Process StartProbe(string probePath, string? title = null)
     {
-        var process = Process.Start(new ProcessStartInfo(probePath, "--probe-window")
+        var startInfo = new ProcessStartInfo(probePath)
         {
             UseShellExecute = false
-        }) ?? throw new InvalidOperationException("Could not start Dock QA probe.");
+        };
+        startInfo.ArgumentList.Add("--probe-window");
+        if (!string.IsNullOrWhiteSpace(title)) startInfo.ArgumentList.Add(title);
+        var process = Process.Start(startInfo) ??
+                      throw new InvalidOperationException("Could not start Dock QA probe.");
         if (!WaitUntil(() =>
             {
                 process.Refresh();
@@ -241,7 +260,7 @@ internal static class DockRegressionTests
         return process;
     }
 
-    private static RunningAppSnapshot? WaitForSnapshot(Process process)
+    private static RunningAppSnapshot? WaitForSnapshot(Process process, int expectedWindows = 1)
     {
         RunningAppSnapshot? result = null;
         WaitUntil(() =>
@@ -250,7 +269,7 @@ internal static class DockRegressionTests
             if (process.HasExited) return true;
             result = RunningAppSnapshot.Capture(PinnedApp.Load())
                 .FirstOrDefault(snapshot => snapshot.ProcessName.Equals(process.ProcessName, StringComparison.OrdinalIgnoreCase));
-            return result is not null;
+            return result is { Windows.Length: >= 1 } && result.Windows.Length >= expectedWindows;
         }, TimeSpan.FromSeconds(5));
         return result;
     }
@@ -263,6 +282,12 @@ internal static class DockRegressionTests
             .ToArray();
         return expected.All(label => labels.Contains(label, StringComparer.Ordinal));
     }
+
+    private static IReadOnlyList<ToolStripMenuItem> WindowEntries(ContextMenuStrip menu) =>
+        menu.Items
+            .OfType<ToolStripMenuItem>()
+            .Where(item => item.Tag is IntPtr)
+            .ToArray();
 
     private static bool TestAppBarGeometryHelpers()
     {
@@ -1403,8 +1428,26 @@ internal sealed class DockForm : Form
         {
             BackColor = Color.FromArgb(30, 35, 46),
             ForeColor = Color.White,
-            ShowImageMargin = false
+            ShowImageMargin = false,
+            ShowCheckMargin = true
         };
+        var foregroundWindow = NativeMethods.GetForegroundWindow();
+        var windows = item.OpenWindows();
+        foreach (var window in windows)
+        {
+            var entry = new ToolStripMenuItem(FormatWindowTitle(window.Title))
+            {
+                Checked = window.Handle == foregroundWindow,
+                Tag = window.Handle,
+                ToolTipText = window.Title
+            };
+            entry.Click += (_, _) =>
+            {
+                if (!item.ActivateWindow(window.Handle)) System.Media.SystemSounds.Exclamation.Play();
+            };
+            menu.Items.Add(entry);
+        }
+        if (windows.Count > 0) menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Open", null, (_, _) => item.ActivateOrLaunch());
         menu.Items.Add(new ToolStripSeparator());
         if (item.IsPinned)
@@ -1424,6 +1467,14 @@ internal sealed class DockForm : Form
             });
         }
         return menu;
+    }
+
+    internal static string FormatWindowTitle(string title)
+    {
+        const int maximumLength = 72;
+        var normalized = string.Join(' ', title.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (normalized.Length <= maximumLength) return normalized;
+        return string.Concat(normalized.AsSpan(0, maximumLength - 1), "…");
     }
 
     private void OnPinsChanged()
@@ -1718,6 +1769,30 @@ internal sealed class DockItem : IDisposable
     public bool CanPin => _runningApp is { CanPin: true };
     public bool CanClose => _pinnedApp?.HasClosableWindows() ?? _runningApp?.HasClosableWindows() ?? false;
 
+    public IReadOnlyList<DockWindowTarget> OpenWindows()
+    {
+        var handles = _pinnedApp is not null
+            ? _pinnedApp.ClosableWindows()
+            : _runningApp?.WindowHandles() ?? [];
+        return handles
+            .Where(NativeMethods.IsWindow)
+            .Distinct()
+            .Select(window => new DockWindowTarget(
+                window,
+                WindowTitleOrFallback(window),
+                NativeMethods.IsIconic(window)))
+            .ToArray();
+    }
+
+    public bool ActivateWindow(IntPtr window) =>
+        PinnedApp.TryActivateWindows([window]);
+
+    private string WindowTitleOrFallback(IntPtr window)
+    {
+        var title = RunningAppSnapshot.WindowTitle(window);
+        return string.IsNullOrWhiteSpace(title) ? $"{Name} window" : title;
+    }
+
     public bool RefreshPinnedState(IReadOnlySet<string> processes)
     {
         if (_pinnedApp is null) return false;
@@ -1796,6 +1871,11 @@ internal sealed class DockItem : IDisposable
 
     public void Dispose() => _icon?.Dispose();
 }
+
+internal sealed record DockWindowTarget(
+    IntPtr Handle,
+    string Title,
+    bool IsMinimized);
 
 internal sealed record RunningAppSnapshot(
     string Key,
@@ -1887,7 +1967,7 @@ internal sealed record RunningAppSnapshot(
             : string.Empty;
     }
 
-    private static string WindowTitle(IntPtr window)
+    internal static string WindowTitle(IntPtr window)
     {
         var length = NativeMethods.GetWindowTextLength(window);
         if (length <= 0) return string.Empty;
@@ -1959,6 +2039,9 @@ internal sealed class RunningApp
         !string.IsNullOrWhiteSpace(ExecutablePath) &&
         File.Exists(ExecutablePath);
     public bool HasClosableWindows() => _windows.Any(NativeMethods.IsWindow);
+
+    internal IntPtr[] WindowHandles() =>
+        _windows.Where(NativeMethods.IsWindow).ToArray();
 
     public bool Update(RunningAppSnapshot snapshot)
     {
