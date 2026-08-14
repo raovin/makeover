@@ -837,6 +837,12 @@ internal sealed class ClaudeUsageReader : IProviderUsageReader
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // Claude Code emits UTF-8; the /usage summary separates fields with the
+            // middle dot "·" (0xC2 0xB7). Without an explicit encoding the child
+            // stream is decoded with this console-less process' default codepage
+            // (ANSI/Latin-1), which splits "·" into "Â·" and defeats weekly parsing.
+            StandardOutputEncoding = new System.Text.UTF8Encoding(false),
+            StandardInputEncoding = new System.Text.UTF8Encoding(false),
             WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
         };
 
@@ -904,9 +910,13 @@ internal static class ClaudeUsageParser
         out ProviderUsageSample sample)
     {
         sample = default;
+        // The separator between "used" and "resets" is a decorative middle dot in the
+        // CLI output. Match it glyph-agnostically (".*?") so the weekly percentage and
+        // reset timestamp — both ASCII — parse even if that byte sequence is ever
+        // mis-decoded; the anchored prefix and required "resets" keep this precise.
         var match = System.Text.RegularExpressions.Regex.Match(
             line,
-            @"^\s*Current week \(all models\):\s*(?<used>\d{1,3})%\s+used\s+·\s+resets\s+(?<reset>.+?)\s*$",
+            @"^\s*Current week \(all models\):\s*(?<used>\d{1,3})%\s+used\b.*?\bresets\s+(?<reset>.+?)\s*$",
             System.Text.RegularExpressions.RegexOptions.CultureInvariant);
         if (!match.Success ||
             !int.TryParse(match.Groups["used"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var usedPercent) ||

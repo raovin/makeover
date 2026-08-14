@@ -464,6 +464,28 @@ internal static class Program
         {
             return false;
         }
+        // Regression: the live MenuBar rendered "—" because Claude Code's UTF-8 middle
+        // dot (0xC2 0xB7) was decoded with the console-less process' default codepage
+        // and arrived as "Â·". Parsing must tolerate that byte sequence, and the reader
+        // must pin UTF-8 on the child streams so the mis-decode never happens.
+        if (!ClaudeUsageParser.TryParseWeeklySample(
+                "Current week (all models): 33% used Â· resets Aug 17, 6:59am (Europe/London)",
+                now,
+                out var mojibakeSample) ||
+            mojibakeSample.UsedPercent != 33 ||
+            mojibakeSample.WindowResetAtUtc != new DateTimeOffset(2026, 8, 17, 5, 59, 0, TimeSpan.Zero))
+        {
+            return false;
+        }
+        foreach (var claudeProbe in new[] { "claude.cmd", "claude.ps1", "claude.exe" })
+        {
+            var claudeStartInfo = ClaudeUsageReader.BuildStartInfo(claudeProbe);
+            if (claudeStartInfo.StandardOutputEncoding?.CodePage != 65001 ||
+                claudeStartInfo.StandardInputEncoding?.CodePage != 65001)
+            {
+                return false;
+            }
+        }
 
         var grokResponse = """
             {
