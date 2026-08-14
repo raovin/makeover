@@ -152,8 +152,8 @@ internal static class DockRegressionTests
         if (!HasCommands(menu, "Open", "Pin to Dock", "Close All Windows")) return false;
         var windowEntries = WindowEntries(menu);
         if (windowEntries.Count != 2 ||
-            !windowEntries.Any(entry => entry.Text == "MacMakeover Dock Probe One") ||
-            !windowEntries.Any(entry => entry.Text == "MacMakeover Dock Probe Two")) return false;
+            !windowEntries.Any(entry => entry.ToolTipText == "MacMakeover Dock Probe One") ||
+            !windowEntries.Any(entry => entry.ToolTipText == "MacMakeover Dock Probe Two")) return false;
         if (item.IsPinned || !item.CanPin || !item.CanClose) return false;
         if (!TestContextMenuLifetime(item)) return false;
 
@@ -173,7 +173,7 @@ internal static class DockRegressionTests
         var secondWindow = secondProbe.MainWindowHandle;
         NativeMethods.ShowWindow(secondWindow, NativeMethods.SwMinimize);
         if (!WaitUntil(() => NativeMethods.IsIconic(secondWindow), TimeSpan.FromSeconds(2))) return false;
-        var secondEntry = windowEntries.Single(entry => entry.Text == "MacMakeover Dock Probe Two");
+        var secondEntry = windowEntries.Single(entry => entry.ToolTipText == "MacMakeover Dock Probe Two");
         secondEntry.PerformClick();
         if (!WaitUntil(() => !NativeMethods.IsIconic(secondWindow), TimeSpan.FromSeconds(2))) return false;
         menu.Items.Cast<ToolStripItem>().First(entry => entry.Text == "Close All Windows").PerformClick();
@@ -1429,15 +1429,16 @@ internal sealed class DockForm : Form
             BackColor = Color.FromArgb(30, 35, 46),
             ForeColor = Color.White,
             ShowImageMargin = false,
-            ShowCheckMargin = true
+            ShowCheckMargin = false
         };
         var foregroundWindow = NativeMethods.GetForegroundWindow();
         var windows = item.OpenWindows();
         foreach (var window in windows)
         {
-            var entry = new ToolStripMenuItem(FormatWindowTitle(window.Title))
+            var formattedTitle = FormatWindowTitle(window.Title);
+            var entry = new ToolStripMenuItem(
+                window.Handle == foregroundWindow ? $"✓ {formattedTitle}" : formattedTitle)
             {
-                Checked = window.Handle == foregroundWindow,
                 Tag = window.Handle,
                 ToolTipText = window.Title
             };
