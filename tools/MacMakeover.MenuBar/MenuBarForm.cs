@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.IO.Pipes;
+using System.Globalization;
 using System.Text;
+using System.Xml.Linq;
 
 namespace MacMakeover.MenuBar;
 
@@ -29,10 +31,179 @@ internal enum TelemetryKind
 
 internal sealed record TelemetrySegment(TelemetryKind Kind, string Text);
 
+internal static class OpenAiBlossomAsset
+{
+    internal static GraphicsPath? TryLoad(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var document = XDocument.Load(path, LoadOptions.PreserveWhitespace);
+            var pathData = document.Root?
+                .Descendants()
+                .Where(element => element.Name.LocalName.Equals("path", StringComparison.Ordinal))
+                .Select(element => new
+                {
+                    Fill = element.Attribute("fill")?.Value,
+                    Data = element.Attribute("d")?.Value
+                })
+                .FirstOrDefault(candidate =>
+                    candidate.Fill?.Equals("black", StringComparison.OrdinalIgnoreCase) == true &&
+                    !string.IsNullOrWhiteSpace(candidate.Data))?
+                .Data;
+            return string.IsNullOrWhiteSpace(pathData) ? null : SvgPathParser.TryParse(pathData);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
+
+internal static class SvgPathParser
+{
+    private static readonly System.Text.RegularExpressions.Regex TokenPattern =
+        new(@"[A-Za-z]|[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    internal static GraphicsPath? TryParse(string data)
+    {
+        try
+        {
+            var tokens = OpenAiBlossomAssetTokenize(data);
+            var path = new GraphicsPath { FillMode = FillMode.Winding };
+            var index = 0;
+            var command = '\0';
+            var current = PointF.Empty;
+            var figureStart = PointF.Empty;
+            while (index < tokens.Count)
+            {
+                if (IsCommand(tokens[index])) command = tokens[index++][0];
+                if (command == '\0') return DisposeAndReturnNull(path);
+
+                var normalized = char.ToUpperInvariant(command);
+                var relative = char.IsLower(command);
+                switch (normalized)
+                {
+                    case 'M':
+                        if (!TryReadPair(tokens, ref index, out var move)) return DisposeAndReturnNull(path);
+                        current = relative ? Add(current, move) : move;
+                        path.StartFigure();
+                        path.AddLine(current, current);
+                        figureStart = current;
+                        command = relative ? 'l' : 'L';
+                        break;
+                    case 'L':
+                        if (!TryReadPair(tokens, ref index, out var line)) return DisposeAndReturnNull(path);
+                        var lineEnd = relative ? Add(current, line) : line;
+                        path.AddLine(current, lineEnd);
+                        current = lineEnd;
+                        break;
+                    case 'H':
+                        if (!TryReadNumber(tokens, ref index, out var horizontal)) return DisposeAndReturnNull(path);
+                        var horizontalEnd = new PointF(
+                            (float)(relative ? current.X + horizontal : horizontal),
+                            current.Y);
+                        path.AddLine(current, horizontalEnd);
+                        current = horizontalEnd;
+                        break;
+                    case 'V':
+                        if (!TryReadNumber(tokens, ref index, out var vertical)) return DisposeAndReturnNull(path);
+                        var verticalEnd = new PointF(
+                            current.X,
+                            (float)(relative ? current.Y + vertical : vertical));
+                        path.AddLine(current, verticalEnd);
+                        current = verticalEnd;
+                        break;
+                    case 'C':
+                        if (!TryReadPair(tokens, ref index, out var controlOne) ||
+                            !TryReadPair(tokens, ref index, out var controlTwo) ||
+                            !TryReadPair(tokens, ref index, out var cubicEnd))
+                        {
+                            return DisposeAndReturnNull(path);
+                        }
+                        if (relative)
+                        {
+                            controlOne = Add(current, controlOne);
+                            controlTwo = Add(current, controlTwo);
+                            cubicEnd = Add(current, cubicEnd);
+                        }
+                        path.AddBezier(current, controlOne, controlTwo, cubicEnd);
+                        current = cubicEnd;
+                        break;
+                    case 'Z':
+                        path.CloseFigure();
+                        current = figureStart;
+                        command = '\0';
+                        break;
+                    default:
+                        return DisposeAndReturnNull(path);
+                }
+            }
+
+            return path.PointCount == 0 ? DisposeAndReturnNull(path) : path;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static List<string> OpenAiBlossomAssetTokenize(string data) =>
+        TokenPattern.Matches(data).Select(match => match.Value).ToList();
+
+    private static bool IsCommand(string token) =>
+        token.Length == 1 && char.IsLetter(token[0]);
+
+    private static bool TryReadPair(
+        IReadOnlyList<string> tokens,
+        ref int index,
+        out PointF point)
+    {
+        point = default;
+        if (!TryReadNumber(tokens, ref index, out var x) ||
+            !TryReadNumber(tokens, ref index, out var y))
+        {
+            return false;
+        }
+
+        point = new PointF((float)x, (float)y);
+        return true;
+    }
+
+    private static bool TryReadNumber(
+        IReadOnlyList<string> tokens,
+        ref int index,
+        out double value)
+    {
+        if (index >= tokens.Count ||
+            IsCommand(tokens[index]) ||
+            !double.TryParse(tokens[index], NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+        {
+            value = 0;
+            return false;
+        }
+
+        index++;
+        return true;
+    }
+
+    private static PointF Add(PointF left, PointF right) =>
+        new(left.X + right.X, left.Y + right.Y);
+
+    private static GraphicsPath? DisposeAndReturnNull(GraphicsPath path)
+    {
+        path.Dispose();
+        return null;
+    }
+}
+
 internal sealed class MenuBarForm : Form
 {
-    private const int LogicalHeight = 20;
-    private const int LogicalCornerHitSize = 8;
+    internal const int LogicalHeight = 28;
+    internal const int LogicalCornerHitSize = 8;
+    internal const int LogicalProviderIconSize = 15;
+    private const int LegacyLogicalHeight = 20;
     private readonly Screen _screen;
     private readonly SystemStateProvider _state;
     private readonly bool _preview;
@@ -47,6 +218,7 @@ internal sealed class MenuBarForm : Form
     private Font _smallFont = null!;
     private Font _iconFont = null!;
     private Image? _appleMark;
+    private GraphicsPath? _openAiBlossom;
     private uint _appBarCallback;
     private readonly uint _taskbarCreatedMessage;
     private bool _appBarRegistered;
@@ -81,6 +253,9 @@ internal sealed class MenuBarForm : Form
             using var source = Image.FromFile(asset);
             _appleMark = new Bitmap(source);
         }
+
+        var openAiAsset = Path.Combine(AppContext.BaseDirectory, "Assets", "OpenAI-Blossom.svg");
+        _openAiBlossom = OpenAiBlossomAsset.TryLoad(openAiAsset);
 
         _state.Changed += OnStateChanged;
         MouseMove += OnMouseMove;
@@ -309,7 +484,7 @@ internal sealed class MenuBarForm : Form
         {
             e.Graphics.DrawLine(topLine, 0, 0, Width, 0);
         }
-        using (var bottomLine = new Pen(Color.FromArgb(92, 125, 135, 149), Math.Max(1, ScaleValue(0.55F))))
+        using (var bottomLine = new Pen(Color.FromArgb(92, 125, 135, 149), Math.Max(1, ScaleValue(0.7F))))
         {
             e.Graphics.DrawLine(bottomLine, 0, Height - 1, Width, Height - 1);
         }
@@ -326,12 +501,12 @@ internal sealed class MenuBarForm : Form
 
     private int DrawLeft(Graphics graphics, SystemSnapshot snapshot)
     {
-        var x = Scale(8);
-        var appleRect = new Rectangle(x, 0, Scale(26), Height);
+        var x = Scale(11);
+        var appleRect = new Rectangle(x, 0, Scale(36), Height);
         DrawHover(graphics, appleRect, BarAction.Apple);
         if (_appleMark is not null)
         {
-            var icon = Scale(14);
+            var icon = Scale(19);
             graphics.DrawImage(_appleMark, x + (appleRect.Width - icon) / 2, (Height - icon) / 2, icon, icon);
         }
         else
@@ -339,12 +514,12 @@ internal sealed class MenuBarForm : Form
             DrawCenteredText(graphics, "A", _semiboldFont, appleRect, Color.White);
         }
         _hits.Add((appleRect, BarAction.Apple));
-        x = appleRect.Right + Scale(3);
+        x = appleRect.Right + Scale(4);
 
-        var maxWidth = Math.Min(Scale(240), Math.Max(Scale(80), Width / 5));
+        var maxWidth = Math.Min(Scale(336), Math.Max(Scale(112), Width / 5));
         var appSize = TextRenderer.MeasureText(snapshot.ActiveApp, _semiboldFont, new Size(maxWidth, Height),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        var appRect = new Rectangle(x, 0, Math.Min(maxWidth, appSize.Width + Scale(6)), Height);
+        var appRect = new Rectangle(x, 0, Math.Min(maxWidth, appSize.Width + Scale(8)), Height);
         TextRenderer.DrawText(
             graphics,
             snapshot.ActiveApp,
@@ -353,42 +528,42 @@ internal sealed class MenuBarForm : Form
             Color.FromArgb(244, 248, 252),
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
             TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-        return appRect.Right + Scale(10);
+        return appRect.Right + Scale(14);
     }
 
     private int DrawRight(Graphics graphics, SystemSnapshot snapshot)
     {
-        var x = Width - Scale(8);
-        x = DrawRightItem(graphics, x, "\uEA8F", _iconFont, BarAction.Notifications, Scale(28));
+        var x = Width - Scale(11);
+        x = DrawRightItem(graphics, x, "\uEA8F", _iconFont, BarAction.Notifications, Scale(39));
         var dateText = DateTime.Now.ToString("ddd d MMM HH:mm");
-        var dateWidth = TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(12);
+        var dateWidth = TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(17);
         x = DrawRightItem(graphics, x, dateText, _textFont, BarAction.Calendar, dateWidth);
-        x = DrawRightItem(graphics, x, "\uE713", _iconFont, BarAction.ControlCenter, Scale(28));
-        x = DrawRightItem(graphics, x, "\uE767", _iconFont, BarAction.Volume, Scale(28));
-        x = DrawRightItem(graphics, x, "\uE702", _iconFont, BarAction.Bluetooth, Scale(27));
-        x = DrawRightItem(graphics, x, ConnectionGlyph(snapshot.Connection), _iconFont, BarAction.Network, Scale(29));
+        x = DrawRightItem(graphics, x, "\uE713", _iconFont, BarAction.ControlCenter, Scale(39));
+        x = DrawRightItem(graphics, x, "\uE767", _iconFont, BarAction.Volume, Scale(39));
+        x = DrawRightItem(graphics, x, "\uE702", _iconFont, BarAction.Bluetooth, Scale(38));
+        x = DrawRightItem(graphics, x, ConnectionGlyph(snapshot.Connection), _iconFont, BarAction.Network, Scale(41));
         foreach (var app in snapshot.TrayApps)
         {
             x = DrawTrayItem(graphics, x, app);
         }
-        return x - Scale(8);
+        return x - Scale(11);
     }
 
     private int DrawTrayItem(Graphics graphics, int right, TrayAppSnapshot app)
     {
-        var width = Scale(24);
+        var width = Scale(34);
         var rect = new Rectangle(right - width, 0, width, Height);
         if (_hoveredTrayKey?.Equals(app.Key, StringComparison.OrdinalIgnoreCase) == true)
         {
-            var inset = Rectangle.Inflate(rect, -Scale(2), -Scale(3));
+            var inset = Rectangle.Inflate(rect, -Scale(3), -Scale(4));
             using var hover = new SolidBrush(Color.FromArgb(34, 255, 255, 255));
-            using var path = RoundedRectangle(inset, Scale(4));
+            using var path = RoundedRectangle(inset, Scale(5));
             graphics.FillPath(hover, path);
         }
         var image = _trayIcons.Get(app);
         if (image is not null)
         {
-            var size = Scale(14);
+            var size = Scale(19);
             graphics.DrawImage(image, rect.Left + (rect.Width - size) / 2, (Height - size) / 2, size, size);
         }
         else
@@ -410,7 +585,7 @@ internal sealed class MenuBarForm : Form
 
     private void DrawCenter(Graphics graphics, SystemSnapshot snapshot, int leftEnd, int rightStart)
     {
-        var available = rightStart - leftEnd - Scale(16);
+        var available = rightStart - leftEnd - Scale(22);
         if (available <= 0) return;
 
         var candidates = new[]
@@ -464,15 +639,15 @@ internal sealed class MenuBarForm : Form
         var powerMode = PowerModeLabel(snapshot.PowerMode);
         // Keep a permanent slot between the battery and its label so AC status never
         // shifts the rest of the centered telemetry group when power is connected.
-        var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(34);
-        var powerModeWidth = TextRenderer.MeasureText(powerMode, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(6);
+        var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(48);
+        var powerModeWidth = TextRenderer.MeasureText(powerMode, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(8);
         TelemetrySegment[]? segments = null;
         var groupWidth = 0;
         foreach (var candidate in candidates)
         {
             var candidateWidth = candidate.Sum(MeasureTelemetry) +
-                                 Math.Max(0, candidate.Length) * Scale(17) + batteryWidth +
-                                 Scale(17) + powerModeWidth;
+                                 Math.Max(0, candidate.Length) * Scale(24) + batteryWidth +
+                                 Scale(24) + powerModeWidth;
             if (candidateWidth > available) continue;
             segments = candidate;
             groupWidth = candidateWidth;
@@ -480,23 +655,23 @@ internal sealed class MenuBarForm : Form
         }
         if (segments is null) return;
 
-        var minimumX = leftEnd + Scale(8);
-        var maximumX = rightStart - groupWidth - Scale(8);
+        var minimumX = leftEnd + Scale(11);
+        var maximumX = rightStart - groupWidth - Scale(11);
         if (maximumX < minimumX) return;
-        var x = CalculateTelemetryX(Width, groupWidth, leftEnd, rightStart, Scale(8));
+        var x = CalculateTelemetryX(Width, groupWidth, leftEnd, rightStart, Scale(11));
         foreach (var segment in segments)
         {
             var width = MeasureTelemetry(segment);
             DrawTelemetry(graphics, segment, new Rectangle(x, 0, width, Height));
-            x += width + Scale(8);
+            x += width + Scale(11);
             DrawTelemetrySeparator(graphics, x);
-            x += Scale(9);
+            x += Scale(13);
         }
 
         DrawBattery(graphics, new Rectangle(x, 0, batteryWidth, Height), snapshot, battery);
-        x += batteryWidth + Scale(8);
+        x += batteryWidth + Scale(11);
         DrawTelemetrySeparator(graphics, x);
-        x += Scale(9);
+        x += Scale(13);
         DrawPowerMode(graphics, new Rectangle(x, 0, powerModeWidth, Height), snapshot.PowerMode, powerMode);
     }
 
@@ -513,12 +688,16 @@ internal sealed class MenuBarForm : Form
     }
 
     private int MeasureTelemetry(TelemetrySegment segment) =>
-        Scale(14) + TextRenderer.MeasureText(segment.Text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+        Scale(19) + TextRenderer.MeasureText(segment.Text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
 
     private void DrawTelemetry(Graphics graphics, TelemetrySegment segment, Rectangle area)
     {
         var color = Color.FromArgb(228, 233, 239);
-        var icon = new Rectangle(area.Left, area.Top + (area.Height - Scale(11)) / 2, Scale(11), Scale(11));
+        var icon = new Rectangle(
+            area.Left,
+            area.Top + (area.Height - Scale(LogicalProviderIconSize)) / 2,
+            Scale(LogicalProviderIconSize),
+            Scale(LogicalProviderIconSize));
         using var pen = new Pen(color, Math.Max(1F, ScaleValue(1F)))
         {
             StartCap = LineCap.Round,
@@ -529,9 +708,9 @@ internal sealed class MenuBarForm : Form
         switch (segment.Kind)
         {
             case TelemetryKind.Cpu:
-                var chip = Rectangle.Inflate(icon, -Scale(2), -Scale(2));
+                var chip = Rectangle.Inflate(icon, -Scale(3), -Scale(3));
                 graphics.DrawRectangle(pen, chip);
-                for (var offset = Scale(2); offset <= Scale(8); offset += Scale(3))
+                for (var offset = Scale(3); offset <= Scale(12); offset += Scale(4))
                 {
                     graphics.DrawLine(pen, icon.Left + offset, icon.Top, icon.Left + offset, chip.Top);
                     graphics.DrawLine(pen, icon.Left + offset, chip.Bottom, icon.Left + offset, icon.Bottom);
@@ -540,25 +719,25 @@ internal sealed class MenuBarForm : Form
                 }
                 break;
             case TelemetryKind.Memory:
-                var memory = new Rectangle(icon.Left, icon.Top + Scale(2), icon.Width, Scale(7));
+                var memory = new Rectangle(icon.Left, icon.Top + Scale(3), icon.Width, Scale(9));
                 graphics.DrawRectangle(pen, memory);
-                graphics.DrawLine(pen, memory.Left + Scale(2), memory.Bottom, memory.Left + Scale(2), icon.Bottom);
-                graphics.DrawLine(pen, memory.Right - Scale(2), memory.Bottom, memory.Right - Scale(2), icon.Bottom);
-                for (var offset = Scale(2); offset <= Scale(8); offset += Scale(3))
+                graphics.DrawLine(pen, memory.Left + Scale(3), memory.Bottom, memory.Left + Scale(3), icon.Bottom);
+                graphics.DrawLine(pen, memory.Right - Scale(3), memory.Bottom, memory.Right - Scale(3), icon.Bottom);
+                for (var offset = Scale(3); offset <= Scale(12); offset += Scale(4))
                 {
-                    graphics.DrawLine(pen, icon.Left + offset, memory.Top + Scale(2), icon.Left + offset, memory.Bottom - Scale(2));
+                    graphics.DrawLine(pen, icon.Left + offset, memory.Top + Scale(3), icon.Left + offset, memory.Bottom - Scale(3));
                 }
                 break;
             case TelemetryKind.Network:
-                graphics.DrawLine(pen, icon.Left + Scale(3), icon.Bottom, icon.Left + Scale(3), icon.Top + Scale(1));
-                graphics.DrawLine(pen, icon.Left + Scale(1), icon.Top + Scale(3), icon.Left + Scale(3), icon.Top + Scale(1));
-                graphics.DrawLine(pen, icon.Left + Scale(5), icon.Top + Scale(3), icon.Left + Scale(3), icon.Top + Scale(1));
-                graphics.DrawLine(pen, icon.Right - Scale(3), icon.Top, icon.Right - Scale(3), icon.Bottom - Scale(1));
-                graphics.DrawLine(pen, icon.Right - Scale(5), icon.Bottom - Scale(3), icon.Right - Scale(3), icon.Bottom - Scale(1));
-                graphics.DrawLine(pen, icon.Right - Scale(1), icon.Bottom - Scale(3), icon.Right - Scale(3), icon.Bottom - Scale(1));
+                graphics.DrawLine(pen, icon.Left + Scale(4), icon.Bottom, icon.Left + Scale(4), icon.Top + Scale(2));
+                graphics.DrawLine(pen, icon.Left + Scale(1), icon.Top + Scale(5), icon.Left + Scale(4), icon.Top + Scale(2));
+                graphics.DrawLine(pen, icon.Left + Scale(7), icon.Top + Scale(5), icon.Left + Scale(4), icon.Top + Scale(2));
+                graphics.DrawLine(pen, icon.Right - Scale(4), icon.Top, icon.Right - Scale(4), icon.Bottom - Scale(2));
+                graphics.DrawLine(pen, icon.Right - Scale(7), icon.Bottom - Scale(5), icon.Right - Scale(4), icon.Bottom - Scale(2));
+                graphics.DrawLine(pen, icon.Right - Scale(1), icon.Bottom - Scale(5), icon.Right - Scale(4), icon.Bottom - Scale(2));
                 break;
             case TelemetryKind.Codex:
-                DrawCodexMark(graphics, icon, pen);
+                DrawOpenAiMark(graphics, icon, color);
                 break;
             case TelemetryKind.Claude:
                 DrawClaudeMark(graphics, icon, pen);
@@ -571,37 +750,31 @@ internal sealed class MenuBarForm : Form
                 break;
         }
 
-        var textRect = new Rectangle(icon.Right + Scale(3), area.Top, area.Right - icon.Right - Scale(3), area.Height);
+        var textRect = new Rectangle(icon.Right + Scale(4), area.Top, area.Right - icon.Right - Scale(4), area.Height);
         TextRenderer.DrawText(graphics, segment.Text, _smallFont, textRect, color,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
             TextFormatFlags.NoPadding);
     }
 
-    private void DrawCodexMark(Graphics graphics, Rectangle icon, Pen pen)
+    private void DrawOpenAiMark(Graphics graphics, Rectangle icon, Color color)
     {
-        // Small original knot mark: six overlapping loops remain legible at the
-        // same size as the surrounding CPU, memory, and network symbols.
-        var center = new PointF(icon.Left + icon.Width / 2F, icon.Top + icon.Height / 2F);
-        var loopOffset = ScaleValue(1.35F);
-        var loopWidth = ScaleValue(4.2F);
-        var loopHeight = ScaleValue(3.4F);
-        for (var index = 0; index < 6; index++)
-        {
-            var angle = -Math.PI / 2 + index * Math.PI / 3;
-            var loopCenter = new PointF(
-                center.X + (float)Math.Cos(angle) * loopOffset,
-                center.Y + (float)Math.Sin(angle) * loopOffset);
-            var loop = new RectangleF(
-                loopCenter.X - loopWidth / 2F,
-                loopCenter.Y - loopHeight / 2F,
-                loopWidth,
-                loopHeight);
-            using var transform = new Matrix();
-            transform.RotateAt((float)(angle * 180 / Math.PI + 90), loopCenter);
-            graphics.Transform = transform;
-            graphics.DrawEllipse(pen, loop);
-            graphics.ResetTransform();
-        }
+        if (_openAiBlossom is null) return;
+
+        using var mark = (GraphicsPath)_openAiBlossom.Clone();
+        var sourceBounds = mark.GetBounds();
+        var scale = Math.Min(icon.Width / sourceBounds.Width, icon.Height / sourceBounds.Height);
+        var targetLeft = icon.Left + (icon.Width - sourceBounds.Width * scale) / 2F;
+        var targetTop = icon.Top + (icon.Height - sourceBounds.Height * scale) / 2F;
+        using var transform = new Matrix(
+            scale,
+            0F,
+            0F,
+            scale,
+            targetLeft - sourceBounds.Left * scale,
+            targetTop - sourceBounds.Top * scale);
+        mark.Transform(transform);
+        using var brush = new SolidBrush(color);
+        graphics.FillPath(brush, mark);
     }
 
     private void DrawClaudeMark(Graphics graphics, Rectangle icon, Pen pen)
@@ -666,18 +839,18 @@ internal sealed class MenuBarForm : Form
 
     private void DrawTelemetrySeparator(Graphics graphics, int x)
     {
-        using var pen = new Pen(Color.FromArgb(68, 186, 195, 205), Math.Max(1F, ScaleValue(0.5F)));
-        graphics.DrawLine(pen, x, Scale(5), x, Height - Scale(5));
+        using var pen = new Pen(Color.FromArgb(68, 186, 195, 205), Math.Max(1F, ScaleValue(0.7F)));
+        graphics.DrawLine(pen, x, Scale(7), x, Height - Scale(7));
     }
 
     private void DrawBattery(Graphics graphics, Rectangle area, SystemSnapshot snapshot, string label)
     {
         var percent = snapshot.BatteryPercent;
-        var iconWidth = Scale(17);
-        var iconHeight = Scale(9);
-        var iconX = area.Left + Scale(1);
+        var iconWidth = Scale(24);
+        var iconHeight = Scale(13);
+        var iconX = area.Left + Scale(2);
         var iconY = area.Top + (area.Height - iconHeight) / 2;
-        var batteryRect = new Rectangle(iconX, iconY, iconWidth - Scale(2), iconHeight);
+        var batteryRect = new Rectangle(iconX, iconY, iconWidth - Scale(3), iconHeight);
         var color = snapshot.OnAcPower
             ? Color.FromArgb(79, 224, 120)
             : percent < 20 || snapshot.PowerMode == PowerModeKind.Saver
@@ -686,14 +859,14 @@ internal sealed class MenuBarForm : Form
         using var pen = new Pen(color, Math.Max(1, ScaleValue(1F)));
         using var fill = new SolidBrush(color);
         graphics.DrawRectangle(pen, batteryRect);
-        graphics.FillRectangle(fill, batteryRect.Right + Scale(1), batteryRect.Top + Scale(2), Scale(2), Math.Max(1, batteryRect.Height - Scale(4)));
-        var fillWidth = Math.Max(1, (batteryRect.Width - Scale(2)) * percent / 100);
-        graphics.FillRectangle(fill, batteryRect.Left + Scale(1), batteryRect.Top + Scale(1), fillWidth, Math.Max(1, batteryRect.Height - Scale(2)));
+        graphics.FillRectangle(fill, batteryRect.Right + Scale(2), batteryRect.Top + Scale(3), Scale(3), Math.Max(1, batteryRect.Height - Scale(6)));
+        var fillWidth = Math.Max(1, (batteryRect.Width - Scale(3)) * percent / 100);
+        graphics.FillRectangle(fill, batteryRect.Left + Scale(2), batteryRect.Top + Scale(2), fillWidth, Math.Max(1, batteryRect.Height - Scale(3)));
         if (ShowsExternalPowerIndicator(snapshot))
         {
             DrawExternalPowerBolt(graphics, batteryRect);
         }
-        var labelLeft = batteryRect.Right + Scale(15);
+        var labelLeft = batteryRect.Right + Scale(21);
         var labelRect = new Rectangle(labelLeft, area.Top, Math.Max(0, area.Right - labelLeft), area.Height);
         TextRenderer.DrawText(graphics, label, _smallFont, labelRect, color,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
@@ -701,20 +874,20 @@ internal sealed class MenuBarForm : Form
 
     private void DrawExternalPowerBolt(Graphics graphics, Rectangle batteryRect)
     {
-        var centerX = batteryRect.Right + ScaleValue(7F);
+        var centerX = batteryRect.Right + ScaleValue(10F);
         var centerY = batteryRect.Top + batteryRect.Height / 2F;
-        var halfWidth = Math.Max(2.5F, ScaleValue(2.8F));
-        var top = centerY - Math.Max(5F, ScaleValue(5F));
-        var bottom = centerY + Math.Max(5F, ScaleValue(5F));
-        var waist = Math.Max(0.9F, ScaleValue(1F));
+        var halfWidth = Math.Max(3.5F, ScaleValue(4F));
+        var top = centerY - Math.Max(7F, ScaleValue(7F));
+        var bottom = centerY + Math.Max(7F, ScaleValue(7F));
+        var waist = Math.Max(1.2F, ScaleValue(1.4F));
         var points = new[]
         {
             new PointF(centerX + waist, top),
             new PointF(centerX - halfWidth, centerY + ScaleValue(0.25F)),
-            new PointF(centerX - ScaleValue(0.15F), centerY + ScaleValue(0.25F)),
+            new PointF(centerX - ScaleValue(0.2F), centerY + ScaleValue(0.35F)),
             new PointF(centerX - waist, bottom),
             new PointF(centerX + halfWidth, centerY - ScaleValue(0.25F)),
-            new PointF(centerX + ScaleValue(0.15F), centerY - ScaleValue(0.25F))
+            new PointF(centerX + ScaleValue(0.2F), centerY - ScaleValue(0.35F))
         };
         using var bolt = new SolidBrush(Color.FromArgb(103, 238, 142));
         graphics.FillPolygon(bolt, points);
@@ -775,9 +948,9 @@ internal sealed class MenuBarForm : Form
     private void DrawHover(Graphics graphics, Rectangle rect, BarAction action)
     {
         if (_hovered != action) return;
-        var inset = Rectangle.Inflate(rect, -Scale(2), -Scale(3));
+        var inset = Rectangle.Inflate(rect, -Scale(3), -Scale(4));
         using var brush = new SolidBrush(Color.FromArgb(34, 255, 255, 255));
-        using var path = RoundedRectangle(inset, Scale(4));
+        using var path = RoundedRectangle(inset, Scale(5));
         graphics.FillPath(brush, path);
     }
 
@@ -953,13 +1126,17 @@ internal sealed class MenuBarForm : Form
 
     private float DpiScale => Math.Max(1F, DeviceDpi / 96F);
     private float VisualScale => Math.Max(DpiScale, _screen.Primary ? 1F : 1.5F);
-    private int Scale(int logical) => Math.Max(1, (int)Math.Round(logical * VisualScale));
+    private int Scale(int logical) => ScaleLogical(logical, VisualScale);
     private float ScaleValue(float logical) => Math.Max(1F, logical * VisualScale);
+
+    internal static int ScaleLogical(int logical, float scale) =>
+        Math.Max(1, (int)Math.Round(logical * Math.Max(1F, scale)));
 
     private void ConfigureTypography()
     {
         _typography?.Dispose();
         var opticalScale = 1F + ((VisualScale / DpiScale) - 1F) * 0.3F;
+        opticalScale *= LogicalHeight / (float)LegacyLogicalHeight;
         _typography = new Typography(opticalScale);
         _textFont = _typography.Text;
         _semiboldFont = _typography.Emphasis;
@@ -974,6 +1151,7 @@ internal sealed class MenuBarForm : Form
         {
             _state.Changed -= OnStateChanged;
             _appleMark?.Dispose();
+            _openAiBlossom?.Dispose();
             _trayIcons.Dispose();
             _toolTip.Dispose();
             _typography?.Dispose();

@@ -758,9 +758,295 @@ internal sealed class GrokUsageReader : IProviderUsageReader
 
 internal sealed class ClaudeUsageReader : IProviderUsageReader
 {
-    public Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(ProviderUsageReadResult.Unavailable(
-            "Claude Code has no supported noninteractive weekly allowance endpoint"));
+    public async Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
+    {
+        var executable = ProviderExecutableLocator.Find("claude.cmd") ??
+                         ProviderExecutableLocator.Find("claude.ps1") ??
+                         ProviderExecutableLocator.Find("claude.exe");
+        if (executable is null)
+        {
+            return ProviderUsageReadResult.Unavailable(
+                "Claude Code CLI not found; install Claude Code and sign in");
+        }
+
+        using var process = new Process { StartInfo = BuildStartInfo(executable) };
+        try
+        {
+            if (!process.Start())
+            {
+                return ProviderUsageReadResult.Unavailable("Claude Code CLI could not start");
+            }
+        }
+        catch
+        {
+            return ProviderUsageReadResult.Unavailable("Claude Code CLI could not start");
+        }
+
+        // Drain diagnostics without retaining or logging credential-adjacent output.
+        _ = process.StandardError.ReadToEndAsync(cancellationToken);
+        try
+        {
+            await SendAsync(process, "/usage", cancellationToken).ConfigureAwait(false);
+            await SendAsync(process, "/exit", cancellationToken).ConfigureAwait(false);
+            process.StandardInput.Close();
+
+            var stdout = await process.StandardOutput
+                .ReadToEndAsync(cancellationToken)
+                .ConfigureAwait(false);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            if (process.ExitCode != 0)
+            {
+                return ProviderUsageReadResult.Unavailable("Claude Code CLI did not return allowance data");
+            }
+
+            return ClaudeUsageParser.TryParseWeeklySample(
+                stdout,
+                DateTimeOffset.UtcNow,
+                out var sample)
+                ? ProviderUsageReadResult.Fresh(sample)
+                : ProviderUsageReadResult.Unavailable(
+                    "Claude Code CLI did not return a fresh weekly allowance");
+        }
+        catch (OperationCanceledException)
+        {
+            return ProviderUsageReadResult.Unavailable("Claude allowance request timed out");
+        }
+        catch
+        {
+            return ProviderUsageReadResult.Unavailable("Claude allowance request failed");
+        }
+        finally
+        {
+            try { process.StandardInput.Close(); } catch { }
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch { }
+            try { process.WaitForExit(1000); } catch { }
+        }
+    }
+
+    internal static ProcessStartInfo BuildStartInfo(string executablePath)
+    {
+        var extension = Path.GetExtension(executablePath);
+        var startInfo = new ProcessStartInfo
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+
+        if (extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".bat", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+            startInfo.Arguments = $"/d /s /c \"\"{executablePath}\" --ax-screen-reader\"";
+        }
+        else if (extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = "pwsh.exe";
+            startInfo.ArgumentList.Add("-NoLogo");
+            startInfo.ArgumentList.Add("-NoProfile");
+            startInfo.ArgumentList.Add("-NonInteractive");
+            startInfo.ArgumentList.Add("-ExecutionPolicy");
+            startInfo.ArgumentList.Add("Bypass");
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(executablePath);
+            startInfo.ArgumentList.Add("--ax-screen-reader");
+        }
+        else
+        {
+            startInfo.FileName = executablePath;
+            startInfo.ArgumentList.Add("--ax-screen-reader");
+        }
+
+        return startInfo;
+    }
+
+    private static async Task SendAsync(
+        Process process,
+        string command,
+        CancellationToken cancellationToken)
+    {
+        await process.StandardInput.WriteLineAsync(command).ConfigureAwait(false);
+        await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
+internal static class ClaudeUsageParser
+{
+    private const string WeeklyPrefix = "Current week (all models):";
+
+    internal static bool TryParseWeeklySample(
+        string output,
+        DateTimeOffset nowUtc,
+        out ProviderUsageSample sample)
+    {
+        sample = default;
+        if (string.IsNullOrWhiteSpace(output)) return false;
+
+        foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!line.TrimStart().StartsWith(WeeklyPrefix, StringComparison.Ordinal)) continue;
+            if (TryParseWeeklyLine(line, nowUtc, out sample)) return true;
+        }
+
+        return false;
+    }
+
+    internal static bool TryParseWeeklyLine(
+        string line,
+        DateTimeOffset nowUtc,
+        out ProviderUsageSample sample)
+    {
+        sample = default;
+        var match = System.Text.RegularExpressions.Regex.Match(
+            line,
+            @"^\s*Current week \(all models\):\s*(?<used>\d{1,3})%\s+used\s+·\s+resets\s+(?<reset>.+?)\s*$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (!match.Success ||
+            !int.TryParse(match.Groups["used"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var usedPercent) ||
+            usedPercent is < 0 or > 100 ||
+            !TryParseReset(match.Groups["reset"].Value, nowUtc, out var resetAtUtc))
+        {
+            return false;
+        }
+
+        sample = new(
+            usedPercent,
+            resetAtUtc,
+            AiProviderUsagePolicy.WeeklyWindowMinutes);
+        return true;
+    }
+
+    private static bool TryParseReset(
+        string resetText,
+        DateTimeOffset nowUtc,
+        out DateTimeOffset resetAtUtc)
+    {
+        resetAtUtc = default;
+        var match = System.Text.RegularExpressions.Regex.Match(
+            resetText,
+            @"^(?<monthDay>[A-Za-z]{3,9}\s+\d{1,2})(?:,\s*(?<year>\d{4}))?,\s*(?<time>\d{1,2}(?::\d{2})?\s*[AaPp][Mm])(?:\s+\((?<zone>[^)]+)\))?$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (!match.Success ||
+            !DateTime.TryParseExact(
+                match.Groups["monthDay"].Value,
+                ["MMM d", "MMMM d"],
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out var monthDay) ||
+            !DateTime.TryParseExact(
+                match.Groups["time"].Value.Replace(" ", string.Empty, StringComparison.Ordinal),
+                ["h:mmtt", "htt"],
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out var clockTime))
+        {
+            return false;
+        }
+
+        var zoneName = match.Groups["zone"].Success
+            ? match.Groups["zone"].Value.Trim()
+            : string.Empty;
+        if (!TryResolveTimeZone(zoneName, out var timeZone)) return false;
+
+        var localNow = TimeZoneInfo.ConvertTime(nowUtc, timeZone).DateTime;
+        var latestSupportedReset = nowUtc.AddMinutes(AiProviderUsagePolicy.WeeklyWindowMinutes);
+        var hasExplicitYear = match.Groups["year"].Success;
+        var year = hasExplicitYear &&
+                   int.TryParse(match.Groups["year"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedYear)
+            ? parsedYear
+            : localNow.Year;
+
+        for (var attempt = 0; attempt < (hasExplicitYear ? 1 : 2); attempt++)
+        {
+            DateTime localReset;
+            try
+            {
+                localReset = new DateTime(
+                    year,
+                    monthDay.Month,
+                    monthDay.Day,
+                    clockTime.Hour,
+                    clockTime.Minute,
+                    0,
+                    DateTimeKind.Unspecified);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return false;
+            }
+
+            if (!timeZone.IsInvalidTime(localReset))
+            {
+                var offsets = timeZone.IsAmbiguousTime(localReset)
+                    ? timeZone.GetAmbiguousTimeOffsets(localReset)
+                    : [timeZone.GetUtcOffset(localReset)];
+                foreach (var offset in offsets)
+                {
+                    var candidate = new DateTimeOffset(localReset, offset).ToUniversalTime();
+                    if (candidate > nowUtc && candidate <= latestSupportedReset)
+                    {
+                        resetAtUtc = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            if (hasExplicitYear) break;
+            year++;
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveTimeZone(string zoneName, out TimeZoneInfo timeZone)
+    {
+        if (string.IsNullOrWhiteSpace(zoneName))
+        {
+            timeZone = TimeZoneInfo.Local;
+            return true;
+        }
+
+        if (zoneName.Equals("UTC", StringComparison.OrdinalIgnoreCase) ||
+            zoneName.Equals("Etc/UTC", StringComparison.OrdinalIgnoreCase) ||
+            zoneName.Equals("GMT", StringComparison.OrdinalIgnoreCase))
+        {
+            timeZone = TimeZoneInfo.Utc;
+            return true;
+        }
+
+        try
+        {
+            timeZone = TimeZoneInfo.FindSystemTimeZoneById(zoneName);
+            return true;
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            // Windows uses a different identifier for the IANA London zone.
+            if (zoneName.Equals("Europe/London", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    timeZone = TimeZoneInfo.FindSystemTimeZoneById("GMT Standard Time");
+                    return true;
+                }
+                catch (TimeZoneNotFoundException) { }
+                catch (InvalidTimeZoneException) { }
+            }
+        }
+        catch (InvalidTimeZoneException)
+        {
+        }
+
+        timeZone = TimeZoneInfo.Utc;
+        return false;
+    }
 }
 
 internal static class GeminiUsageParser

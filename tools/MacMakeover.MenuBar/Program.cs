@@ -70,6 +70,7 @@ internal static class Program
                TrayIconCacheSelfTest() &&
                DisplayRebuildSelfTest() &&
                TelemetryLayoutSelfTest() &&
+               OpenAiBlossomSelfTest() &&
                AppBarRegistrationSelfTest() &&
                ProviderUsageSelfTest() &&
                RenderedNotificationTokenSelfTest() &&
@@ -393,6 +394,50 @@ internal static class Program
             """.Replace("__RESET__", expiredReset.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (CodexUsageParser.TryParseWeeklySample(expiredResponse, now, out _)) return false;
 
+        var claudeOutput = """
+            Current session: 0% used
+            Current week (all models): 30% used · resets Aug 17, 6:59am (Europe/London)
+            """;
+        if (!ClaudeUsageParser.TryParseWeeklySample(claudeOutput, now, out var claudeSample) ||
+            claudeSample.UsedPercent != 30 ||
+            claudeSample.WindowDurationMinutes != AiProviderUsagePolicy.WeeklyWindowMinutes ||
+            claudeSample.WindowResetAtUtc != new DateTimeOffset(2026, 8, 17, 5, 59, 0, TimeSpan.Zero) ||
+            new AiProviderUsageValue(
+                true,
+                claudeSample.UsedPercent,
+                claudeSample.WindowResetAtUtc,
+                string.Empty).RenderedText != "70%")
+        {
+            return false;
+        }
+        if (ClaudeUsageParser.TryParseWeeklySample("Current session: 30% used", now, out _))
+        {
+            return false;
+        }
+        if (ClaudeUsageParser.TryParseWeeklySample(
+                "Current week (all models): 30% used · resets Aug 17, 6:59am (Not/AZone)",
+                now,
+                out _))
+        {
+            return false;
+        }
+        if (ClaudeUsageParser.TryParseWeeklySample(
+                "Current week (all models): 30% used · resets Aug 12, 6:59am (Europe/London)",
+                now,
+                out _))
+        {
+            return false;
+        }
+        var yearRolloverNow = new DateTimeOffset(2026, 12, 31, 23, 30, 0, TimeSpan.Zero);
+        if (!ClaudeUsageParser.TryParseWeeklySample(
+                "Current week (all models): 30% used · resets Jan 1, 1:30am (Europe/London)",
+                yearRolloverNow,
+                out var rolloverSample) ||
+            rolloverSample.WindowResetAtUtc != new DateTimeOffset(2027, 1, 1, 1, 30, 0, TimeSpan.Zero))
+        {
+            return false;
+        }
+
         var grokResponse = """
             {
               "jsonrpc": "2.0",
@@ -481,8 +526,9 @@ internal static class Program
         }
 
         var current = new AiProviderUsageValue(true, 60, now.AddHours(2), string.Empty);
+        var claudeCurrent = new AiProviderUsageValue(true, 30, now.AddHours(2), string.Empty);
         var unavailable = AiProviderUsageValue.Unavailable("test");
-        var previous = new AiProviderUsageSnapshot(current, unavailable, unavailable, unavailable);
+        var previous = new AiProviderUsageSnapshot(current, claudeCurrent, unavailable, unavailable);
         var retained = AiProviderUsagePolicy.ApplyResults(
             previous,
             ProviderUsageReadResult.Unavailable("offline"),
@@ -490,7 +536,11 @@ internal static class Program
             ProviderUsageReadResult.Unavailable("offline"),
             ProviderUsageReadResult.Unavailable("signed out"),
             now.AddHours(1));
-        if (!retained.Codex.Available || retained.Codex.UsedPercent != 60) return false;
+        if (!retained.Codex.Available || retained.Codex.UsedPercent != 60 ||
+            !retained.Claude.Available || retained.Claude.UsedPercent != 30)
+        {
+            return false;
+        }
 
         var reset = AiProviderUsagePolicy.ApplyResults(
             previous,
@@ -499,7 +549,9 @@ internal static class Program
             ProviderUsageReadResult.Unavailable("offline"),
             ProviderUsageReadResult.Unavailable("signed out"),
             now.AddHours(2));
-        if (reset.Codex.Available || !AiProviderUsagePolicy.ExpireIfNeeded(current, now.AddHours(2)).RenderedText.Equals("\u2014", StringComparison.Ordinal))
+        if (reset.Codex.Available || reset.Claude.Available ||
+            !AiProviderUsagePolicy.ExpireIfNeeded(current, now.AddHours(2)).RenderedText.Equals("\u2014", StringComparison.Ordinal) ||
+            !AiProviderUsagePolicy.ExpireIfNeeded(claudeCurrent, now.AddHours(2)).RenderedText.Equals("\u2014", StringComparison.Ordinal))
             return false;
 
         var noReset = new AiProviderUsageValue(true, 20, null, string.Empty);
@@ -517,6 +569,16 @@ internal static class Program
 
     private static bool TelemetryLayoutSelfTest()
     {
+        if (MenuBarForm.LogicalHeight != 28 ||
+            MenuBarForm.LogicalProviderIconSize < 15 ||
+            MenuBarForm.ScaleLogical(MenuBarForm.LogicalHeight, 1.5F) != 42 ||
+            MenuBarForm.ComputeTopBarBounds(
+                    new Rectangle(0, 0, 1920, 1080),
+                    MenuBarForm.ScaleLogical(MenuBarForm.LogicalHeight, 1.5F)).Height != 42)
+        {
+            return false;
+        }
+
         const int width = 1280;
         const int groupWidth = 460;
         const int leftEnd = 150;
@@ -534,6 +596,18 @@ internal static class Program
                normal + groupWidth <= rightStart - 8 &&
                Math.Abs(scaled - normal * 3 / 2) <= 1 &&
                MenuBarForm.CalculateTelemetryX(800, 620, 120, 700, 8) == 128;
+    }
+
+    private static bool OpenAiBlossomSelfTest()
+    {
+        var assetPath = Path.Combine(AppContext.BaseDirectory, "Assets", "OpenAI-Blossom.svg");
+        using var mark = OpenAiBlossomAsset.TryLoad(assetPath);
+        if (mark is null) return false;
+
+        var bounds = mark.GetBounds();
+        return mark.PointCount == 170 &&
+               Math.Abs(bounds.Width - 267.198F) < 0.01F &&
+               Math.Abs(bounds.Height - 264.812F) < 0.01F;
     }
 }
 
