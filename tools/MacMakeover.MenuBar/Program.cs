@@ -144,9 +144,36 @@ internal static class Program
         }
 
         var bounds = MenuBarForm.ComputeTopBarBounds(new Rectangle(100, 200, 1920, 1080), 30);
-        return bounds == new Rectangle(100, 200, 1920, 30) &&
-               MenuBarForm.ComputeTopBarBounds(new Rectangle(0, 0, 1280, 800), 0) ==
-               new Rectangle(0, 0, 1280, 1);
+        if (bounds != new Rectangle(100, 200, 1920, 30) ||
+            MenuBarForm.ComputeTopBarBounds(new Rectangle(0, 0, 1280, 800), 0) !=
+                new Rectangle(0, 0, 1280, 1))
+        {
+            return false;
+        }
+
+        foreach (var (scale, expectedReservationHeight) in new[]
+                 {
+                     (1F, 29),
+                     (1.25F, 36),
+                     (1.5F, 43),
+                     (2F, 57)
+                 })
+        {
+            var visibleHeight = MenuBarForm.ScaleLogical(MenuBarForm.LogicalHeight, scale);
+            if (MenuBarForm.ComputeAppBarReservationHeight(visibleHeight) != expectedReservationHeight)
+            {
+                return false;
+            }
+
+            var reserved = new Rectangle(0, 0, 1920, expectedReservationHeight);
+            if (MenuBarForm.ComputeVisibleBounds(reserved, visibleHeight) !=
+                new Rectangle(0, 0, 1920, visibleHeight))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool RenderedNotificationTokenSelfTest()
@@ -570,11 +597,69 @@ internal static class Program
     private static bool TelemetryLayoutSelfTest()
     {
         if (MenuBarForm.LogicalHeight != 28 ||
-            MenuBarForm.LogicalProviderIconSize < 15 ||
+            MenuBarForm.LogicalProviderIconSize != 12 ||
             MenuBarForm.ScaleLogical(MenuBarForm.LogicalHeight, 1.5F) != 42 ||
             MenuBarForm.ComputeTopBarBounds(
                     new Rectangle(0, 0, 1920, 1080),
                     MenuBarForm.ScaleLogical(MenuBarForm.LogicalHeight, 1.5F)).Height != 42)
+        {
+            return false;
+        }
+
+        if (Math.Abs(MenuBarForm.ComputeTypographyOpticalScale(1.5F, 1.5F) - 1F) > 0.001F ||
+            Math.Abs(MenuBarForm.ComputeTypographyOpticalScale(1.5F, 1F) - 1.15F) > 0.001F)
+        {
+            return false;
+        }
+
+        var at1280 = new[]
+        {
+            new[]
+            {
+                new TelemetrySegment(TelemetryKind.Cpu, "42%"),
+                new TelemetrySegment(TelemetryKind.Memory, "11/32 GB"),
+                new TelemetrySegment(TelemetryKind.Network, "↓1M ↑2M"),
+                new TelemetrySegment(TelemetryKind.Codex, "70%"),
+                new TelemetrySegment(TelemetryKind.Claude, "70%"),
+                new TelemetrySegment(TelemetryKind.Grok, "70%"),
+                new TelemetrySegment(TelemetryKind.Gemini, "70%")
+            },
+            new[]
+            {
+                new TelemetrySegment(TelemetryKind.Cpu, "42%"),
+                new TelemetrySegment(TelemetryKind.Memory, "11/32 GB"),
+                new TelemetrySegment(TelemetryKind.Codex, "70%"),
+                new TelemetrySegment(TelemetryKind.Claude, "70%"),
+                new TelemetrySegment(TelemetryKind.Grok, "70%"),
+                new TelemetrySegment(TelemetryKind.Gemini, "70%")
+            },
+            new[]
+            {
+                new TelemetrySegment(TelemetryKind.Cpu, "42%"),
+                new TelemetrySegment(TelemetryKind.Memory, "11G"),
+                new TelemetrySegment(TelemetryKind.Codex, "70%"),
+                new TelemetrySegment(TelemetryKind.Claude, "70%"),
+                new TelemetrySegment(TelemetryKind.Grok, "70%"),
+                new TelemetrySegment(TelemetryKind.Gemini, "70%")
+            },
+            new[]
+            {
+                new TelemetrySegment(TelemetryKind.Cpu, "42%"),
+                new TelemetrySegment(TelemetryKind.Codex, "70%"),
+                new TelemetrySegment(TelemetryKind.Claude, "70%"),
+                new TelemetrySegment(TelemetryKind.Grok, "70%"),
+                new TelemetrySegment(TelemetryKind.Gemini, "70%")
+            }
+        };
+        var selectedAt1280 = MenuBarForm.SelectTelemetryCandidateIndex(
+            new[] { 900, 700, 560, 420 },
+            availableWidth: 700);
+        if (selectedAt1280 != 1 ||
+            at1280[selectedAt1280].Any(segment => segment.Kind == TelemetryKind.Network) ||
+            at1280[selectedAt1280].Length != 6 ||
+            at1280[selectedAt1280][1].Text != "11/32 GB" ||
+            at1280[selectedAt1280].Count(segment => segment.Kind is
+                TelemetryKind.Codex or TelemetryKind.Claude or TelemetryKind.Grok or TelemetryKind.Gemini) != 4)
         {
             return false;
         }

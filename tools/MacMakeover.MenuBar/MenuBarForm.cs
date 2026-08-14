@@ -202,8 +202,8 @@ internal sealed class MenuBarForm : Form
 {
     internal const int LogicalHeight = 28;
     internal const int LogicalCornerHitSize = 8;
-    internal const int LogicalProviderIconSize = 15;
-    private const int LegacyLogicalHeight = 20;
+    internal const int LogicalProviderIconSize = 12;
+    private const int LogicalTelemetryIconSize = 11;
     private readonly Screen _screen;
     private readonly SystemStateProvider _state;
     private readonly bool _preview;
@@ -377,6 +377,18 @@ internal sealed class MenuBarForm : Form
     internal static Rectangle ComputeTopBarBounds(Rectangle screenBounds, int scaledHeight) =>
         new(screenBounds.Left, screenBounds.Top, screenBounds.Width, Math.Max(1, scaledHeight));
 
+    internal static int ComputeAppBarReservationHeight(int visibleHeight) =>
+        Math.Max(1, visibleHeight) + 1;
+
+    internal static Rectangle ComputeVisibleBounds(
+        Rectangle reservedBounds,
+        int visibleHeight) =>
+        new(
+            reservedBounds.Left,
+            reservedBounds.Top,
+            reservedBounds.Width,
+            Math.Max(1, visibleHeight));
+
     private void RegisterAppBar()
     {
         if (_appBarRegistered) return;
@@ -401,8 +413,9 @@ internal sealed class MenuBarForm : Form
     private void PositionAppBar()
     {
         if (!_appBarRegistered || IsDisposed) return;
-        var height = Scale(LogicalHeight);
-        var desired = ComputeTopBarBounds(_screen.Bounds, height);
+        var visibleHeight = Scale(LogicalHeight);
+        var reservationHeight = ComputeAppBarReservationHeight(visibleHeight);
+        var desired = ComputeTopBarBounds(_screen.Bounds, reservationHeight);
         var data = CreateAppBarData();
         data.Edge = NativeMethods.AbeTop;
         data.Bounds = new NativeMethods.Rect
@@ -414,10 +427,10 @@ internal sealed class MenuBarForm : Form
         };
         NativeMethods.SHAppBarMessage(NativeMethods.AbmQueryPos, ref data);
         data.Bounds.Top = _screen.Bounds.Top;
-        data.Bounds.Bottom = data.Bounds.Top + height;
+        data.Bounds.Bottom = data.Bounds.Top + reservationHeight;
         NativeMethods.SHAppBarMessage(NativeMethods.AbmSetPos, ref data);
-        var bounds = data.Bounds.ToRectangle();
-        ApplyNativeBounds(bounds);
+        var reservedBounds = data.Bounds.ToRectangle();
+        ApplyNativeBounds(ComputeVisibleBounds(reservedBounds, visibleHeight));
     }
 
     /// <summary>
@@ -484,7 +497,7 @@ internal sealed class MenuBarForm : Form
         {
             e.Graphics.DrawLine(topLine, 0, 0, Width, 0);
         }
-        using (var bottomLine = new Pen(Color.FromArgb(92, 125, 135, 149), Math.Max(1, ScaleValue(0.7F))))
+        using (var bottomLine = new Pen(Color.FromArgb(92, 125, 135, 149), Math.Max(1, ScaleValue(0.55F))))
         {
             e.Graphics.DrawLine(bottomLine, 0, Height - 1, Width, Height - 1);
         }
@@ -501,12 +514,12 @@ internal sealed class MenuBarForm : Form
 
     private int DrawLeft(Graphics graphics, SystemSnapshot snapshot)
     {
-        var x = Scale(11);
-        var appleRect = new Rectangle(x, 0, Scale(36), Height);
+        var x = Scale(8);
+        var appleRect = new Rectangle(x, 0, Scale(26), Height);
         DrawHover(graphics, appleRect, BarAction.Apple);
         if (_appleMark is not null)
         {
-            var icon = Scale(19);
+            var icon = Scale(14);
             graphics.DrawImage(_appleMark, x + (appleRect.Width - icon) / 2, (Height - icon) / 2, icon, icon);
         }
         else
@@ -514,12 +527,12 @@ internal sealed class MenuBarForm : Form
             DrawCenteredText(graphics, "A", _semiboldFont, appleRect, Color.White);
         }
         _hits.Add((appleRect, BarAction.Apple));
-        x = appleRect.Right + Scale(4);
+        x = appleRect.Right + Scale(3);
 
-        var maxWidth = Math.Min(Scale(336), Math.Max(Scale(112), Width / 5));
+        var maxWidth = Math.Min(Scale(240), Math.Max(Scale(80), Width / 5));
         var appSize = TextRenderer.MeasureText(snapshot.ActiveApp, _semiboldFont, new Size(maxWidth, Height),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        var appRect = new Rectangle(x, 0, Math.Min(maxWidth, appSize.Width + Scale(8)), Height);
+        var appRect = new Rectangle(x, 0, Math.Min(maxWidth, appSize.Width + Scale(6)), Height);
         TextRenderer.DrawText(
             graphics,
             snapshot.ActiveApp,
@@ -528,42 +541,42 @@ internal sealed class MenuBarForm : Form
             Color.FromArgb(244, 248, 252),
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
             TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-        return appRect.Right + Scale(14);
+        return appRect.Right + Scale(10);
     }
 
     private int DrawRight(Graphics graphics, SystemSnapshot snapshot)
     {
-        var x = Width - Scale(11);
-        x = DrawRightItem(graphics, x, "\uEA8F", _iconFont, BarAction.Notifications, Scale(39));
+        var x = Width - Scale(8);
+        x = DrawRightItem(graphics, x, "\uEA8F", _iconFont, BarAction.Notifications, Scale(28));
         var dateText = DateTime.Now.ToString("ddd d MMM HH:mm");
-        var dateWidth = TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(17);
+        var dateWidth = TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(12);
         x = DrawRightItem(graphics, x, dateText, _textFont, BarAction.Calendar, dateWidth);
-        x = DrawRightItem(graphics, x, "\uE713", _iconFont, BarAction.ControlCenter, Scale(39));
-        x = DrawRightItem(graphics, x, "\uE767", _iconFont, BarAction.Volume, Scale(39));
-        x = DrawRightItem(graphics, x, "\uE702", _iconFont, BarAction.Bluetooth, Scale(38));
-        x = DrawRightItem(graphics, x, ConnectionGlyph(snapshot.Connection), _iconFont, BarAction.Network, Scale(41));
+        x = DrawRightItem(graphics, x, "\uE713", _iconFont, BarAction.ControlCenter, Scale(28));
+        x = DrawRightItem(graphics, x, "\uE767", _iconFont, BarAction.Volume, Scale(28));
+        x = DrawRightItem(graphics, x, "\uE702", _iconFont, BarAction.Bluetooth, Scale(27));
+        x = DrawRightItem(graphics, x, ConnectionGlyph(snapshot.Connection), _iconFont, BarAction.Network, Scale(29));
         foreach (var app in snapshot.TrayApps)
         {
             x = DrawTrayItem(graphics, x, app);
         }
-        return x - Scale(11);
+        return x - Scale(8);
     }
 
     private int DrawTrayItem(Graphics graphics, int right, TrayAppSnapshot app)
     {
-        var width = Scale(34);
+        var width = Scale(24);
         var rect = new Rectangle(right - width, 0, width, Height);
         if (_hoveredTrayKey?.Equals(app.Key, StringComparison.OrdinalIgnoreCase) == true)
         {
-            var inset = Rectangle.Inflate(rect, -Scale(3), -Scale(4));
+            var inset = Rectangle.Inflate(rect, -Scale(2), -Scale(3));
             using var hover = new SolidBrush(Color.FromArgb(34, 255, 255, 255));
-            using var path = RoundedRectangle(inset, Scale(5));
+            using var path = RoundedRectangle(inset, Scale(4));
             graphics.FillPath(hover, path);
         }
         var image = _trayIcons.Get(app);
         if (image is not null)
         {
-            var size = Scale(19);
+            var size = Scale(14);
             graphics.DrawImage(image, rect.Left + (rect.Width - size) / 2, (Height - size) / 2, size, size);
         }
         else
@@ -585,7 +598,7 @@ internal sealed class MenuBarForm : Form
 
     private void DrawCenter(Graphics graphics, SystemSnapshot snapshot, int leftEnd, int rightStart)
     {
-        var available = rightStart - leftEnd - Scale(22);
+        var available = rightStart - leftEnd - Scale(16);
         if (available <= 0) return;
 
         var candidates = new[]
@@ -603,8 +616,7 @@ internal sealed class MenuBarForm : Form
             new[]
             {
                 new TelemetrySegment(TelemetryKind.Cpu, $"{snapshot.CpuPercent}%"),
-                new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0}G"),
-                new TelemetrySegment(TelemetryKind.Network, $"\u2193{FormatRate(snapshot.DownloadBytesPerSecond)} \u2191{FormatRate(snapshot.UploadBytesPerSecond)}"),
+                new TelemetrySegment(TelemetryKind.Memory, $"{snapshot.UsedMemoryGb:0}/{snapshot.TotalMemoryGb:0} GB"),
                 new TelemetrySegment(TelemetryKind.Codex, snapshot.AiUsage.Codex.RenderedText),
                 new TelemetrySegment(TelemetryKind.Claude, snapshot.AiUsage.Claude.RenderedText),
                 new TelemetrySegment(TelemetryKind.Grok, snapshot.AiUsage.Grok.RenderedText),
@@ -639,40 +651,53 @@ internal sealed class MenuBarForm : Form
         var powerMode = PowerModeLabel(snapshot.PowerMode);
         // Keep a permanent slot between the battery and its label so AC status never
         // shifts the rest of the centered telemetry group when power is connected.
-        var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(48);
-        var powerModeWidth = TextRenderer.MeasureText(powerMode, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(8);
+        var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(34);
+        var powerModeWidth = TextRenderer.MeasureText(powerMode, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(6);
         TelemetrySegment[]? segments = null;
         var groupWidth = 0;
-        foreach (var candidate in candidates)
+        var candidateWidths = candidates
+            .Select(candidate => candidate.Sum(MeasureTelemetry) +
+                                 Math.Max(0, candidate.Length) * Scale(17) + batteryWidth +
+                                 Scale(17) + powerModeWidth)
+            .ToArray();
+        var selectedCandidate = SelectTelemetryCandidateIndex(candidateWidths, available);
+        if (selectedCandidate >= 0)
         {
-            var candidateWidth = candidate.Sum(MeasureTelemetry) +
-                                 Math.Max(0, candidate.Length) * Scale(24) + batteryWidth +
-                                 Scale(24) + powerModeWidth;
-            if (candidateWidth > available) continue;
-            segments = candidate;
-            groupWidth = candidateWidth;
-            break;
+            segments = candidates[selectedCandidate];
+            groupWidth = candidateWidths[selectedCandidate];
         }
         if (segments is null) return;
 
-        var minimumX = leftEnd + Scale(11);
-        var maximumX = rightStart - groupWidth - Scale(11);
+        var minimumX = leftEnd + Scale(8);
+        var maximumX = rightStart - groupWidth - Scale(8);
         if (maximumX < minimumX) return;
-        var x = CalculateTelemetryX(Width, groupWidth, leftEnd, rightStart, Scale(11));
+        var x = CalculateTelemetryX(Width, groupWidth, leftEnd, rightStart, Scale(8));
         foreach (var segment in segments)
         {
             var width = MeasureTelemetry(segment);
             DrawTelemetry(graphics, segment, new Rectangle(x, 0, width, Height));
-            x += width + Scale(11);
+            x += width + Scale(8);
             DrawTelemetrySeparator(graphics, x);
-            x += Scale(13);
+            x += Scale(9);
         }
 
         DrawBattery(graphics, new Rectangle(x, 0, batteryWidth, Height), snapshot, battery);
-        x += batteryWidth + Scale(11);
+        x += batteryWidth + Scale(8);
         DrawTelemetrySeparator(graphics, x);
-        x += Scale(13);
+        x += Scale(9);
         DrawPowerMode(graphics, new Rectangle(x, 0, powerModeWidth, Height), snapshot.PowerMode, powerMode);
+    }
+
+    internal static int SelectTelemetryCandidateIndex(
+        IReadOnlyList<int> candidateWidths,
+        int availableWidth)
+    {
+        for (var index = 0; index < candidateWidths.Count; index++)
+        {
+            if (candidateWidths[index] <= availableWidth) return index;
+        }
+
+        return -1;
     }
 
     internal static int CalculateTelemetryX(int width, int groupWidth, int leftEnd, int rightStart, int inset)
@@ -688,16 +713,24 @@ internal sealed class MenuBarForm : Form
     }
 
     private int MeasureTelemetry(TelemetrySegment segment) =>
-        Scale(19) + TextRenderer.MeasureText(segment.Text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+        Scale(TelemetryIconSize(segment.Kind)) +
+        Scale(3) +
+        TextRenderer.MeasureText(segment.Text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+
+    private static int TelemetryIconSize(TelemetryKind kind) =>
+        kind is TelemetryKind.Codex or TelemetryKind.Claude or TelemetryKind.Grok or TelemetryKind.Gemini
+            ? LogicalProviderIconSize
+            : LogicalTelemetryIconSize;
 
     private void DrawTelemetry(Graphics graphics, TelemetrySegment segment, Rectangle area)
     {
         var color = Color.FromArgb(228, 233, 239);
+        var iconSize = TelemetryIconSize(segment.Kind);
         var icon = new Rectangle(
             area.Left,
-            area.Top + (area.Height - Scale(LogicalProviderIconSize)) / 2,
-            Scale(LogicalProviderIconSize),
-            Scale(LogicalProviderIconSize));
+            area.Top + (area.Height - Scale(iconSize)) / 2,
+            Scale(iconSize),
+            Scale(iconSize));
         using var pen = new Pen(color, Math.Max(1F, ScaleValue(1F)))
         {
             StartCap = LineCap.Round,
@@ -708,9 +741,9 @@ internal sealed class MenuBarForm : Form
         switch (segment.Kind)
         {
             case TelemetryKind.Cpu:
-                var chip = Rectangle.Inflate(icon, -Scale(3), -Scale(3));
+                var chip = Rectangle.Inflate(icon, -Scale(2), -Scale(2));
                 graphics.DrawRectangle(pen, chip);
-                for (var offset = Scale(3); offset <= Scale(12); offset += Scale(4))
+                for (var offset = Scale(2); offset <= Scale(8); offset += Scale(3))
                 {
                     graphics.DrawLine(pen, icon.Left + offset, icon.Top, icon.Left + offset, chip.Top);
                     graphics.DrawLine(pen, icon.Left + offset, chip.Bottom, icon.Left + offset, icon.Bottom);
@@ -719,22 +752,22 @@ internal sealed class MenuBarForm : Form
                 }
                 break;
             case TelemetryKind.Memory:
-                var memory = new Rectangle(icon.Left, icon.Top + Scale(3), icon.Width, Scale(9));
+                var memory = new Rectangle(icon.Left, icon.Top + Scale(2), icon.Width, Scale(7));
                 graphics.DrawRectangle(pen, memory);
-                graphics.DrawLine(pen, memory.Left + Scale(3), memory.Bottom, memory.Left + Scale(3), icon.Bottom);
-                graphics.DrawLine(pen, memory.Right - Scale(3), memory.Bottom, memory.Right - Scale(3), icon.Bottom);
-                for (var offset = Scale(3); offset <= Scale(12); offset += Scale(4))
+                graphics.DrawLine(pen, memory.Left + Scale(2), memory.Bottom, memory.Left + Scale(2), icon.Bottom);
+                graphics.DrawLine(pen, memory.Right - Scale(2), memory.Bottom, memory.Right - Scale(2), icon.Bottom);
+                for (var offset = Scale(2); offset <= Scale(8); offset += Scale(3))
                 {
-                    graphics.DrawLine(pen, icon.Left + offset, memory.Top + Scale(3), icon.Left + offset, memory.Bottom - Scale(3));
+                    graphics.DrawLine(pen, icon.Left + offset, memory.Top + Scale(2), icon.Left + offset, memory.Bottom - Scale(2));
                 }
                 break;
             case TelemetryKind.Network:
-                graphics.DrawLine(pen, icon.Left + Scale(4), icon.Bottom, icon.Left + Scale(4), icon.Top + Scale(2));
-                graphics.DrawLine(pen, icon.Left + Scale(1), icon.Top + Scale(5), icon.Left + Scale(4), icon.Top + Scale(2));
-                graphics.DrawLine(pen, icon.Left + Scale(7), icon.Top + Scale(5), icon.Left + Scale(4), icon.Top + Scale(2));
-                graphics.DrawLine(pen, icon.Right - Scale(4), icon.Top, icon.Right - Scale(4), icon.Bottom - Scale(2));
-                graphics.DrawLine(pen, icon.Right - Scale(7), icon.Bottom - Scale(5), icon.Right - Scale(4), icon.Bottom - Scale(2));
-                graphics.DrawLine(pen, icon.Right - Scale(1), icon.Bottom - Scale(5), icon.Right - Scale(4), icon.Bottom - Scale(2));
+                graphics.DrawLine(pen, icon.Left + Scale(3), icon.Bottom, icon.Left + Scale(3), icon.Top + Scale(1));
+                graphics.DrawLine(pen, icon.Left + Scale(1), icon.Top + Scale(3), icon.Left + Scale(3), icon.Top + Scale(1));
+                graphics.DrawLine(pen, icon.Left + Scale(5), icon.Top + Scale(3), icon.Left + Scale(3), icon.Top + Scale(1));
+                graphics.DrawLine(pen, icon.Right - Scale(3), icon.Top, icon.Right - Scale(3), icon.Bottom - Scale(1));
+                graphics.DrawLine(pen, icon.Right - Scale(5), icon.Bottom - Scale(3), icon.Right - Scale(3), icon.Bottom - Scale(1));
+                graphics.DrawLine(pen, icon.Right - Scale(1), icon.Bottom - Scale(3), icon.Right - Scale(3), icon.Bottom - Scale(1));
                 break;
             case TelemetryKind.Codex:
                 DrawOpenAiMark(graphics, icon, color);
@@ -750,7 +783,7 @@ internal sealed class MenuBarForm : Form
                 break;
         }
 
-        var textRect = new Rectangle(icon.Right + Scale(4), area.Top, area.Right - icon.Right - Scale(4), area.Height);
+        var textRect = new Rectangle(icon.Right + Scale(3), area.Top, area.Right - icon.Right - Scale(3), area.Height);
         TextRenderer.DrawText(graphics, segment.Text, _smallFont, textRect, color,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
             TextFormatFlags.NoPadding);
@@ -839,18 +872,18 @@ internal sealed class MenuBarForm : Form
 
     private void DrawTelemetrySeparator(Graphics graphics, int x)
     {
-        using var pen = new Pen(Color.FromArgb(68, 186, 195, 205), Math.Max(1F, ScaleValue(0.7F)));
-        graphics.DrawLine(pen, x, Scale(7), x, Height - Scale(7));
+        using var pen = new Pen(Color.FromArgb(68, 186, 195, 205), Math.Max(1F, ScaleValue(0.5F)));
+        graphics.DrawLine(pen, x, Scale(5), x, Height - Scale(5));
     }
 
     private void DrawBattery(Graphics graphics, Rectangle area, SystemSnapshot snapshot, string label)
     {
         var percent = snapshot.BatteryPercent;
-        var iconWidth = Scale(24);
-        var iconHeight = Scale(13);
-        var iconX = area.Left + Scale(2);
+        var iconWidth = Scale(17);
+        var iconHeight = Scale(9);
+        var iconX = area.Left + Scale(1);
         var iconY = area.Top + (area.Height - iconHeight) / 2;
-        var batteryRect = new Rectangle(iconX, iconY, iconWidth - Scale(3), iconHeight);
+        var batteryRect = new Rectangle(iconX, iconY, iconWidth - Scale(2), iconHeight);
         var color = snapshot.OnAcPower
             ? Color.FromArgb(79, 224, 120)
             : percent < 20 || snapshot.PowerMode == PowerModeKind.Saver
@@ -859,14 +892,14 @@ internal sealed class MenuBarForm : Form
         using var pen = new Pen(color, Math.Max(1, ScaleValue(1F)));
         using var fill = new SolidBrush(color);
         graphics.DrawRectangle(pen, batteryRect);
-        graphics.FillRectangle(fill, batteryRect.Right + Scale(2), batteryRect.Top + Scale(3), Scale(3), Math.Max(1, batteryRect.Height - Scale(6)));
-        var fillWidth = Math.Max(1, (batteryRect.Width - Scale(3)) * percent / 100);
-        graphics.FillRectangle(fill, batteryRect.Left + Scale(2), batteryRect.Top + Scale(2), fillWidth, Math.Max(1, batteryRect.Height - Scale(3)));
+        graphics.FillRectangle(fill, batteryRect.Right + Scale(1), batteryRect.Top + Scale(2), Scale(2), Math.Max(1, batteryRect.Height - Scale(4)));
+        var fillWidth = Math.Max(1, (batteryRect.Width - Scale(2)) * percent / 100);
+        graphics.FillRectangle(fill, batteryRect.Left + Scale(1), batteryRect.Top + Scale(1), fillWidth, Math.Max(1, batteryRect.Height - Scale(2)));
         if (ShowsExternalPowerIndicator(snapshot))
         {
             DrawExternalPowerBolt(graphics, batteryRect);
         }
-        var labelLeft = batteryRect.Right + Scale(21);
+        var labelLeft = batteryRect.Right + Scale(15);
         var labelRect = new Rectangle(labelLeft, area.Top, Math.Max(0, area.Right - labelLeft), area.Height);
         TextRenderer.DrawText(graphics, label, _smallFont, labelRect, color,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
@@ -874,20 +907,20 @@ internal sealed class MenuBarForm : Form
 
     private void DrawExternalPowerBolt(Graphics graphics, Rectangle batteryRect)
     {
-        var centerX = batteryRect.Right + ScaleValue(10F);
+        var centerX = batteryRect.Right + ScaleValue(7F);
         var centerY = batteryRect.Top + batteryRect.Height / 2F;
-        var halfWidth = Math.Max(3.5F, ScaleValue(4F));
-        var top = centerY - Math.Max(7F, ScaleValue(7F));
-        var bottom = centerY + Math.Max(7F, ScaleValue(7F));
-        var waist = Math.Max(1.2F, ScaleValue(1.4F));
+        var halfWidth = Math.Max(2.5F, ScaleValue(2.8F));
+        var top = centerY - Math.Max(5F, ScaleValue(5F));
+        var bottom = centerY + Math.Max(5F, ScaleValue(5F));
+        var waist = Math.Max(0.9F, ScaleValue(1F));
         var points = new[]
         {
             new PointF(centerX + waist, top),
             new PointF(centerX - halfWidth, centerY + ScaleValue(0.25F)),
-            new PointF(centerX - ScaleValue(0.2F), centerY + ScaleValue(0.35F)),
+            new PointF(centerX - ScaleValue(0.15F), centerY + ScaleValue(0.25F)),
             new PointF(centerX - waist, bottom),
             new PointF(centerX + halfWidth, centerY - ScaleValue(0.25F)),
-            new PointF(centerX + ScaleValue(0.2F), centerY - ScaleValue(0.35F))
+            new PointF(centerX + ScaleValue(0.15F), centerY - ScaleValue(0.25F))
         };
         using var bolt = new SolidBrush(Color.FromArgb(103, 238, 142));
         graphics.FillPolygon(bolt, points);
@@ -948,9 +981,9 @@ internal sealed class MenuBarForm : Form
     private void DrawHover(Graphics graphics, Rectangle rect, BarAction action)
     {
         if (_hovered != action) return;
-        var inset = Rectangle.Inflate(rect, -Scale(3), -Scale(4));
+        var inset = Rectangle.Inflate(rect, -Scale(2), -Scale(3));
         using var brush = new SolidBrush(Color.FromArgb(34, 255, 255, 255));
-        using var path = RoundedRectangle(inset, Scale(5));
+        using var path = RoundedRectangle(inset, Scale(4));
         graphics.FillPath(brush, path);
     }
 
@@ -1132,11 +1165,13 @@ internal sealed class MenuBarForm : Form
     internal static int ScaleLogical(int logical, float scale) =>
         Math.Max(1, (int)Math.Round(logical * Math.Max(1F, scale)));
 
+    internal static float ComputeTypographyOpticalScale(float visualScale, float dpiScale) =>
+        1F + (Math.Max(1F, visualScale) / Math.Max(1F, dpiScale) - 1F) * 0.3F;
+
     private void ConfigureTypography()
     {
         _typography?.Dispose();
         var opticalScale = 1F + ((VisualScale / DpiScale) - 1F) * 0.3F;
-        opticalScale *= LogicalHeight / (float)LegacyLogicalHeight;
         _typography = new Typography(opticalScale);
         _textFont = _typography.Text;
         _semiboldFont = _typography.Emphasis;
