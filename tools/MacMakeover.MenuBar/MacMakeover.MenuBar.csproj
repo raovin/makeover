@@ -13,7 +13,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Content Include="Assets\apple-mark.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Claude-Mark-32.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Grok-Mark-144.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\OpenAI-Blossom.svg" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Provider-Mark-Sources.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Fonts\**\*.*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

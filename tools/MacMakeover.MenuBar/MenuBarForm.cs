@@ -218,6 +218,8 @@ internal sealed class MenuBarForm : Form
     private Font _smallFont = null!;
     private Font _iconFont = null!;
     private Image? _appleMark;
+    private Image? _claudeMark;
+    private Image? _grokMark;
     private GraphicsPath? _openAiBlossom;
     private uint _appBarCallback;
     private readonly uint _taskbarCreatedMessage;
@@ -256,6 +258,10 @@ internal sealed class MenuBarForm : Form
 
         var openAiAsset = Path.Combine(AppContext.BaseDirectory, "Assets", "OpenAI-Blossom.svg");
         _openAiBlossom = OpenAiBlossomAsset.TryLoad(openAiAsset);
+        _claudeMark = TryLoadProviderMark(
+            Path.Combine(AppContext.BaseDirectory, "Assets", "Claude-Mark-32.png"));
+        _grokMark = TryLoadProviderMark(
+            Path.Combine(AppContext.BaseDirectory, "Assets", "Grok-Mark-144.png"));
 
         _state.Changed += OnStateChanged;
         MouseMove += OnMouseMove;
@@ -773,10 +779,10 @@ internal sealed class MenuBarForm : Form
                 DrawOpenAiMark(graphics, icon, color);
                 break;
             case TelemetryKind.Claude:
-                DrawClaudeMark(graphics, icon);
+                DrawProviderRasterMark(graphics, icon, _claudeMark);
                 break;
             case TelemetryKind.Grok:
-                DrawGrokMark(graphics, icon, color);
+                DrawProviderRasterMark(graphics, icon, _grokMark);
                 break;
             case TelemetryKind.Gemini:
                 DrawAntigravityMark(graphics, icon);
@@ -810,76 +816,57 @@ internal sealed class MenuBarForm : Form
         graphics.FillPath(brush, mark);
     }
 
-    internal static void DrawClaudeMark(Graphics graphics, Rectangle icon)
+    internal static Bitmap? TryLoadProviderMark(string path)
     {
-        // Claude's asymmetric coral sunburst, reduced to a rounded 12-ray mark.
-        // Varying the ray directions and lengths is important at this size: a regular
-        // six-ray spark reads as a generic status glyph rather than Claude.
-        var center = new PointF(icon.Left + icon.Width / 2F, icon.Top + icon.Height / 2F);
-        var scale = Math.Min(icon.Width, icon.Height) / 12F;
-        var rayEnds = new (float X, float Y)[]
+        if (!File.Exists(path)) return null;
+        try
         {
-            (4.55F, 0.55F), (6.55F, 1.05F), (8.75F, 1.95F),
-            (10.95F, 4.05F), (10.85F, 6.25F), (9.70F, 8.55F),
-            (7.55F, 10.65F), (5.35F, 11.35F), (3.55F, 9.95F),
-            (1.45F, 8.35F), (0.75F, 5.65F), (2.10F, 3.25F)
-        };
-        using var pen = new Pen(Color.FromArgb(232, 111, 75), Math.Max(1.45F, 1.65F * scale))
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-            LineJoin = LineJoin.Round
-        };
-        foreach (var end in rayEnds)
-        {
-            var endPoint = IconPoint(icon, end.X, end.Y);
-            var vectorX = endPoint.X - center.X;
-            var vectorY = endPoint.Y - center.Y;
-            var vectorLength = MathF.Sqrt(vectorX * vectorX + vectorY * vectorY);
-            var inner = 1.15F * scale;
-            var start = new PointF(
-                center.X + vectorX / vectorLength * inner,
-                center.Y + vectorY / vectorLength * inner);
-            graphics.DrawLine(pen, start, endPoint);
+            using var source = Image.FromFile(path);
+            return new Bitmap(source);
         }
-        using var centerBrush = new SolidBrush(Color.FromArgb(232, 111, 75));
-        var centerDiameter = 3.15F * scale;
-        graphics.FillEllipse(
-            centerBrush,
-            center.X - centerDiameter / 2F,
-            center.Y - centerDiameter / 2F,
-            centerDiameter,
-            centerDiameter);
+        catch
+        {
+            return null;
+        }
     }
 
-    internal static void DrawGrokMark(Graphics graphics, Rectangle icon, Color color)
+    internal static void DrawProviderRasterMark(Graphics graphics, Rectangle icon, Image? mark)
     {
-        // Grok's signature is a broken heavy ring crossed by a sharp diagonal spear.
-        // Keeping the two ring gaps aligned with the spear avoids a generic “slashed O”.
-        var scale = Math.Min(icon.Width, icon.Height) / 12F;
-        var orbit = new RectangleF(
-            icon.Left + 1.35F * scale,
-            icon.Top + 1.35F * scale,
-            9.3F * scale,
-            9.3F * scale);
-        using var orbitPen = new Pen(color, Math.Max(1.65F, 2.05F * scale))
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-            LineJoin = LineJoin.Round
-        };
-        graphics.DrawArc(orbitPen, orbit, 202F, 112F);
-        graphics.DrawArc(orbitPen, orbit, 22F, 112F);
+        if (mark is null) return;
 
-        using var spear = new GraphicsPath();
-        spear.AddPolygon([
-            IconPoint(icon, 0.15F, 11.85F),
-            IconPoint(icon, 5.15F, 6.30F),
-            IconPoint(icon, 11.85F, 0.10F),
-            IconPoint(icon, 6.75F, 6.72F)
-        ]);
-        using var brush = new SolidBrush(color);
-        graphics.FillPath(brush, spear);
+        // Claude's 32 px favicon is already pixel-optimized; Grok is rasterized once
+        // from its official vector. Keep the runtime path to one integer-aligned scale
+        // step so neither mark inherits the blur of hand-drawn subpixel strokes.
+        // The official assets carry their own optical whitespace. Using the full
+        // integer-aligned icon box preserves Claude's ray separation at 150% DPI;
+        // shrinking it to 14 physical pixels visibly merges the smallest rays.
+        var destination = icon;
+        var previousInterpolation = graphics.InterpolationMode;
+        var previousPixelOffset = graphics.PixelOffsetMode;
+        var previousCompositingQuality = graphics.CompositingQuality;
+        try
+        {
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.CompositingQuality = CompositingQuality.GammaCorrected;
+            using var attributes = new System.Drawing.Imaging.ImageAttributes();
+            attributes.SetWrapMode(WrapMode.TileFlipXY);
+            graphics.DrawImage(
+                mark,
+                destination,
+                0,
+                0,
+                mark.Width,
+                mark.Height,
+                GraphicsUnit.Pixel,
+                attributes);
+        }
+        finally
+        {
+            graphics.InterpolationMode = previousInterpolation;
+            graphics.PixelOffsetMode = previousPixelOffset;
+            graphics.CompositingQuality = previousCompositingQuality;
+        }
     }
 
     internal static void DrawAntigravityMark(Graphics graphics, Rectangle icon)
@@ -1279,6 +1266,8 @@ internal sealed class MenuBarForm : Form
         {
             _state.Changed -= OnStateChanged;
             _appleMark?.Dispose();
+            _claudeMark?.Dispose();
+            _grokMark?.Dispose();
             _openAiBlossom?.Dispose();
             _trayIcons.Dispose();
             _toolTip.Dispose();

@@ -826,15 +826,22 @@ internal static class Program
 
     private static bool ProviderLogoSelfTest()
     {
+        using var claude = MenuBarForm.TryLoadProviderMark(
+            Path.Combine(AppContext.BaseDirectory, "Assets", "Claude-Mark-32.png"));
+        using var grok = MenuBarForm.TryLoadProviderMark(
+            Path.Combine(AppContext.BaseDirectory, "Assets", "Grok-Mark-144.png"));
+        if (claude is null || grok is null ||
+            claude.Size != new Size(32, 32) || grok.Size != new Size(144, 144))
+        {
+            return false;
+        }
+
         using var bitmap = new Bitmap(48, 16);
         using var graphics = Graphics.FromImage(bitmap);
         graphics.Clear(Color.Transparent);
         graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        MenuBarForm.DrawClaudeMark(graphics, new Rectangle(2, 2, 12, 12));
-        MenuBarForm.DrawGrokMark(
-            graphics,
-            new Rectangle(18, 2, 12, 12),
-            Color.FromArgb(228, 233, 239));
+        MenuBarForm.DrawProviderRasterMark(graphics, new Rectangle(2, 2, 12, 12), claude);
+        MenuBarForm.DrawProviderRasterMark(graphics, new Rectangle(18, 2, 12, 12), grok);
         MenuBarForm.DrawAntigravityMark(graphics, new Rectangle(34, 2, 12, 12));
 
         var claudePixels = 0;
