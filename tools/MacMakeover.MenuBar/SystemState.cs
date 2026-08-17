@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32;
 
 namespace MacMakeover.MenuBar;
 
@@ -62,6 +63,7 @@ internal sealed class SystemStateProvider : IDisposable
     private string _cachedExecutableDescription = string.Empty;
     private string _cachedFrameHostTitle = string.Empty;
     private int _polling;
+    private bool _eventsSubscribed;
     private bool _disposed;
 
     public SystemStateProvider()
@@ -82,10 +84,36 @@ internal sealed class SystemStateProvider : IDisposable
     public void Start()
     {
         Poll();
+        SubscribeRefreshEvents();
         _aiUsage.Start();
         // Keep the established telemetry cadence; Changed is suppressed when the
         // rendered notification token is unchanged so idle CPU stays flat.
         _timer.Change(1000, 1500);
+    }
+
+    private void SubscribeRefreshEvents()
+    {
+        if (_eventsSubscribed) return;
+        NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        SystemEvents.SessionSwitch += OnSessionSwitch;
+        _eventsSubscribed = true;
+    }
+
+    private void OnNetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs args)
+    {
+        if (!_disposed && args.IsAvailable) _aiUsage.RequestImmediateRefresh();
+    }
+
+    private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs args)
+    {
+        if (!_disposed && args.Mode == PowerModes.Resume) _aiUsage.RequestImmediateRefresh();
+    }
+
+    private void OnSessionSwitch(object sender, SessionSwitchEventArgs args)
+    {
+        if (!_disposed && args.Reason == SessionSwitchReason.SessionUnlock)
+            _aiUsage.RequestImmediateRefresh();
     }
 
     private void Poll()
@@ -441,6 +469,13 @@ internal sealed class SystemStateProvider : IDisposable
     public void Dispose()
     {
         _disposed = true;
+        if (_eventsSubscribed)
+        {
+            NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
+            _eventsSubscribed = false;
+        }
         _timer.Dispose();
         _aiUsage.Dispose();
     }

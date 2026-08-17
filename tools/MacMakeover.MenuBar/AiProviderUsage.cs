@@ -9,19 +9,20 @@ internal sealed record AiProviderUsageValue(
     bool Available,
     int UsedPercent,
     DateTimeOffset? WindowResetAtUtc,
-    string UnavailableReason)
+    string UnavailableReason,
+    DateTimeOffset? LastUpdatedAtUtc = null,
+    int ConsecutiveFailures = 0,
+    bool IsStale = false)
 {
     public static AiProviderUsageValue Unavailable(string reason) =>
         new(false, 0, null, reason);
 
-    public int RemainingPercent => AiProviderUsagePolicy.ClampUsedPercent(100 - UsedPercent);
-
     public string RenderedText => Available
-        ? $"{RemainingPercent.ToString(CultureInfo.InvariantCulture)}%"
+        ? $"{(IsStale ? "~" : string.Empty)}{UsedPercent.ToString(CultureInfo.InvariantCulture)}%"
         : "\u2014";
 
     public string RenderedToken => Available
-        ? RemainingPercent.ToString(CultureInfo.InvariantCulture)
+        ? $"{(IsStale ? "~" : string.Empty)}{UsedPercent.ToString(CultureInfo.InvariantCulture)}"
         : "\u2014";
 
     internal bool CanRetainAt(DateTimeOffset nowUtc) =>
@@ -133,13 +134,23 @@ internal static class ProviderExecutableLocator
 internal static class AiProviderUsagePolicy
 {
     internal const long WeeklyWindowMinutes = 7L * 24L * 60L;
-    internal const int RefreshIntervalMinutes = 5;
+    internal const int RefreshIntervalMinutes = 2;
+    internal const int ProviderCount = 4;
+    internal const int ProviderSpacingSeconds = RefreshIntervalMinutes * 60 / ProviderCount;
     internal const int RefreshTimeoutSeconds = 12;
+    internal const int StaleAfterMinutes = 5;
+    internal const int StaleAfterFailures = 2;
 
     internal static int ClampUsedPercent(int percent) => Math.Clamp(percent, 0, 100);
 
     internal static bool IsWeeklyWindow(long? durationMinutes) =>
         durationMinutes == WeeklyWindowMinutes;
+
+    internal static bool UsesRecommendedRefreshPolicy() =>
+        RefreshIntervalMinutes == 2 &&
+        ProviderSpacingSeconds == 30 &&
+        StaleAfterMinutes == 5 &&
+        StaleAfterFailures == 2;
 
     internal static AiProviderUsageSnapshot ApplyResults(
         AiProviderUsageSnapshot previous,
@@ -160,12 +171,19 @@ internal static class AiProviderUsagePolicy
         AiProviderUsageValue value,
         DateTimeOffset nowUtc)
     {
-        return value.HasExpiredAt(nowUtc)
-            ? AiProviderUsageValue.Unavailable("Allowance window expired; awaiting fresh data")
-            : value;
+        if (value.HasExpiredAt(nowUtc))
+            return AiProviderUsageValue.Unavailable("Allowance window expired; awaiting fresh data");
+        if (!value.Available) return value;
+
+        var staleByAge = value.LastUpdatedAtUtc is not { } updatedAt ||
+                         nowUtc - updatedAt >= TimeSpan.FromMinutes(StaleAfterMinutes);
+        var isStale = value.IsStale ||
+                      value.ConsecutiveFailures >= StaleAfterFailures ||
+                      staleByAge;
+        return isStale == value.IsStale ? value : value with { IsStale = isStale };
     }
 
-    private static AiProviderUsageValue ApplyResult(
+    internal static AiProviderUsageValue ApplyResult(
         AiProviderUsageValue previous,
         ProviderUsageReadResult result,
         DateTimeOffset nowUtc,
@@ -181,13 +199,25 @@ internal static class AiProviderUsagePolicy
                 true,
                 ClampUsedPercent(sample.UsedPercent),
                 resetAt,
-                string.Empty);
+                string.Empty,
+                nowUtc,
+                0,
+                false);
         }
 
-        return previous.CanRetainAt(nowUtc)
-            ? previous
-            : AiProviderUsageValue.Unavailable(
-                string.IsNullOrWhiteSpace(result.Reason) ? fallbackReason : result.Reason);
+        var reason = string.IsNullOrWhiteSpace(result.Reason) ? fallbackReason : result.Reason;
+        if (!previous.CanRetainAt(nowUtc))
+            return AiProviderUsageValue.Unavailable(reason);
+
+        var failures = previous.ConsecutiveFailures + 1;
+        var staleByAge = previous.LastUpdatedAtUtc is not { } updatedAt ||
+                         nowUtc - updatedAt >= TimeSpan.FromMinutes(StaleAfterMinutes);
+        return previous with
+        {
+            UnavailableReason = reason,
+            ConsecutiveFailures = failures,
+            IsStale = previous.IsStale || failures >= StaleAfterFailures || staleByAge
+        };
     }
 }
 
@@ -1234,13 +1264,14 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
 {
     private readonly object _gate = new();
     private readonly System.Threading.Timer _timer;
-    private readonly IProviderUsageReader _codexReader;
-    private readonly IProviderUsageReader _claudeReader;
-    private readonly IProviderUsageReader _grokReader;
-    private readonly IProviderUsageReader _geminiReader;
+    private readonly IProviderUsageReader[] _readers;
+    private readonly TimeSpan _providerSpacing;
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private AiProviderUsageSnapshot _snapshot = AiProviderUsageSnapshot.Empty;
-    private int _refreshing;
+    private int _nextProviderIndex;
+    private int _refreshAllRequested;
+    private int _requestWorkerRunning;
     private bool _started;
     private bool _disposed;
 
@@ -1248,13 +1279,19 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
         IProviderUsageReader? codexReader = null,
         IProviderUsageReader? claudeReader = null,
         IProviderUsageReader? grokReader = null,
-        IProviderUsageReader? geminiReader = null)
+        IProviderUsageReader? geminiReader = null,
+        TimeSpan? providerSpacing = null)
     {
-        _codexReader = codexReader ?? new CodexUsageReader();
-        _claudeReader = claudeReader ?? new ClaudeUsageReader();
-        _grokReader = grokReader ?? new GrokUsageReader();
-        _geminiReader = geminiReader ?? new GeminiUsageReader();
-        _timer = new System.Threading.Timer(_ => _ = RefreshAsync(), null,
+        _readers =
+        [
+            codexReader ?? new CodexUsageReader(),
+            claudeReader ?? new ClaudeUsageReader(),
+            grokReader ?? new GrokUsageReader(),
+            geminiReader ?? new GeminiUsageReader()
+        ];
+        _providerSpacing = providerSpacing ??
+                           TimeSpan.FromSeconds(AiProviderUsagePolicy.ProviderSpacingSeconds);
+        _timer = new System.Threading.Timer(_ => _ = RefreshNextProviderAsync(), null,
             Timeout.Infinite, Timeout.Infinite);
     }
 
@@ -1286,53 +1323,102 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
             _started = true;
         }
 
-        _ = Task.Run(RefreshAsync);
         _timer.Change(
-            TimeSpan.FromMinutes(AiProviderUsagePolicy.RefreshIntervalMinutes),
-            TimeSpan.FromMinutes(AiProviderUsagePolicy.RefreshIntervalMinutes));
+            _providerSpacing,
+            _providerSpacing);
+        RequestImmediateRefresh();
     }
 
-    private async Task RefreshAsync()
+    internal void RequestImmediateRefresh()
     {
-        if (_disposed || Interlocked.Exchange(ref _refreshing, 1) != 0) return;
+        if (_disposed) return;
+        Interlocked.Exchange(ref _refreshAllRequested, 1);
+        if (Interlocked.CompareExchange(ref _requestWorkerRunning, 1, 0) == 0)
+            _ = Task.Run(ProcessRequestedRefreshesAsync);
+    }
+
+    private async Task ProcessRequestedRefreshesAsync()
+    {
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-            timeout.CancelAfter(TimeSpan.FromSeconds(AiProviderUsagePolicy.RefreshTimeoutSeconds));
-            var codexTask = ReadSafelyAsync(_codexReader, timeout.Token);
-            var claudeTask = ReadSafelyAsync(_claudeReader, timeout.Token);
-            var grokTask = ReadSafelyAsync(_grokReader, timeout.Token);
-            var geminiTask = ReadSafelyAsync(_geminiReader, timeout.Token);
-            var results = await Task.WhenAll(
-                codexTask,
-                claudeTask,
-                grokTask,
-                geminiTask).ConfigureAwait(false);
-            if (_disposed) return;
-
-            lock (_gate)
+            do
             {
-                _snapshot = AiProviderUsagePolicy.ApplyResults(
-                    _snapshot,
-                    results[0],
-                    results[1],
-                    results[2],
-                    results[3],
-                    DateTimeOffset.UtcNow);
+                Interlocked.Exchange(ref _refreshAllRequested, 0);
+                await _refreshGate.WaitAsync(_lifetime.Token).ConfigureAwait(false);
+                try
+                {
+                    for (var index = 0; index < _readers.Length && !_disposed; index++)
+                        await RefreshProviderAsync(index).ConfigureAwait(false);
+                    _nextProviderIndex = 0;
+                }
+                finally
+                {
+                    _refreshGate.Release();
+                }
             }
+            while (!_disposed && Volatile.Read(ref _refreshAllRequested) != 0);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
-            // A timeout or shutdown leaves the last value eligible only when its
-            // reset boundary proves that it is still the same allowance window.
-        }
-        catch
-        {
-            // Provider failures are informational and must not affect the shell.
+            // Normal shutdown.
         }
         finally
         {
-            Volatile.Write(ref _refreshing, 0);
+            Volatile.Write(ref _requestWorkerRunning, 0);
+            if (!_disposed && Volatile.Read(ref _refreshAllRequested) != 0)
+                RequestImmediateRefresh();
+        }
+    }
+
+    private async Task RefreshNextProviderAsync()
+    {
+        if (_disposed || !await _refreshGate.WaitAsync(0).ConfigureAwait(false)) return;
+        try
+        {
+            var index = _nextProviderIndex;
+            _nextProviderIndex = (_nextProviderIndex + 1) % _readers.Length;
+            await RefreshProviderAsync(index).ConfigureAwait(false);
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
+
+    private async Task RefreshProviderAsync(int index)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(AiProviderUsagePolicy.RefreshTimeoutSeconds));
+        var result = await ReadSafelyAsync(_readers[index], timeout.Token).ConfigureAwait(false);
+        if (_disposed) return;
+
+        var nowUtc = DateTimeOffset.UtcNow;
+        lock (_gate)
+        {
+            _snapshot = index switch
+            {
+                0 => _snapshot with
+                {
+                    Codex = AiProviderUsagePolicy.ApplyResult(
+                        _snapshot.Codex, result, nowUtc, "Codex allowance data unavailable")
+                },
+                1 => _snapshot with
+                {
+                    Claude = AiProviderUsagePolicy.ApplyResult(
+                        _snapshot.Claude, result, nowUtc, "Claude allowance data unavailable")
+                },
+                2 => _snapshot with
+                {
+                    Grok = AiProviderUsagePolicy.ApplyResult(
+                        _snapshot.Grok, result, nowUtc, "Grok allowance data unavailable")
+                },
+                3 => _snapshot with
+                {
+                    Gemini = AiProviderUsagePolicy.ApplyResult(
+                        _snapshot.Gemini, result, nowUtc, "Gemini allowance data unavailable")
+                },
+                _ => _snapshot
+            };
         }
     }
 

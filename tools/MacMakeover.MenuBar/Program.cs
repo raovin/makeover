@@ -433,7 +433,7 @@ internal static class Program
                 true,
                 claudeSample.UsedPercent,
                 claudeSample.WindowResetAtUtc,
-                string.Empty).RenderedText != "70%")
+                string.Empty).RenderedText != "30%")
         {
             return false;
         }
@@ -560,7 +560,7 @@ internal static class Program
                 true,
                 geminiSample.UsedPercent,
                 geminiSample.WindowResetAtUtc,
-                string.Empty).RenderedText != "91%" ||
+                string.Empty).RenderedText != "9%" ||
             geminiSample.WindowDurationMinutes != AiProviderUsagePolicy.WeeklyWindowMinutes ||
             geminiSample.WindowResetAtUtc != new DateTimeOffset(2026, 8, 18, 9, 3, 1, TimeSpan.Zero))
         {
@@ -574,8 +574,16 @@ internal static class Program
             return false;
         }
 
-        var current = new AiProviderUsageValue(true, 60, now.AddHours(2), string.Empty);
-        var claudeCurrent = new AiProviderUsageValue(true, 30, now.AddHours(2), string.Empty);
+        if (!AiProviderUsagePolicy.UsesRecommendedRefreshPolicy())
+        {
+            return false;
+        }
+        if (!StaggeredUsageCoordinatorSelfTest()) return false;
+
+        var current = new AiProviderUsageValue(
+            true, 60, now.AddHours(2), string.Empty, now, 0, false);
+        var claudeCurrent = new AiProviderUsageValue(
+            true, 30, now.AddHours(2), string.Empty, now, 0, false);
         var unavailable = AiProviderUsageValue.Unavailable("test");
         var previous = new AiProviderUsageSnapshot(current, claudeCurrent, unavailable, unavailable);
         var retained = AiProviderUsagePolicy.ApplyResults(
@@ -584,9 +592,42 @@ internal static class Program
             ProviderUsageReadResult.Unavailable("unsupported"),
             ProviderUsageReadResult.Unavailable("offline"),
             ProviderUsageReadResult.Unavailable("signed out"),
-            now.AddHours(1));
+            now.AddMinutes(1));
         if (!retained.Codex.Available || retained.Codex.UsedPercent != 60 ||
-            !retained.Claude.Available || retained.Claude.UsedPercent != 30)
+            retained.Codex.IsStale || retained.Codex.ConsecutiveFailures != 1 ||
+            retained.Codex.RenderedText != "60%" ||
+            !retained.Claude.Available || retained.Claude.UsedPercent != 30 ||
+            retained.Claude.IsStale)
+        {
+            return false;
+        }
+
+        var staleAfterSecondFailure = AiProviderUsagePolicy.ApplyResults(
+            retained,
+            ProviderUsageReadResult.Unavailable("offline"),
+            ProviderUsageReadResult.Unavailable("unsupported"),
+            ProviderUsageReadResult.Unavailable("offline"),
+            ProviderUsageReadResult.Unavailable("signed out"),
+            now.AddMinutes(2));
+        if (!staleAfterSecondFailure.Codex.IsStale ||
+            staleAfterSecondFailure.Codex.ConsecutiveFailures != 2 ||
+            staleAfterSecondFailure.Codex.RenderedText != "~60%" ||
+            !staleAfterSecondFailure.Claude.IsStale)
+        {
+            return false;
+        }
+
+        var fresh = AiProviderUsagePolicy.ApplyResult(
+            unavailable,
+            ProviderUsageReadResult.Fresh(new ProviderUsageSample(
+                25,
+                now.AddHours(3),
+                AiProviderUsagePolicy.WeeklyWindowMinutes)),
+            now,
+            "unavailable");
+        if (!fresh.Available || fresh.UsedPercent != 25 || fresh.RenderedText != "25%" ||
+            fresh.LastUpdatedAtUtc != now || fresh.ConsecutiveFailures != 0 || fresh.IsStale ||
+            AiProviderUsagePolicy.ExpireIfNeeded(fresh, now.AddMinutes(5)).RenderedText != "~25%")
         {
             return false;
         }
@@ -612,8 +653,73 @@ internal static class Program
             ProviderUsageReadResult.Unavailable("signed out"),
             now.AddDays(1));
         return !noResetResult.Codex.Available &&
-               current.RenderedText == "40%" &&
+               current.RenderedText == "60%" &&
                AiProviderUsageValue.Unavailable("test").RenderedText == "\u2014";
+    }
+
+    private static bool StaggeredUsageCoordinatorSelfTest()
+    {
+        var state = new UsageReaderProbeState();
+        using var coordinator = new AiProviderUsageCoordinator(
+            new UsageReaderProbe(state, 10),
+            new UsageReaderProbe(state, 20),
+            new UsageReaderProbe(state, 30),
+            new UsageReaderProbe(state, 40),
+            TimeSpan.FromMilliseconds(25));
+        coordinator.Start();
+        coordinator.RequestImmediateRefresh();
+
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        AiProviderUsageSnapshot snapshot;
+        do
+        {
+            Thread.Sleep(10);
+            snapshot = coordinator.Snapshot;
+        }
+        while (DateTime.UtcNow < deadline &&
+               (!snapshot.Codex.Available || !snapshot.Claude.Available ||
+                !snapshot.Grok.Available || !snapshot.Gemini.Available));
+
+        return state.MaxConcurrent == 1 &&
+               snapshot.Codex.RenderedText == "10%" &&
+               snapshot.Claude.RenderedText == "20%" &&
+               snapshot.Grok.RenderedText == "30%" &&
+               snapshot.Gemini.RenderedText == "40%";
+    }
+
+    private sealed class UsageReaderProbeState
+    {
+        public int Active;
+        public int MaxConcurrent;
+    }
+
+    private sealed class UsageReaderProbe(UsageReaderProbeState state, int usedPercent)
+        : IProviderUsageReader
+    {
+        public async Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
+        {
+            var active = Interlocked.Increment(ref state.Active);
+            var observed = Volatile.Read(ref state.MaxConcurrent);
+            while (active > observed)
+            {
+                var prior = Interlocked.CompareExchange(ref state.MaxConcurrent, active, observed);
+                if (prior == observed) break;
+                observed = prior;
+            }
+
+            try
+            {
+                await Task.Delay(20, cancellationToken).ConfigureAwait(false);
+                return ProviderUsageReadResult.Fresh(new ProviderUsageSample(
+                    usedPercent,
+                    DateTimeOffset.UtcNow.AddDays(1),
+                    AiProviderUsagePolicy.WeeklyWindowMinutes));
+            }
+            finally
+            {
+                Interlocked.Decrement(ref state.Active);
+            }
+        }
     }
 
     private static bool TelemetryLayoutSelfTest()
