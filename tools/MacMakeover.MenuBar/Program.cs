@@ -68,10 +68,11 @@ internal static class Program
                SystemStateProvider.FriendlyAppName("ApplicationFrameHost", "Settings", "Application Frame Host") == "Settings" &&
                TrayAppProvider.ExpandExecutablePath("{F38BF404-1D43-42F2-9305-67DE0B28FC23}\\explorer.exe") == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe") &&
                TrayIconCacheSelfTest() &&
-               DisplayRebuildSelfTest() &&
-               TelemetryLayoutSelfTest() &&
-               OpenAiBlossomSelfTest() &&
-               AppBarRegistrationSelfTest() &&
+                DisplayRebuildSelfTest() &&
+                TelemetryLayoutSelfTest() &&
+                OpenAiBlossomSelfTest() &&
+                ProviderLogoSelfTest() &&
+                AppBarRegistrationSelfTest() &&
                ProviderUsageSelfTest() &&
                RenderedNotificationTokenSelfTest() &&
                MenuBarForm.IsShowDesktopCorner(new Point(0, 0), new Size(1280, 20), 8) &&
@@ -821,6 +822,54 @@ internal static class Program
         return mark.PointCount == 170 &&
                Math.Abs(bounds.Width - 267.198F) < 0.01F &&
                Math.Abs(bounds.Height - 264.812F) < 0.01F;
+    }
+
+    private static bool ProviderLogoSelfTest()
+    {
+        using var bitmap = new Bitmap(48, 16);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.Transparent);
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        MenuBarForm.DrawClaudeMark(graphics, new Rectangle(2, 2, 12, 12));
+        MenuBarForm.DrawGrokMark(
+            graphics,
+            new Rectangle(18, 2, 12, 12),
+            Color.FromArgb(228, 233, 239));
+        MenuBarForm.DrawAntigravityMark(graphics, new Rectangle(34, 2, 12, 12));
+
+        var claudePixels = 0;
+        var grokPixels = 0;
+        var antigravityPixels = 0;
+        var claudeHasCoral = false;
+        var antigravityHasBlue = false;
+        for (var y = 0; y < bitmap.Height; y++)
+        {
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                if (pixel.A < 24) continue;
+                if (x < 16)
+                {
+                    claudePixels++;
+                    claudeHasCoral |= pixel.R > pixel.B + 60;
+                }
+                else if (x < 32)
+                {
+                    grokPixels++;
+                }
+                else
+                {
+                    antigravityPixels++;
+                    antigravityHasBlue |= pixel.B > pixel.R + 30;
+                }
+            }
+        }
+
+        return claudePixels >= 24 &&
+               grokPixels >= 20 &&
+               antigravityPixels >= 24 &&
+               claudeHasCoral &&
+               antigravityHasBlue;
     }
 }
 

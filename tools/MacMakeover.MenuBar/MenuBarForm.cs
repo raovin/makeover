@@ -773,13 +773,13 @@ internal sealed class MenuBarForm : Form
                 DrawOpenAiMark(graphics, icon, color);
                 break;
             case TelemetryKind.Claude:
-                DrawClaudeMark(graphics, icon, pen);
+                DrawClaudeMark(graphics, icon);
                 break;
             case TelemetryKind.Grok:
-                DrawGrokMark(graphics, icon, pen);
+                DrawGrokMark(graphics, icon, color);
                 break;
             case TelemetryKind.Gemini:
-                DrawGeminiMark(graphics, icon, pen);
+                DrawAntigravityMark(graphics, icon);
                 break;
         }
 
@@ -810,65 +810,158 @@ internal sealed class MenuBarForm : Form
         graphics.FillPath(brush, mark);
     }
 
-    private void DrawClaudeMark(Graphics graphics, Rectangle icon, Pen pen)
+    internal static void DrawClaudeMark(Graphics graphics, Rectangle icon)
     {
-        // Claude's compact mark is represented as an original six-ray spark.
+        // Claude's asymmetric coral sunburst, reduced to a rounded 12-ray mark.
+        // Varying the ray directions and lengths is important at this size: a regular
+        // six-ray spark reads as a generic status glyph rather than Claude.
         var center = new PointF(icon.Left + icon.Width / 2F, icon.Top + icon.Height / 2F);
-        var inner = ScaleValue(1.1F);
-        var outer = ScaleValue(4.5F);
-        for (var index = 0; index < 6; index++)
+        var scale = Math.Min(icon.Width, icon.Height) / 12F;
+        var rayEnds = new (float X, float Y)[]
         {
-            var angle = -Math.PI / 2 + index * Math.PI / 3;
+            (4.55F, 0.55F), (6.55F, 1.05F), (8.75F, 1.95F),
+            (10.95F, 4.05F), (10.85F, 6.25F), (9.70F, 8.55F),
+            (7.55F, 10.65F), (5.35F, 11.35F), (3.55F, 9.95F),
+            (1.45F, 8.35F), (0.75F, 5.65F), (2.10F, 3.25F)
+        };
+        using var pen = new Pen(Color.FromArgb(232, 111, 75), Math.Max(1.45F, 1.65F * scale))
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+            LineJoin = LineJoin.Round
+        };
+        foreach (var end in rayEnds)
+        {
+            var endPoint = IconPoint(icon, end.X, end.Y);
+            var vectorX = endPoint.X - center.X;
+            var vectorY = endPoint.Y - center.Y;
+            var vectorLength = MathF.Sqrt(vectorX * vectorX + vectorY * vectorY);
+            var inner = 1.15F * scale;
             var start = new PointF(
-                center.X + (float)Math.Cos(angle) * inner,
-                center.Y + (float)Math.Sin(angle) * inner);
-            var end = new PointF(
-                center.X + (float)Math.Cos(angle) * outer,
-                center.Y + (float)Math.Sin(angle) * outer);
-            graphics.DrawLine(pen, start, end);
+                center.X + vectorX / vectorLength * inner,
+                center.Y + vectorY / vectorLength * inner);
+            graphics.DrawLine(pen, start, endPoint);
         }
-        var dot = ScaleValue(1.25F);
-        graphics.FillEllipse(Brushes.White, center.X - dot / 2F, center.Y - dot / 2F, dot, dot);
+        using var centerBrush = new SolidBrush(Color.FromArgb(232, 111, 75));
+        var centerDiameter = 3.15F * scale;
+        graphics.FillEllipse(
+            centerBrush,
+            center.X - centerDiameter / 2F,
+            center.Y - centerDiameter / 2F,
+            centerDiameter,
+            centerDiameter);
     }
 
-    private void DrawGrokMark(Graphics graphics, Rectangle icon, Pen pen)
+    internal static void DrawGrokMark(Graphics graphics, Rectangle icon, Color color)
     {
-        // A compact orbit-and-slash mark that remains distinct from the knot and spark.
-        var orbit = Rectangle.Inflate(icon, -Scale(1), -Scale(1));
-        graphics.DrawEllipse(pen, orbit);
-        graphics.DrawLine(
-            pen,
-            icon.Left + Scale(2),
-            icon.Bottom - Scale(1),
-            icon.Right - Scale(1),
-            icon.Top + Scale(2));
-        graphics.DrawLine(
-            pen,
-            icon.Left + Scale(5),
-            icon.Top + Scale(5),
-            icon.Right - Scale(1),
-            icon.Bottom - Scale(1));
-    }
+        // Grok's signature is a broken heavy ring crossed by a sharp diagonal spear.
+        // Keeping the two ring gaps aligned with the spear avoids a generic “slashed O”.
+        var scale = Math.Min(icon.Width, icon.Height) / 12F;
+        var orbit = new RectangleF(
+            icon.Left + 1.35F * scale,
+            icon.Top + 1.35F * scale,
+            9.3F * scale,
+            9.3F * scale);
+        using var orbitPen = new Pen(color, Math.Max(1.65F, 2.05F * scale))
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+            LineJoin = LineJoin.Round
+        };
+        graphics.DrawArc(orbitPen, orbit, 202F, 112F);
+        graphics.DrawArc(orbitPen, orbit, 22F, 112F);
 
-    private void DrawGeminiMark(Graphics graphics, Rectangle icon, Pen pen)
-    {
-        // Compact four-point Gemini-style sparkle, drawn locally to remain crisp.
-        var centerX = icon.Left + icon.Width / 2F;
-        var centerY = icon.Top + icon.Height / 2F;
-        using var path = new GraphicsPath();
-        path.AddLines([
-            new PointF(centerX, icon.Top + Scale(1)),
-            new PointF(centerX + ScaleValue(1.25F), centerY - ScaleValue(1.25F)),
-            new PointF(icon.Right - Scale(1), centerY),
-            new PointF(centerX + ScaleValue(1.25F), centerY + ScaleValue(1.25F)),
-            new PointF(centerX, icon.Bottom - Scale(1)),
-            new PointF(centerX - ScaleValue(1.25F), centerY + ScaleValue(1.25F)),
-            new PointF(icon.Left + Scale(1), centerY),
-            new PointF(centerX - ScaleValue(1.25F), centerY - ScaleValue(1.25F)),
-            new PointF(centerX, icon.Top + Scale(1))
+        using var spear = new GraphicsPath();
+        spear.AddPolygon([
+            IconPoint(icon, 0.15F, 11.85F),
+            IconPoint(icon, 5.15F, 6.30F),
+            IconPoint(icon, 11.85F, 0.10F),
+            IconPoint(icon, 6.75F, 6.72F)
         ]);
-        graphics.DrawPath(pen, path);
+        using var brush = new SolidBrush(color);
+        graphics.FillPath(brush, spear);
     }
+
+    internal static void DrawAntigravityMark(Graphics graphics, Rectangle icon)
+    {
+        // Antigravity's rounded arch is the product mark used by the AGY client. The
+        // deep inner cutout and outward feet preserve the silhouette at menu-bar scale.
+        using var path = new GraphicsPath();
+        path.StartFigure();
+        path.AddBezier(
+            IconPoint(icon, 0.20F, 11.15F),
+            IconPoint(icon, 1.15F, 11.45F),
+            IconPoint(icon, 2.25F, 10.15F),
+            IconPoint(icon, 3.00F, 8.55F));
+        path.AddBezier(
+            IconPoint(icon, 3.00F, 8.55F),
+            IconPoint(icon, 3.70F, 7.05F),
+            IconPoint(icon, 4.15F, 3.50F),
+            IconPoint(icon, 4.80F, 1.55F));
+        path.AddBezier(
+            IconPoint(icon, 4.80F, 1.55F),
+            IconPoint(icon, 5.10F, 0.55F),
+            IconPoint(icon, 5.45F, 0.25F),
+            IconPoint(icon, 6.00F, 0.25F));
+        path.AddBezier(
+            IconPoint(icon, 6.00F, 0.25F),
+            IconPoint(icon, 6.55F, 0.25F),
+            IconPoint(icon, 6.90F, 0.55F),
+            IconPoint(icon, 7.20F, 1.55F));
+        path.AddBezier(
+            IconPoint(icon, 7.20F, 1.55F),
+            IconPoint(icon, 7.85F, 3.50F),
+            IconPoint(icon, 8.30F, 7.05F),
+            IconPoint(icon, 9.00F, 8.55F));
+        path.AddBezier(
+            IconPoint(icon, 9.00F, 8.55F),
+            IconPoint(icon, 9.75F, 10.15F),
+            IconPoint(icon, 10.85F, 11.45F),
+            IconPoint(icon, 11.80F, 11.15F));
+        path.AddBezier(
+            IconPoint(icon, 11.80F, 11.15F),
+            IconPoint(icon, 10.75F, 10.45F),
+            IconPoint(icon, 9.85F, 9.15F),
+            IconPoint(icon, 9.10F, 7.90F));
+        path.AddBezier(
+            IconPoint(icon, 9.10F, 7.90F),
+            IconPoint(icon, 8.05F, 6.15F),
+            IconPoint(icon, 7.30F, 5.35F),
+            IconPoint(icon, 6.00F, 5.35F));
+        path.AddBezier(
+            IconPoint(icon, 6.00F, 5.35F),
+            IconPoint(icon, 4.70F, 5.35F),
+            IconPoint(icon, 3.95F, 6.15F),
+            IconPoint(icon, 2.90F, 7.90F));
+        path.AddBezier(
+            IconPoint(icon, 2.90F, 7.90F),
+            IconPoint(icon, 2.15F, 9.15F),
+            IconPoint(icon, 1.25F, 10.45F),
+            IconPoint(icon, 0.20F, 11.15F));
+        path.CloseFigure();
+
+        using var gradient = new LinearGradientBrush(
+            icon,
+            Color.FromArgb(255, 194, 40),
+            Color.FromArgb(47, 125, 255),
+            90F)
+        {
+            InterpolationColors = new ColorBlend
+            {
+                Colors = [
+                    Color.FromArgb(255, 190, 35),
+                    Color.FromArgb(244, 102, 69),
+                    Color.FromArgb(77, 183, 132),
+                    Color.FromArgb(47, 125, 255)
+                ],
+                Positions = [0F, 0.23F, 0.48F, 1F]
+            }
+        };
+        graphics.FillPath(gradient, path);
+    }
+
+    private static PointF IconPoint(Rectangle icon, float x, float y) =>
+        new(icon.Left + icon.Width * x / 12F, icon.Top + icon.Height * y / 12F);
 
     private void DrawTelemetrySeparator(Graphics graphics, int x)
     {
