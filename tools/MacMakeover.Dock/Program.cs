@@ -1230,6 +1230,9 @@ internal sealed class DockForm : Form
     private Rectangle _frame;
     private float _visualScale = 1F;
     private int _hoveredItem = -1;
+    private int _draggedItemIndex = -1;
+    private Point _dragStartPoint;
+    private bool _isDragging;
     private int _refreshInFlight;
     private int _refreshQueued;
     private int _refreshGeneration;
@@ -1259,6 +1262,7 @@ internal sealed class DockForm : Form
         if (preview && previewHover) _hoveredItem = Math.Min(4, _items.Count - 1);
         MouseMove += OnDockMouseMove;
         MouseLeave += OnDockMouseLeave;
+        MouseDown += OnDockMouseDown;
         MouseUp += OnDockMouseUp;
         Shown += (_, _) =>
         {
@@ -1378,8 +1382,62 @@ internal sealed class DockForm : Form
         }
     }
 
+    private void OnDockMouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            var targetIndex = _items.FindIndex(item => item.Bounds.Contains(e.Location));
+            if (targetIndex >= 0 && _items[targetIndex].IsPinned)
+            {
+                _draggedItemIndex = targetIndex;
+                _dragStartPoint = e.Location;
+                _isDragging = false;
+            }
+        }
+    }
+
     private void OnDockMouseMove(object? sender, MouseEventArgs e)
     {
+        if (_draggedItemIndex >= 0 && e.Button == MouseButtons.Left)
+        {
+            if (!_isDragging && (Math.Abs(e.Location.X - _dragStartPoint.X) > 4 || Math.Abs(e.Location.Y - _dragStartPoint.Y) > 4))
+            {
+                _isDragging = true;
+            }
+
+            if (_isDragging)
+            {
+                var newIndex = _items.FindIndex(item => e.Location.X < item.Bounds.Right);
+                if (newIndex < 0) newIndex = _items.Count - 1;
+
+                if (newIndex != _draggedItemIndex && newIndex >= 0 && newIndex < _items.Count)
+                {
+                    var item = _items[_draggedItemIndex];
+                    if (item.IsPinned && _items[newIndex].IsPinned)
+                    {
+                        _items.RemoveAt(_draggedItemIndex);
+                        _items.Insert(newIndex, item);
+                        
+                        var pinnedOldIndex = _pinnedItems.IndexOf(item);
+                        if (pinnedOldIndex >= 0)
+                        {
+                            _pinnedItems.RemoveAt(pinnedOldIndex);
+                            var newPinnedIndex = 0;
+                            for (var i = 0; i < newIndex; i++)
+                            {
+                                if (_items[i].IsPinned) newPinnedIndex++;
+                            }
+                            _pinnedItems.Insert(Math.Min(newPinnedIndex, _pinnedItems.Count), item);
+                        }
+                        
+                        _draggedItemIndex = newIndex;
+                        PositionDock();
+                    }
+                }
+            }
+            return;
+        }
+
         var next = _items.FindIndex(item => item.Bounds.Contains(e.Location));
         if (next == _hoveredItem) return;
         _hoveredItem = next;
@@ -1399,6 +1457,15 @@ internal sealed class DockForm : Form
 
     private void OnDockMouseUp(object? sender, MouseEventArgs e)
     {
+        if (_isDragging)
+        {
+            _isDragging = false;
+            _draggedItemIndex = -1;
+            DockPinStore.Reorder(_pinnedItems.Where(i => i.IsPinned).Select(i => i.Name));
+            return;
+        }
+        _draggedItemIndex = -1;
+
         var item = _items.FirstOrDefault(candidate => candidate.Bounds.Contains(e.Location));
         if (item is null) return;
 
@@ -2178,6 +2245,7 @@ internal sealed class DockPinState
 {
     public List<UserDockPin> Added { get; init; } = [];
     public List<string> Removed { get; init; } = [];
+    public List<string> Order { get; init; } = [];
 }
 
 internal sealed record UserDockPin(string Name, string ProcessName, string ExecutablePath);
@@ -2252,6 +2320,18 @@ internal static class DockPinStore
         Changed?.Invoke();
     }
 
+    public static void Reorder(IEnumerable<string> orderedNames)
+    {
+        lock (Sync)
+        {
+            var state = Load();
+            state.Order.Clear();
+            state.Order.AddRange(orderedNames);
+            Save(state);
+        }
+        Changed?.Invoke();
+    }
+
     private static void Save(DockPinState state)
     {
         var directory = Path.GetDirectoryName(StatePath)!;
@@ -2317,6 +2397,11 @@ internal sealed class PinnedApp
         return builtIn
             .Concat(added)
             .DistinctBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(app =>
+            {
+                var idx = state.Order.FindIndex(n => n.Equals(app.Name, StringComparison.OrdinalIgnoreCase));
+                return idx >= 0 ? idx : int.MaxValue;
+            })
             .ToArray();
     }
 
