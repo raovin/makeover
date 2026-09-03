@@ -47,6 +47,7 @@ internal static class Program
         }
         if (args.Length >= 2 && args[0].Equals("--snapshot-running", StringComparison.OrdinalIgnoreCase))
         {
+            ApplicationConfiguration.Initialize();
             var pinned = PinnedApp.Load();
             var snapshot = RunningAppSnapshot.Capture(pinned).Select(app => new
             {
@@ -120,6 +121,7 @@ internal static class DockRegressionTests
             if (!TestFileExplorerActivationPolicy()) return 8;
             if (!TestStaleSystemPinPolicy()) return 9;
             if (!TestDisplayRebuildPolicy()) return 10;
+            if (!TestExecutableIdentityMatching()) return 11;
             if (!TestDynamicApp(probePath)) return 2;
             if (!TestPinnedApp(probePath)) return 3;
             return 0;
@@ -138,6 +140,42 @@ internal static class DockRegressionTests
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
+    }
+
+    private static bool TestExecutableIdentityMatching()
+    {
+        var chromePath = Path.Combine(Path.GetTempPath(), "MacMakeover", "Google Chrome", "Application", "chrome.exe");
+        var browserClawPath = Path.Combine(Path.GetTempPath(), "MacMakeover", "BrowserClaw", "Application", "chrome.exe");
+        var chromePin = new PinnedApp
+        {
+            Name = "Google Chrome",
+            Patterns = [],
+            ExecutablePath = chromePath,
+            ProcessNames = ["chrome"]
+        };
+        var browserClawPin = new PinnedApp
+        {
+            Name = "BrowserClaw",
+            Patterns = [],
+            ExecutablePath = browserClawPath,
+            ProcessNames = ["chrome"]
+        };
+        var chromeProcess = new ProcessIdentity("chrome", chromePath.ToUpperInvariant());
+        var browserClawProcess = new ProcessIdentity("chrome", browserClawPath);
+
+        // Same basename + same normalized path is a match, while a different path is not.
+        if (!chromePin.MatchesProcess(chromeProcess.ProcessName, chromeProcess.ExecutablePath)) return false;
+        if (chromePin.MatchesProcess(browserClawProcess.ProcessName, browserClawProcess.ExecutablePath)) return false;
+        if (!browserClawPin.MatchesProcess(browserClawProcess.ProcessName, browserClawProcess.ExecutablePath)) return false;
+        if (!chromePin.IsRunning(new[] { chromeProcess })) return false;
+        if (chromePin.IsRunning(new[] { browserClawProcess })) return false;
+        if (!browserClawPin.IsRunning(new[] { browserClawProcess })) return false;
+
+        if (!RunningAppSnapshot.IsPinnedProcess(new[] { chromePin }, "chrome", chromePath)) return false;
+        if (RunningAppSnapshot.IsPinnedProcess(new[] { chromePin }, "chrome", browserClawPath)) return false;
+
+        // If the candidate path is unavailable, retain the existing process-name fallback.
+        return chromePin.MatchesProcess("chrome", null);
     }
 
     private static bool TestDynamicApp(string probePath)
@@ -1595,16 +1633,30 @@ internal sealed class DockForm : Form
         return path;
     }
 
-    private static HashSet<string> SnapshotProcesses()
+    private static IReadOnlyList<ProcessIdentity> SnapshotProcesses(IReadOnlyList<PinnedApp> pinnedApps)
     {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pinnedProcessNames = pinnedApps
+            .SelectMany(app => app.ProcessNames)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var identities = new List<ProcessIdentity>();
         foreach (var process in Process.GetProcesses())
         {
-            try { names.Add(process.ProcessName); }
+            try
+            {
+                var processName = process.ProcessName;
+                if (pinnedProcessNames.Contains(processName))
+                {
+                    identities.Add(new ProcessIdentity(
+                        processName,
+                        ProcessIdentityReader.TryGetExecutablePath(process)));
+                }
+            }
+            catch (System.ComponentModel.Win32Exception) { }
+            catch (ArgumentException) { }
             catch (InvalidOperationException) { }
             finally { process.Dispose(); }
         }
-        return names;
+        return identities;
     }
 
     private void RefreshDockState()
@@ -1629,7 +1681,7 @@ internal sealed class DockForm : Form
         var marshaledToUi = false;
         try
         {
-            var processes = SnapshotProcesses();
+            var processes = SnapshotProcesses(pinnedApps);
             var snapshots = RunningAppSnapshot.Capture(pinnedApps);
             try
             {
@@ -1660,7 +1712,7 @@ internal sealed class DockForm : Form
     }
 
     private void ApplyDockState(
-        HashSet<string> runningProcesses,
+        IReadOnlyList<ProcessIdentity> runningProcesses,
         IReadOnlyList<RunningAppSnapshot> snapshots,
         int generation)
     {
@@ -1942,7 +1994,7 @@ internal sealed class DockItem : IDisposable
         return string.IsNullOrWhiteSpace(title) ? $"{Name} window" : title;
     }
 
-    public bool RefreshPinnedState(IReadOnlySet<string> processes)
+    public bool RefreshPinnedState(IReadOnlyList<ProcessIdentity> processes)
     {
         if (_pinnedApp is null) return false;
         var running = _pinnedApp.IsRunning(processes);
@@ -2026,6 +2078,48 @@ internal sealed record DockWindowTarget(
     string Title,
     bool IsMinimized);
 
+internal sealed record ProcessIdentity(
+    string ProcessName,
+    string? ExecutablePath);
+
+internal static class ProcessIdentityReader
+{
+    public static ProcessIdentity? TryRead(Process process)
+    {
+        try
+        {
+            var processName = process.ProcessName;
+            return string.IsNullOrWhiteSpace(processName)
+                ? null
+                : new ProcessIdentity(processName, TryGetExecutablePath(process));
+        }
+        catch (System.ComponentModel.Win32Exception) { }
+        catch (ArgumentException) { }
+        catch (InvalidOperationException) { }
+        return null;
+    }
+
+    public static string? TryGetExecutablePath(Process process)
+    {
+        try { return process.MainModule?.FileName; }
+        catch (System.ComponentModel.Win32Exception) { }
+        catch (ArgumentException) { }
+        catch (InvalidOperationException) { }
+        catch (NotSupportedException) { }
+        return null;
+    }
+
+    public static string? NormalizeExecutablePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var candidate = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
+        try { return Path.GetFullPath(candidate); }
+        catch (ArgumentException) { return candidate; }
+        catch (IOException) { return candidate; }
+        catch (NotSupportedException) { return candidate; }
+    }
+}
+
 internal sealed record RunningAppSnapshot(
     string Key,
     string Name,
@@ -2052,13 +2146,11 @@ internal sealed record RunningAppSnapshot(
             try
             {
                 using var process = Process.GetProcessById((int)processId);
-                var processName = process.ProcessName;
-                if (ExcludedProcesses.Contains(processName) || pinnedApps.Any(app => app.MatchesProcess(processName))) return true;
-
-                string? executablePath = null;
-                try { executablePath = process.MainModule?.FileName; }
-                catch (System.ComponentModel.Win32Exception) { }
-                catch (InvalidOperationException) { }
+                var identity = ProcessIdentityReader.TryRead(process);
+                if (identity is null) return true;
+                var processName = identity.ProcessName;
+                var executablePath = identity.ExecutablePath;
+                if (ExcludedProcesses.Contains(processName) || IsPinnedProcess(pinnedApps, processName, executablePath)) return true;
 
                 var title = WindowTitle(window);
                 var name = DisplayName(processName, executablePath, title);
@@ -2067,7 +2159,7 @@ internal sealed record RunningAppSnapshot(
                 // when the app also exposes its concrete process below.
                 var key = processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)
                     ? $"{processName}:{title}"
-                    : string.IsNullOrWhiteSpace(executablePath) ? processName : executablePath;
+                    : ProcessIdentityReader.NormalizeExecutablePath(executablePath) ?? processName;
                 if (!groups.TryGetValue(key, out var group))
                 {
                     group = new RunningAppAccumulator(key, name, processName, executablePath);
@@ -2096,6 +2188,12 @@ internal sealed record RunningAppSnapshot(
                 group.Windows.ToArray()))
             .ToArray();
     }
+
+    internal static bool IsPinnedProcess(
+        IReadOnlyList<PinnedApp> pinnedApps,
+        string processName,
+        string? executablePath) =>
+        pinnedApps.Any(app => app.MatchesProcess(processName, executablePath));
 
     internal static bool IsTaskbarWindow(IntPtr window)
     {
@@ -2354,6 +2452,19 @@ internal sealed class PinnedApp
         ["Service Bus Explorer"] = ["ServiceBusExplorer"], ["PowerShell 7 (x64)"] = ["pwsh"], ["Bruno"] = ["Bruno"],
         ["WireGuard"] = ["wireguard"], ["Proton VPN"] = ["ProtonVPN.Client", "ProtonVPN.Launcher"], ["Bitwarden"] = ["Bitwarden"]
     };
+    private readonly Lazy<string?> _expectedExecutablePath;
+
+    public PinnedApp()
+    {
+        _expectedExecutablePath = new Lazy<string?>(() =>
+        {
+            var source = string.IsNullOrWhiteSpace(ExecutablePath)
+                ? Shortcut is null ? null : ResolveShortcutTarget(Shortcut)
+                : ExecutablePath;
+            return ProcessIdentityReader.NormalizeExecutablePath(source);
+        });
+    }
+
     public required string Name { get; init; }
     public string? AppId { get; init; }
     public required string[] Patterns { get; init; }
@@ -2361,6 +2472,7 @@ internal sealed class PinnedApp
     public string? ExecutablePath { get; init; }
     public required string[] ProcessNames { get; init; }
     public bool IsUserPin { get; init; }
+    internal string? ExpectedExecutablePath => _expectedExecutablePath.Value;
 
     public static IReadOnlyList<PinnedApp> Load()
     {
@@ -2412,7 +2524,20 @@ internal sealed class PinnedApp
 
     public bool IsRunning(IReadOnlySet<string> processes) => ProcessNames.Any(processes.Contains);
 
+    public bool IsRunning(IReadOnlyList<ProcessIdentity> processes) =>
+        processes.Any(process => MatchesProcess(process.ProcessName, process.ExecutablePath));
+
     public bool MatchesProcess(string processName) => ProcessNames.Contains(processName, StringComparer.OrdinalIgnoreCase);
+
+    internal bool MatchesProcess(string processName, string? executablePath)
+    {
+        if (!MatchesProcess(processName)) return false;
+        var expected = ExpectedExecutablePath;
+        if (expected is null) return true;
+        var candidate = ProcessIdentityReader.NormalizeExecutablePath(executablePath);
+        return candidate is null ||
+               expected.Equals(candidate, StringComparison.OrdinalIgnoreCase);
+    }
 
     internal bool IsFileExplorer => Name.Equals("File Explorer", StringComparison.OrdinalIgnoreCase);
 
@@ -2449,6 +2574,7 @@ internal sealed class PinnedApp
                 {
                     try
                     {
+                        if (!MatchesProcess(processName, ProcessIdentityReader.TryGetExecutablePath(process))) continue;
                         var window = process.MainWindowHandle;
                         if (window == IntPtr.Zero || !NativeMethods.IsWindow(window)) continue;
                         if (NativeMethods.IsIconic(window))
@@ -2538,6 +2664,7 @@ internal sealed class PinnedApp
                 {
                     try
                     {
+                        if (!MatchesProcess(processName, ProcessIdentityReader.TryGetExecutablePath(process))) continue;
                         if (process.SessionId == currentSessionId) processIds.Add((uint)process.Id);
                     }
                     catch (InvalidOperationException) { }
@@ -2589,8 +2716,7 @@ internal sealed class PinnedApp
             var packaged = LoadShellItemIcon($"shell:AppsFolder\\{AppId}", size);
             if (packaged is not null) return packaged;
         }
-        var source = ExecutablePath;
-        source ??= Shortcut is null ? null : ResolveShortcutTarget(Shortcut);
+        var source = ExpectedExecutablePath;
         source ??= Shortcut;
         source ??= AppId is null ? null : $"shell:AppsFolder\\{AppId}";
         if (source is null) return null;
