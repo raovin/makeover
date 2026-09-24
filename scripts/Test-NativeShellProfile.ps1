@@ -543,9 +543,26 @@ if ($hotCornerStartupArtifacts.Count -gt 0) {
   $failures.Add("Retired global hot-corner artifacts remain in the Startup folder: $artifactNames")
 }
 $wallpaperGuard = Get-ScheduledTask -TaskName 'MacMakeover Wallpaper Guard' -ErrorAction SilentlyContinue
-if (-not $wallpaperGuard -or -not $wallpaperGuard.Settings.Enabled -or
-    ($wallpaperGuard.Actions.Arguments -join ' ') -notmatch 'Repair-NativeWallpaperPolicy\.ps1') {
-  $failures.Add('The MDM wallpaper repair guard is not installed and enabled.')
+$guardLaunchOk = $false
+if ($wallpaperGuard -and $wallpaperGuard.Settings.Enabled) {
+  $guardActions = @($wallpaperGuard.Actions)
+  if ($guardActions.Count -eq 1) {
+    $guardExecute = [string]$guardActions[0].Execute
+    $guardArguments = [string]$guardActions[0].Arguments
+    # One action only: joining every action let a conhost.exe entry borrow
+    # --headless and the script name from a different action. -File must be its
+    # own argument so a space in the user-profile path cannot split the script.
+    $guardLaunchOk = $guardExecute -match '(?i)(?:^|[\\/])conhost\.exe$' -and
+      $guardArguments -match '(?i)(?:^|\s)--headless(?:\s|$)' -and
+      $guardArguments -match '(?i)(?:^|[\\/"])powershell\.exe(?:"|\s|$)' -and
+      $guardArguments -match '(?i)(?:^|\s)-NoProfile(?:\s|$)' -and
+      $guardArguments -match '(?i)(?:^|\s)-NonInteractive(?:\s|$)' -and
+      $guardArguments -match '(?i)(?:^|\s)-ExecutionPolicy\s+Bypass(?:\s|$)' -and
+      $guardArguments -match '(?i)(?:^|\s)-File\s+(?:"[^"]*Repair-NativeWallpaperPolicy\.ps1"|\S*Repair-NativeWallpaperPolicy\.ps1)(?:\s|$)'
+  }
+}
+if (-not $guardLaunchOk) {
+  $failures.Add('The MDM wallpaper repair guard is not installed, enabled, and headless.')
 }
 
 $pinManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'config\native-taskbar-pins.json') -Raw |

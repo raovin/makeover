@@ -78,9 +78,12 @@ try {
 
   New-Item -ItemType Directory -Force -Path $wallpaperGuardRoot | Out-Null
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Repair-NativeWallpaperPolicy.ps1') -Destination $wallpaperGuardScript -Force
+  $guardPowerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $guardConhost = Join-Path $env:WINDIR 'System32\conhost.exe'
   $guardAction = New-ScheduledTaskAction `
-    -Execute (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-    -Argument ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f $wallpaperGuardScript)
+    -Execute $guardConhost `
+    -Argument ('--headless "{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{1}"' -f `
+      $guardPowerShell, $wallpaperGuardScript)
   $guardLogon = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
   $guardRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
     -RepetitionInterval (New-TimeSpan -Minutes 15) `

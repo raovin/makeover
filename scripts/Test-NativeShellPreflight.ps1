@@ -389,6 +389,13 @@ if ($switchSource -notmatch 'policyWallpaperManagedHash' -or
     $prepareSource -notmatch 'virtualDesktopsPath') {
   $failures.Add('Wallpaper deployment no longer reconciles the MDM target/provider or updates virtual desktops.')
 }
+$guardArgumentTemplate = '--headless "{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{1}"'
+if ($switchSource -notmatch [regex]::Escape($guardArgumentTemplate) -or
+    $switchSource -notmatch [regex]::Escape('-Execute $guardConhost') -or
+    $switchSource -notmatch [regex]::Escape('System32\conhost.exe') -or
+    $switchSource -notmatch [regex]::Escape('System32\WindowsPowerShell\v1.0\powershell.exe')) {
+  $failures.Add('Wallpaper guard must run quoted noninteractive Windows PowerShell -File through conhost.exe --headless.')
+}
 $wallpaperRepairSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Repair-NativeWallpaperPolicy.ps1') -Raw
 if ($wallpaperRepairSource -notmatch 'public static class NativeWallpaperRefresh' -or
     $wallpaperRepairSource -notmatch 'public static extern bool SystemParametersInfo' -or

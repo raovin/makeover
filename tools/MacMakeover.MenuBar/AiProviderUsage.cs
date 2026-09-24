@@ -1175,88 +1175,12 @@ internal static class GeminiUsageParser
 
 internal sealed class GeminiUsageReader : IProviderUsageReader
 {
-    public async Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
+    public Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
     {
-        var executable = FindAgyExecutable();
-        if (executable is null)
-        {
-            return ProviderUsageReadResult.Unavailable(
-                "Antigravity CLI not found; install AGY and sign in with Google");
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executable,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-        };
-        startInfo.ArgumentList.Add("--print");
-        startInfo.ArgumentList.Add("/usage");
-        startInfo.ArgumentList.Add("--output-format");
-        startInfo.ArgumentList.Add("json");
-        startInfo.ArgumentList.Add("--print-timeout");
-        startInfo.ArgumentList.Add("10s");
-
-        using var process = new Process { StartInfo = startInfo };
-        try
-        {
-            if (!process.Start())
-            {
-                return ProviderUsageReadResult.Unavailable("Antigravity CLI could not start");
-            }
-
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            // Drain diagnostics without retaining or logging credential-adjacent output.
-            _ = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            var stdout = await stdoutTask.ConfigureAwait(false);
-            if (process.ExitCode != 0)
-            {
-                return ProviderUsageReadResult.Unavailable(
-                    "Antigravity CLI did not return Gemini quota data");
-            }
-
-            return GeminiUsageParser.TryParseWeeklySample(
-                stdout,
-                DateTimeOffset.UtcNow,
-                out var sample)
-                ? ProviderUsageReadResult.Fresh(sample)
-                : ProviderUsageReadResult.Unavailable(
-                    "Antigravity CLI did not return a fresh Gemini weekly quota");
-        }
-        catch (OperationCanceledException)
-        {
-            try
-            {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-            }
-            catch { }
-            return ProviderUsageReadResult.Unavailable("Gemini quota request timed out");
-        }
-        catch
-        {
-            return ProviderUsageReadResult.Unavailable("Gemini quota request failed");
-        }
-        finally
-        {
-            try
-            {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-            }
-            catch { }
-        }
-    }
-
-    private static string? FindAgyExecutable()
-    {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var installed = Path.Combine(localAppData, "agy", "bin", "agy.exe");
-        if (File.Exists(installed)) return installed;
-
-        return ProviderExecutableLocator.Find("agy.exe");
+        // AGY /usage can initiate browser authentication even in print mode.
+        // Background polling must not start interactive sign-in flows.
+        return Task.FromResult(ProviderUsageReadResult.Unavailable(
+            "Automatic Gemini quota checks disabled to prevent browser sign-in tabs"));
     }
 }
 

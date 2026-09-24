@@ -153,8 +153,10 @@ Promotion is intentionally split:
 
 The privileged phase also sets the ADMX Desktop Wallpaper policy to `CropToFit`
 (`4`; Windows' ordinary desktop key uses `10` for the same Fill result) and registers
-`MacMakeover Wallpaper Guard`. The hidden task runs at logon and every 15 minutes to
-repair device-management reapplication without adding a resident polling process.
+`MacMakeover Wallpaper Guard`. The task action is `conhost.exe --headless` running
+Windows PowerShell `-NoProfile -NonInteractive -ExecutionPolicy Bypass -File` at logon
+and every 15 minutes to repair device-management reapplication without adding a
+resident polling process or briefly flashing a PowerShell window.
 Promotion removes the retired hot-corner Startup shortcut; the owned AppBar handles
 both corners directly.
 
