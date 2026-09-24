@@ -1,5 +1,10 @@
 # Native shell tray audit — 2026-09-24
 
+Deployment follow-up: the new binaries were installed and the running profile
+passed on September 25. See [deployment and performance review](PERFORMANCE-REVIEW-2026-09-25.md)
+for the UAC limitation and final installed-state evidence. The verification below
+records the original source-audit state before that deployment.
+
 ## Result
 
 MenuBar tray rows now represent live notification registrations instead of
