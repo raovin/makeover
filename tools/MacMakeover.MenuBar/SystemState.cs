@@ -196,7 +196,7 @@ internal sealed class SystemStateProvider : IDisposable
         var trays = snapshot.TrayApps.Count == 0
             ? string.Empty
             : string.Join('|', snapshot.TrayApps.Select(app =>
-                $"{app.Key}\u001e{app.Name}\u001e{app.ExecutablePath}\u001e{(app.Promoted ? '1' : '0')}"));
+                $"{app.Key}\u001e{app.Name}\u001e{app.ExecutablePath}\u001e{(app.Promoted ? '1' : '0')}\u001e{app.IconSnapshotIdentity}\u001e{app.IconGuid?.ToString("D")}"));
         return string.Join('\u001f',
             snapshot.CpuPercent.ToString(System.Globalization.CultureInfo.InvariantCulture),
             snapshot.UsedMemoryGb.ToString("0", System.Globalization.CultureInfo.InvariantCulture),

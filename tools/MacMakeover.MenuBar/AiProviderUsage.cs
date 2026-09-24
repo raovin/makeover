@@ -1191,13 +1191,18 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
     private readonly IProviderUsageReader[] _readers;
     private readonly TimeSpan _providerSpacing;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    // Canceled in Dispose. Disposed only after that cancel returns and every
+    // registered worker has exited, so in-flight reads can still take Token.
     private readonly CancellationTokenSource _lifetime = new();
     private AiProviderUsageSnapshot _snapshot = AiProviderUsageSnapshot.Empty;
     private int _nextProviderIndex;
     private int _refreshAllRequested;
     private int _requestWorkerRunning;
+    private int _registeredOperations;
     private bool _started;
-    private bool _disposed;
+    private bool _cancelCompleted;
+    private bool _lifetimeReleased;
+    private volatile bool _disposed;
 
     public AiProviderUsageCoordinator(
         IProviderUsageReader? codexReader = null,
@@ -1215,8 +1220,11 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
         ];
         _providerSpacing = providerSpacing ??
                            TimeSpan.FromSeconds(AiProviderUsagePolicy.ProviderSpacingSeconds);
-        _timer = new System.Threading.Timer(_ => _ = RefreshNextProviderAsync(), null,
-            Timeout.Infinite, Timeout.Infinite);
+        _timer = new System.Threading.Timer(
+            _ => _ = ObserveCancellation(RefreshNextProviderAsync()),
+            null,
+            Timeout.Infinite,
+            Timeout.Infinite);
     }
 
     public AiProviderUsageSnapshot Snapshot
@@ -1241,16 +1249,17 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
 
     public void Start()
     {
+        var refreshNow = false;
         lock (_gate)
         {
             if (_started || _disposed) return;
             _started = true;
+            // Same lock as Dispose's state change, so Change cannot follow Dispose.
+            _timer.Change(_providerSpacing, _providerSpacing);
+            refreshNow = true;
         }
 
-        _timer.Change(
-            _providerSpacing,
-            _providerSpacing);
-        RequestImmediateRefresh();
+        if (refreshNow) RequestImmediateRefresh();
     }
 
     internal void RequestImmediateRefresh()
@@ -1258,11 +1267,17 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
         if (_disposed) return;
         Interlocked.Exchange(ref _refreshAllRequested, 1);
         if (Interlocked.CompareExchange(ref _requestWorkerRunning, 1, 0) == 0)
-            _ = Task.Run(ProcessRequestedRefreshesAsync);
+            _ = ObserveCancellation(Task.Run(ProcessRequestedRefreshesAsync));
     }
 
     private async Task ProcessRequestedRefreshesAsync()
     {
+        if (!TryRegisterOperation())
+        {
+            Volatile.Write(ref _requestWorkerRunning, 0);
+            return;
+        }
+
         try
         {
             do
@@ -1273,7 +1288,7 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
                 {
                     for (var index = 0; index < _readers.Length && !_disposed; index++)
                         await RefreshProviderAsync(index).ConfigureAwait(false);
-                    _nextProviderIndex = 0;
+                    if (!_disposed) _nextProviderIndex = 0;
                 }
                 finally
                 {
@@ -1282,43 +1297,53 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
             }
             while (!_disposed && Volatile.Read(ref _refreshAllRequested) != 0);
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            // Normal shutdown.
+            // Shutdown cancels the wait. Caught so the discarded task does not fault.
         }
         finally
         {
             Volatile.Write(ref _requestWorkerRunning, 0);
             if (!_disposed && Volatile.Read(ref _refreshAllRequested) != 0)
                 RequestImmediateRefresh();
+            CompleteOperation();
         }
     }
 
     private async Task RefreshNextProviderAsync()
     {
-        if (_disposed || !await _refreshGate.WaitAsync(0).ConfigureAwait(false)) return;
+        if (!TryRegisterOperation()) return;
+        var gateHeld = false;
         try
         {
+            if (_disposed || !await _refreshGate.WaitAsync(0).ConfigureAwait(false)) return;
+            gateHeld = true;
             var index = _nextProviderIndex;
             _nextProviderIndex = (_nextProviderIndex + 1) % _readers.Length;
             await RefreshProviderAsync(index).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            // Discarded timer work must not fault when shutdown cancels the read.
+        }
         finally
         {
-            _refreshGate.Release();
+            if (gateHeld) _refreshGate.Release();
+            CompleteOperation();
         }
     }
 
     private async Task RefreshProviderAsync(int index)
     {
+        // Caller holds a registered operation, so _lifetime is still alive here.
+        if (_disposed) return;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(AiProviderUsagePolicy.RefreshTimeoutSeconds));
         var result = await ReadSafelyAsync(_readers[index], timeout.Token).ConfigureAwait(false);
-        if (_disposed) return;
-
         var nowUtc = DateTimeOffset.UtcNow;
         lock (_gate)
         {
+            if (_disposed) return;
             _snapshot = index switch
             {
                 0 => _snapshot with
@@ -1366,10 +1391,96 @@ internal sealed class AiProviderUsageCoordinator : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        _lifetime.Cancel();
+        var cancelOnCaller = false;
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            // No registered worker means Cancel has no reader callback to run.
+            cancelOnCaller = _registeredOperations == 0;
+        }
+
+        // Change runs under _gate and only before _disposed is set, so this
+        // cannot overlap Start. Do not hold _gate: a callback may need it.
         _timer.Dispose();
-        _lifetime.Dispose();
+        if (cancelOnCaller)
+        {
+            FinishCancel();
+            return;
+        }
+
+        // A registered reader can Kill and WaitForExit from its cancel path.
+        // Leave that off the disposing thread and do not wait for it.
+        ThreadPool.UnsafeQueueUserWorkItem(
+            static (AiProviderUsageCoordinator self) => self.FinishCancel(),
+            this,
+            preferLocal: false);
+    }
+
+    private void FinishCancel()
+    {
+        CancellationTokenSource? lifetime = null;
+        try
+        {
+            _lifetime.Cancel();
+        }
+        catch (AggregateException)
+        {
+            // Reader cancel callbacks can throw. Swallow the aggregate here so
+            // the pool thread does not crash the process, and do not log it:
+            // callback text can be credential-adjacent.
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _cancelCompleted = true;
+                lifetime = ClaimLifetime();
+            }
+
+            lifetime?.Dispose();
+        }
+    }
+
+    private bool TryRegisterOperation()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return false;
+            _registeredOperations++;
+            return true;
+        }
+    }
+
+    private void CompleteOperation()
+    {
+        CancellationTokenSource? lifetime = null;
+        lock (_gate)
+        {
+            _registeredOperations--;
+            lifetime = ClaimLifetime();
+        }
+
+        lifetime?.Dispose();
+    }
+
+    private CancellationTokenSource? ClaimLifetime()
+    {
+        if (!_disposed || !_cancelCompleted || _registeredOperations != 0 || _lifetimeReleased)
+            return null;
+        _lifetimeReleased = true;
+        return _lifetime;
+    }
+
+    private static async Task ObserveCancellation(Task work)
+    {
+        try
+        {
+            await work.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The discarded timer and refresh tasks treat shutdown as completion.
+        }
     }
 }

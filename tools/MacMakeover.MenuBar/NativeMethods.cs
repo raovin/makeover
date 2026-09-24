@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace MacMakeover.MenuBar;
@@ -7,6 +8,12 @@ internal static class NativeMethods
     public const int WsExToolWindow = 0x00000080;
     public const int WsExNoActivate = 0x08000000;
     public const int WmAppCommand = 0x0319;
+    public const int WmContextMenu = 0x007B;
+    private const int WmUser = 0x0400;
+    // tailscale/walk allocates its first WalkNotifyIconSink message at
+    // WM_USER + 3. This is used only after the live window class and owner
+    // process have both been verified; failure is always a no-op.
+    private const int WalkNotifyIconMessage = WmUser + 3;
     public const int AppCommandVolumeUp = 10;
     public const int AppCommandVolumeDown = 9;
     public const int SwRestore = 9;
@@ -45,6 +52,22 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct NotifyIconIdentifier
+    {
+        public uint Size;
+        public IntPtr Window;
+        public uint Id;
+        public Guid IconGuid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct FileTime
     {
         public uint Low;
@@ -69,6 +92,11 @@ internal static class NativeMethods
     [DllImport("shell32.dll")]
     public static extern UIntPtr SHAppBarMessage(uint message, ref AppBarData data);
 
+    [DllImport("shell32.dll")]
+    private static extern int Shell_NotifyIconGetRect(
+        ref NotifyIconIdentifier identifier,
+        out Rect iconRect);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern uint RegisterWindowMessage(string message);
 
@@ -90,6 +118,17 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr FindWindowEx(
+        IntPtr parent,
+        IntPtr after,
+        string? className,
+        string? windowName);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(
@@ -123,5 +162,107 @@ internal static class NativeMethods
 
     [DllImport("powrprof.dll")]
     public static extern uint PowerGetEffectiveOverlayScheme(out Guid powerMode);
+
+    internal static bool TryShowNotificationIconContextMenu(
+        Guid iconGuid,
+        string executablePath,
+        int anchorX,
+        int anchorY)
+    {
+        if (iconGuid == Guid.Empty || string.IsNullOrWhiteSpace(executablePath)) return false;
+        if (!IsNotificationIconLive(iconGuid)) return false;
+        var virtualScreen = SystemInformation.VirtualScreen;
+        if (!virtualScreen.Contains(anchorX, anchorY)) return false;
+        var anchor = new Point { X = anchorX, Y = anchorY };
+
+        // Walk-based tray clients own a hidden sink window and handle their
+        // native context menu on the shell callback message. This path keeps
+        // working while the Explorer taskbar is intentionally hidden by the
+        // custom dock.
+        if (TryShowWalkContextMenu(executablePath, anchor)) return true;
+
+        // There is no supported generic shell API for asking another process
+        // to open its tray menu. Do not synthesize a global mouse click: the
+        // custom dock hides Explorer's notification area and a stale shell
+        // rectangle must never be treated as a safe target.
+        return false;
+    }
+
+    internal static bool IsNotificationIconLive(Guid iconGuid)
+    {
+        if (iconGuid == Guid.Empty) return false;
+        var identifier = new NotifyIconIdentifier
+        {
+            Size = (uint)Marshal.SizeOf<NotifyIconIdentifier>(),
+            IconGuid = iconGuid
+        };
+        return Shell_NotifyIconGetRect(ref identifier, out _) >= 0;
+    }
+
+    internal static bool IsKnownWalkTrayClient(string executablePath) =>
+        Path.GetFileName(executablePath).Equals("tailscale-ipn.exe", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool ShouldDispatchWalkContextMenu(string executablePath, int matchingSinkCount) =>
+        IsKnownWalkTrayClient(executablePath) && matchingSinkCount == 1;
+
+    internal static IntPtr PackWalkContextMenu(int x, int y) =>
+        PackPoint(new Point { X = x, Y = y });
+
+    internal static IntPtr PackWalkContextMenuMessage() =>
+        PackMessage(WmContextMenu, 0);
+
+    private static bool TryShowWalkContextMenu(string executablePath, Point anchor)
+    {
+        var expectedPath = TrayAppProvider.NormalizeExecutablePath(executablePath);
+        if (!IsKnownWalkTrayClient(expectedPath)) return false;
+
+        var matches = new List<IntPtr>();
+        var after = IntPtr.Zero;
+        while (true)
+        {
+            var window = FindWindowEx(IntPtr.Zero, after, "WalkNotifyIconSink", null);
+            if (window == IntPtr.Zero) break;
+            after = window;
+
+            GetWindowThreadProcessId(window, out var processId);
+            if (processId == 0) continue;
+            try
+            {
+                using var process = Process.GetProcessById((int)processId);
+                var livePath = process.MainModule?.FileName;
+                if (string.IsNullOrWhiteSpace(livePath) ||
+                    !string.Equals(
+                        TrayAppProvider.NormalizeExecutablePath(livePath),
+                        expectedPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                matches.Add(window);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+            {
+                // The owner can exit between enumeration and dispatch.
+            }
+        }
+
+        // A GUID-to-window mapping is not exposed by Explorer. Tailscale's
+        // current client creates one Walk sink per GUID icon, so only dispatch
+        // when the process has exactly one candidate; never pick an arbitrary
+        // sink if that contract becomes ambiguous.
+        if (!ShouldDispatchWalkContextMenu(expectedPath, matches.Count)) return false;
+        return PostMessage(
+            matches[0],
+            WalkNotifyIconMessage,
+            PackPoint(anchor),
+            PackWalkContextMenuMessage());
+    }
+
+    private static IntPtr PackPoint(Point point) =>
+        new(unchecked((int)((uint)(ushort)point.X | ((uint)(ushort)point.Y << 16))));
+
+    private static IntPtr PackMessage(int low, int high) =>
+        new(unchecked((int)((uint)(ushort)low | ((uint)(ushort)high << 16))));
 
 }

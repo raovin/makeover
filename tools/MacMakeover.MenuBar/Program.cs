@@ -67,6 +67,8 @@ internal static class Program
                SystemStateProvider.FriendlyAppName("acmeeditor", "Quarterly Plan.txt - Acme Editor") == "acmeeditor" &&
                SystemStateProvider.FriendlyAppName("ApplicationFrameHost", "Settings", "Application Frame Host") == "Settings" &&
                TrayAppProvider.ExpandExecutablePath("{F38BF404-1D43-42F2-9305-67DE0B28FC23}\\explorer.exe") == Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe") &&
+               TrayAppProviderSelfTest() &&
+               TrayNativeDispatchSelfTest() &&
                TrayIconCacheSelfTest() &&
                 DisplayRebuildSelfTest() &&
                 TelemetryLayoutSelfTest() &&
@@ -80,6 +82,66 @@ internal static class Program
                !MenuBarForm.IsShowDesktopCorner(new Point(8, 0), new Size(1280, 20), 8) &&
                !MenuBarForm.IsShowDesktopCorner(new Point(1271, 8), new Size(1280, 20), 8);
     }
+
+    private static bool TrayAppProviderSelfTest()
+    {
+        var liveGuid = new Guid("11111111-1111-1111-1111-111111111111");
+        var staleGuid = new Guid("22222222-2222-2222-2222-222222222222");
+        var secondLiveGuid = new Guid("33333333-3333-3333-3333-333333333333");
+        const string multiPath = @"C:\Apps\multi.exe";
+        const string legacyPath = @"C:\Apps\legacy.exe";
+        var registrations = new[]
+        {
+            new TrayAppSnapshot("live", "Live", multiPath, false, "one", liveGuid),
+            new TrayAppSnapshot("live-duplicate", "Live", multiPath, true, "two", liveGuid),
+            new TrayAppSnapshot("live-two", "Live two", multiPath, false, "four", secondLiveGuid),
+            new TrayAppSnapshot("stale", "Stale", multiPath, true, "three", staleGuid),
+            new TrayAppSnapshot("multi-legacy-a", "Legacy", multiPath, false, "snapshot-a"),
+            new TrayAppSnapshot("multi-legacy-b", "Legacy", multiPath, true, "snapshot-b"),
+            new TrayAppSnapshot("legacy-a", "Legacy", legacyPath, false, "snapshot-a"),
+            new TrayAppSnapshot("legacy-b", "Legacy", legacyPath, true, "snapshot-b")
+        };
+        var selected = TrayAppProvider.SelectLive(
+            registrations,
+            new HashSet<string>(new[] { multiPath, legacyPath }, StringComparer.OrdinalIgnoreCase),
+            guid => guid == liveGuid || guid == secondLiveGuid);
+        return selected.Count == 3 &&
+               selected.Any(item => item.Key == "live-duplicate" && item.IconGuid == liveGuid) &&
+               selected.Any(item => item.Key == "live-two" && item.IconGuid == secondLiveGuid) &&
+               selected.Any(item => item.Key == "legacy-b" && item.IconGuid is null) &&
+               selected.All(item => !item.Key.StartsWith("multi-legacy", StringComparison.Ordinal)) &&
+               TrayAppProvider.ResolveDisplayName(
+                   null,
+                   @"C:\Program Files\Tailscale\tailscale-ipn.exe") == "Tailscale" &&
+               TrayAppProvider.ResolveDisplayName("  Existing tooltip  ", multiPath) == "Existing tooltip" &&
+               TrayAppProvider.ResolveDisplayName(null, @"C:\Apps\foo_bar.exe") == "Foo Bar" &&
+               TrayAppProvider.ParseIconGuid(liveGuid.ToByteArray()) == liveGuid &&
+               TrayAppProvider.ParseIconGuid(liveGuid.ToString("D")) == liveGuid &&
+               TrayAppProvider.ParseIconGuid(null) is null &&
+               TrayAppProvider.ParseIconGuid("not-a-guid") is null &&
+               TrayAppProvider.ParseIconGuid(Guid.Empty) is null;
+    }
+
+    private static bool TrayNativeDispatchSelfTest() =>
+        NativeMethods.IsKnownWalkTrayClient(@"C:\Program Files\Tailscale\tailscale-ipn.exe") &&
+        !NativeMethods.IsKnownWalkTrayClient(@"C:\Program Files\Other\other.exe") &&
+        NativeMethods.ShouldDispatchWalkContextMenu(@"C:\Program Files\Tailscale\tailscale-ipn.exe", 1) &&
+        !NativeMethods.ShouldDispatchWalkContextMenu(@"C:\Program Files\Tailscale\tailscale-ipn.exe", 2) &&
+        !NativeMethods.ShouldDispatchWalkContextMenu(@"C:\Program Files\Other\other.exe", 1) &&
+        NativeMethods.PackWalkContextMenu(100, 200).ToInt64() == 0x00C80064 &&
+        NativeMethods.PackWalkContextMenuMessage().ToInt64() == NativeMethods.WmContextMenu &&
+        TrayAppLauncher.GetContextMenuDispatch(new TrayAppSnapshot(
+            "awake", "Awake", @"C:\Apps\AwakeAndAvailable.exe", false)) ==
+            TrayAppLauncher.ContextMenuDispatch.ExistingAwakeMenu &&
+        TrayAppLauncher.GetContextMenuDispatch(new TrayAppSnapshot(
+            "awake-guid", "Awake", @"C:\Apps\AwakeAndAvailable.exe", false, "", Guid.NewGuid())) ==
+            TrayAppLauncher.ContextMenuDispatch.ExistingAwakeMenu &&
+        TrayAppLauncher.GetContextMenuDispatch(new TrayAppSnapshot(
+            "unknown-guid", "Other", @"C:\Apps\other.exe", false, "", Guid.NewGuid())) ==
+            TrayAppLauncher.ContextMenuDispatch.Unavailable &&
+        TrayAppLauncher.GetContextMenuDispatch(new TrayAppSnapshot(
+            "tailscale-guid", "Tailscale", @"C:\Program Files\Tailscale\tailscale-ipn.exe", false, "", Guid.NewGuid())) ==
+            TrayAppLauncher.ContextMenuDispatch.NativeIcon;
 
     private static bool TrayIconCacheSelfTest()
     {
@@ -580,6 +642,7 @@ internal static class Program
             return false;
         }
         if (!StaggeredUsageCoordinatorSelfTest()) return false;
+        if (!CoordinatorLifecycleSelfTest()) return false;
 
         var current = new AiProviderUsageValue(
             true, 60, now.AddHours(2), string.Empty, now, 0, false);
@@ -688,6 +751,62 @@ internal static class Program
                snapshot.Gemini.RenderedText == "40%";
     }
 
+    private static bool CoordinatorLifecycleSelfTest()
+    {
+        using var entered = new ManualResetEventSlim();
+        using var cancelled = new ManualResetEventSlim();
+        using var finished = new ManualResetEventSlim();
+        using (var coordinator = new AiProviderUsageCoordinator(
+                   new LateUsageReader(entered, cancelled, finished),
+                   new LateUsageReader(entered, cancelled, finished),
+                   new LateUsageReader(entered, cancelled, finished),
+                   new LateUsageReader(entered, cancelled, finished),
+                   TimeSpan.FromHours(1)))
+        {
+            coordinator.Start();
+            if (!entered.Wait(TimeSpan.FromSeconds(1))) return false;
+
+            coordinator.Dispose();
+            if (!cancelled.Wait(TimeSpan.FromSeconds(1)) ||
+                !finished.Wait(TimeSpan.FromSeconds(2))) return false;
+
+            // The reader deliberately returns after cancellation. Dispose must
+            // prevent that late result from becoming visible.
+            var lateSnapshot = coordinator.Snapshot;
+            coordinator.RequestImmediateRefresh();
+            coordinator.Start();
+            if (lateSnapshot.Codex.Available || lateSnapshot.Claude.Available ||
+                lateSnapshot.Grok.Available || lateSnapshot.Gemini.Available)
+            {
+                return false;
+            }
+        }
+
+        var errors = 0;
+        using (var racing = new AiProviderUsageCoordinator(
+                   new ImmediateUnavailableReader(),
+                   new ImmediateUnavailableReader(),
+                   new ImmediateUnavailableReader(),
+                   new ImmediateUnavailableReader(),
+                   TimeSpan.FromHours(1)))
+        {
+            var start = Task.Run(() => TryRun(racing.Start, ref errors));
+            var dispose = Task.Run(() => TryRun(racing.Dispose, ref errors));
+            var request = Task.Run(() => TryRun(racing.RequestImmediateRefresh, ref errors));
+            Task.WaitAll(start, dispose, request);
+            racing.RequestImmediateRefresh();
+            racing.Dispose();
+        }
+
+        return errors == 0;
+
+        static void TryRun(Action action, ref int errors)
+        {
+            try { action(); }
+            catch { Interlocked.Increment(ref errors); }
+        }
+    }
+
     private sealed class UsageReaderProbeState
     {
         public int Active;
@@ -721,6 +840,37 @@ internal static class Program
                 Interlocked.Decrement(ref state.Active);
             }
         }
+    }
+
+    private sealed class LateUsageReader(
+        ManualResetEventSlim entered,
+        ManualResetEventSlim cancelled,
+        ManualResetEventSlim finished)
+        : IProviderUsageReader
+    {
+        public async Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken)
+        {
+            entered.Set();
+            using var registration = cancellationToken.Register(cancelled.Set);
+            try
+            {
+                await Task.Delay(250).ConfigureAwait(false);
+                return ProviderUsageReadResult.Fresh(new ProviderUsageSample(
+                    99,
+                    DateTimeOffset.UtcNow.AddDays(1),
+                    AiProviderUsagePolicy.WeeklyWindowMinutes));
+            }
+            finally
+            {
+                finished.Set();
+            }
+        }
+    }
+
+    private sealed class ImmediateUnavailableReader : IProviderUsageReader
+    {
+        public Task<ProviderUsageReadResult> ReadAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(ProviderUsageReadResult.Unavailable("self-test"));
     }
 
     private static bool TelemetryLayoutSelfTest()

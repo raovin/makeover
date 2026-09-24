@@ -9,14 +9,15 @@ internal sealed record TrayAppSnapshot(
     string Name,
     string ExecutablePath,
     bool Promoted,
-    string IconSnapshotIdentity = "");
+    string IconSnapshotIdentity = "",
+    Guid? IconGuid = null);
 
 internal static class TrayAppProvider
 {
     private const string NotifyIconRegistryPath = @"Control Panel\NotifyIconSettings";
     private static readonly object Gate = new();
     private static DateTime _registryReadAt;
-    private static IReadOnlyList<TrayRegistration> _registrations = [];
+    private static IReadOnlyList<TrayAppSnapshot> _registrations = [];
     private static DateTime _captureReadAt;
     private static IReadOnlyList<TrayAppSnapshot> _capture = [];
 
@@ -38,27 +39,18 @@ internal static class TrayAppProvider
                     {
                         if (!string.IsNullOrWhiteSpace(process.MainModule?.FileName))
                         {
-                            runningPaths.Add(Path.GetFullPath(process.MainModule.FileName));
+                            runningPaths.Add(NormalizeExecutablePath(process.MainModule.FileName));
                         }
                     }
                     catch (System.ComponentModel.Win32Exception) { }
                     catch (InvalidOperationException) { }
+                    catch (NotSupportedException) { }
+                    catch (UnauthorizedAccessException) { }
+                    catch (System.Security.SecurityException) { }
                 }
             }
 
-            return _capture = registrations
-                .Where(item => runningPaths.Contains(item.ExecutablePath))
-                .GroupBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.OrderByDescending(item => item.Promoted).First())
-                .OrderBy(item => item.Name.Equals("Awake & Available", StringComparison.OrdinalIgnoreCase) ? 0 : item.Promoted ? 1 : 2)
-                .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
-                .Select(item => new TrayAppSnapshot(
-                    item.Key,
-                    item.Name,
-                    item.ExecutablePath,
-                    item.Promoted,
-                    item.IconSnapshotIdentity))
-                .ToArray();
+            return _capture = SelectLive(registrations, runningPaths);
         }
     }
 
@@ -71,13 +63,61 @@ internal static class TrayAppProvider
             .Replace("{F38BF404-1D43-42F2-9305-67DE0B28FC23}", windows, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static IReadOnlyList<TrayRegistration> Registrations()
+    internal static IReadOnlyList<TrayAppSnapshot> SelectLive(
+        IReadOnlyList<TrayAppSnapshot> registrations,
+        ISet<string> runningPaths,
+        Func<Guid, bool>? isIconLive = null)
+    {
+        isIconLive ??= NativeMethods.IsNotificationIconLive;
+        var running = registrations.Where(item => runningPaths.Contains(item.ExecutablePath)).ToArray();
+        var liveGuided = running
+            .Where(item => item.IconGuid is { } guid && IsLiveGuid(guid, isIconLive))
+            // A GUID is the shell's stable notification-icon identity. Keep
+            // distinct GUIDs even when one process owns several icons, while
+            // collapsing duplicate registry rows for the same live icon.
+            .GroupBy(item => item.IconGuid!.Value)
+            .Select(BestRegistration)
+            .ToArray();
+        var guidedPaths = liveGuided
+            .Select(item => item.ExecutablePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Without a GUID there is no safe way to distinguish two historical
+        // registry rows belonging to the same process. Keep one deterministic
+        // legacy row per executable, and do not add it when that executable
+        // already has a verified live GUID icon.
+        var legacy = running
+            .Where(item => item.IconGuid is null && !guidedPaths.Contains(item.ExecutablePath))
+            .GroupBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .Select(BestRegistration);
+
+        return liveGuided
+            .Concat(legacy)
+            .OrderBy(item => item.Name.Equals("Awake & Available", StringComparison.OrdinalIgnoreCase) ? 0 : item.Promoted ? 1 : 2)
+            .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        static bool IsLiveGuid(Guid guid, Func<Guid, bool> predicate)
+        {
+            try { return predicate(guid); }
+            catch { return false; }
+        }
+
+        static TrayAppSnapshot BestRegistration(IEnumerable<TrayAppSnapshot> group) => group
+            .OrderByDescending(item => item.Promoted)
+            .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .First();
+    }
+
+    private static IReadOnlyList<TrayAppSnapshot> Registrations()
     {
         lock (Gate)
         {
             if ((DateTime.UtcNow - _registryReadAt).TotalSeconds < 2) return _registrations;
             _registryReadAt = DateTime.UtcNow;
-            var registrations = new List<TrayRegistration>();
+            var registrations = new List<TrayAppSnapshot>();
             try
             {
                 using var root = Registry.CurrentUser.OpenSubKey(NotifyIconRegistryPath);
@@ -87,18 +127,26 @@ internal static class TrayAppProvider
                     using var key = root.OpenSubKey(keyName);
                     var tooltip = key?.GetValue("InitialTooltip") as string;
                     var rawPath = key?.GetValue("ExecutablePath") as string;
-                    if (string.IsNullOrWhiteSpace(tooltip) || string.IsNullOrWhiteSpace(rawPath)) continue;
-                    var executablePath = ExpandExecutablePath(rawPath);
+                    if (string.IsNullOrWhiteSpace(rawPath)) continue;
+                    var executablePath = NormalizeExecutablePath(rawPath);
                     var processName = Path.GetFileNameWithoutExtension(executablePath);
                     if (string.IsNullOrWhiteSpace(processName) || IsShellOwned(processName)) continue;
                     var promoted = key?.GetValue("IsPromoted", 0) is int promotedValue && promotedValue != 0;
                     var iconSnapshot = key?.GetValue("IconSnapshot") as byte[];
-                    registrations.Add(new TrayRegistration(
+                    var version = string.IsNullOrWhiteSpace(tooltip)
+                        ? TryReadVersionInfo(executablePath)
+                        : null;
+                    registrations.Add(new TrayAppSnapshot(
                         keyName,
-                        tooltip.Trim(),
+                        ResolveDisplayName(
+                            tooltip,
+                            executablePath,
+                            version?.ProductName,
+                            version?.FileDescription),
                         executablePath,
                         promoted,
-                        TrayIconCache.GetIconSnapshotIdentity(iconSnapshot)));
+                        TrayIconCache.GetIconSnapshotIdentity(iconSnapshot),
+                        ParseIconGuid(key?.GetValue("IconGuid"))));
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -109,18 +157,97 @@ internal static class TrayAppProvider
         }
     }
 
+    internal static Guid? ParseIconGuid(object? rawValue)
+    {
+        if (rawValue is Guid guid && guid != Guid.Empty) return guid;
+        if (rawValue is byte[] bytes && bytes.Length == 16)
+        {
+            try
+            {
+                var parsed = new Guid(bytes);
+                return parsed == Guid.Empty ? null : parsed;
+            }
+            catch (ArgumentException) { }
+        }
+
+        if (rawValue is string text && Guid.TryParse(text.Trim(), out var textGuid) && textGuid != Guid.Empty)
+            return textGuid;
+
+        return null;
+    }
+
+    internal static string NormalizeExecutablePath(string path)
+    {
+        var expanded = ExpandExecutablePath(path).Trim().Trim('"');
+        try { return Path.GetFullPath(expanded); }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return expanded;
+        }
+    }
+
+    internal static string ResolveDisplayName(
+        string? tooltip,
+        string executablePath,
+        string? productName = null,
+        string? fileDescription = null)
+    {
+        var candidates = new[]
+        {
+            CleanDisplayName(tooltip),
+            CleanDisplayName(productName),
+            CleanDisplayName(fileDescription),
+            KnownDisplayName(Path.GetFileNameWithoutExtension(executablePath)),
+            SplitProcessName(Path.GetFileNameWithoutExtension(executablePath))
+        };
+        return candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate)) ?? "Tray application";
+    }
+
+    private static FileVersionInfo? TryReadVersionInfo(string executablePath)
+    {
+        try
+        {
+            return File.Exists(executablePath) ? FileVersionInfo.GetVersionInfo(executablePath) : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static string? CleanDisplayName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var clean = value.Trim().Replace('\r', ' ').Replace('\n', ' ');
+        return string.IsNullOrWhiteSpace(clean) ? null : clean;
+    }
+
+    private static string? KnownDisplayName(string? processName) =>
+        processName?.ToLowerInvariant() switch
+        {
+            "tailscale-ipn" => "Tailscale",
+            "awakeandavailable" => "Awake & Available",
+            _ => null
+        };
+
+    private static string? SplitProcessName(string? processName)
+    {
+        if (string.IsNullOrWhiteSpace(processName)) return null;
+        var words = processName
+            .Replace('-', ' ')
+            .Replace('_', ' ')
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (words.Length == 0) return null;
+        return string.Join(' ', words.Select(word =>
+            word.Length == 1 ? word.ToUpperInvariant() : char.ToUpperInvariant(word[0]) + word[1..]));
+    }
+
     private static bool IsShellOwned(string processName) =>
         processName.Equals("explorer", StringComparison.OrdinalIgnoreCase) ||
         processName.Equals("SecurityHealthSystray", StringComparison.OrdinalIgnoreCase) ||
         processName.Equals("Taskmgr", StringComparison.OrdinalIgnoreCase) ||
         processName.Equals("MoNotificationUx", StringComparison.OrdinalIgnoreCase);
 
-    private sealed record TrayRegistration(
-        string Key,
-        string Name,
-        string ExecutablePath,
-        bool Promoted,
-        string IconSnapshotIdentity);
 }
 
 internal sealed class TrayIconCache : IDisposable
@@ -249,6 +376,50 @@ internal sealed class TrayIconCache : IDisposable
 
 internal static class TrayAppLauncher
 {
+    internal enum ContextMenuDispatch
+    {
+        NativeIcon,
+        ExistingAwakeMenu,
+        Unavailable
+    }
+
+    internal static ContextMenuDispatch GetContextMenuDispatch(TrayAppSnapshot app)
+    {
+        if (Path.GetFileName(app.ExecutablePath).Equals(
+                "AwakeAndAvailable.exe",
+                StringComparison.OrdinalIgnoreCase))
+            return ContextMenuDispatch.ExistingAwakeMenu;
+
+        return app.IconGuid is { } iconGuid &&
+               iconGuid != Guid.Empty &&
+               NativeMethods.IsKnownWalkTrayClient(app.ExecutablePath)
+            ? ContextMenuDispatch.NativeIcon
+            : ContextMenuDispatch.Unavailable;
+    }
+
+    public static bool TryShowContextMenu(TrayAppSnapshot app, Point screenPoint)
+    {
+        switch (GetContextMenuDispatch(app))
+        {
+            case ContextMenuDispatch.NativeIcon when app.IconGuid is { } iconGuid:
+                if (NativeMethods.TryShowNotificationIconContextMenu(
+                        iconGuid,
+                        app.ExecutablePath,
+                        screenPoint.X,
+                        screenPoint.Y)) return true;
+                AppLog.Write($"Native tray icon disappeared or could not receive context menu: {app.Name} ({app.Key})");
+                return false;
+            case ContextMenuDispatch.ExistingAwakeMenu:
+                // Awake & Available exposes its real ContextMenuStrip through its
+                // existing single-instance signal when launched a second time.
+                Activate(app);
+                return true;
+            default:
+                AppLog.Write($"Native tray context menu unavailable for {app.Name} ({app.Key}); no IconGuid");
+                return false;
+        }
+    }
+
     public static void Activate(TrayAppSnapshot app)
     {
         var processName = Path.GetFileNameWithoutExtension(app.ExecutablePath);

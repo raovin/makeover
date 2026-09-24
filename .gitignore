@@ -11,3 +11,10 @@ qa/
 # Local .NET build outputs for the resident menu host.
 bin/
 obj/
+
+# Local agent worktrees and metadata are not repository artifacts.
+/.claude/worktrees/
+/.codex/
+
+# Local generated Awake publish output.
+/tools/AwakeAndAvailable/dist/

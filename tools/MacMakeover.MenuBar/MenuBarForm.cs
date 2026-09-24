@@ -1123,8 +1123,8 @@ internal sealed class MenuBarForm : Form
 
     private void OnMouseUp(object? sender, MouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Left) return;
-        if (IsShowDesktopCorner(e.Location, ClientSize, Scale(LogicalCornerHitSize)))
+        if (e.Button is not (MouseButtons.Left or MouseButtons.Right)) return;
+        if (e.Button == MouseButtons.Left && IsShowDesktopCorner(e.Location, ClientSize, Scale(LogicalCornerHitSize)))
         {
             AppLog.Write($"Show Desktop corner clicked on {_screen.DeviceName}: x={e.X} width={Width}");
             MenuRouter.Send("desktop");
@@ -1134,10 +1134,21 @@ internal sealed class MenuBarForm : Form
         var trayHit = _trayHits.FirstOrDefault(item => item.Bounds.Contains(e.Location));
         if (trayHit.App is not null)
         {
-            try { TrayAppLauncher.Activate(trayHit.App); }
+            try
+            {
+                if (e.Button == MouseButtons.Right)
+                {
+                    var screenPoint = PointToScreen(e.Location);
+                    TrayAppLauncher.TryShowContextMenu(trayHit.App, screenPoint);
+                }
+                else
+                    TrayAppLauncher.Activate(trayHit.App);
+            }
             catch (Exception ex) { AppLog.Write($"Tray app activation failed for {trayHit.App.Name}: {ex.Message}"); }
             return;
         }
+
+        if (e.Button != MouseButtons.Left) return;
 
         var hit = _hits.Where(item => item.Bounds.Contains(e.Location))
             .Select(item => (BarAction?)item.Action)
