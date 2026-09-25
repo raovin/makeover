@@ -127,6 +127,7 @@ internal static class DockRegressionTests
             if (!TestDisplayRebuildPolicy()) return 10;
             if (!TestExecutableIdentityMatching()) return 11;
             if (!TestDockStateCaptureCache()) return 12;
+            if (!TestOverrideIconNormalization()) return 13;
             if (!TestDynamicApp(probePath)) return 2;
             if (!TestPinnedApp(probePath)) return 3;
             return 0;
@@ -617,6 +618,79 @@ internal static class DockRegressionTests
         var first = DockStateCapture.Capture(pinned);
         var second = DockStateCapture.Capture(pinned);
         return ReferenceEquals(first, second);
+    }
+
+    private static bool TestOverrideIconNormalization()
+    {
+        using var padded = new Bitmap(40, 40, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(padded))
+        using (var brush = new SolidBrush(Color.FromArgb(210, 238, 112, 76)))
+        {
+            graphics.Clear(Color.Transparent);
+            graphics.FillRectangle(brush, 10, 10, 20, 20);
+        }
+
+        using var normalizedPadded = DockIconNormalizer.Normalize(padded, 80);
+        if (normalizedPadded is null) return false;
+        var paddedBounds = DockIconNormalizer.VisibleBounds(normalizedPadded);
+        if (paddedBounds.IsEmpty ||
+            paddedBounds.Width < 60 ||
+            paddedBounds.Height < 60 ||
+            Math.Abs(paddedBounds.Width - paddedBounds.Height) > 2 ||
+            normalizedPadded.GetPixel(40, 40).A < 150)
+        {
+            return false;
+        }
+
+        using var rectangular = new Bitmap(64, 32, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(rectangular))
+        using (var brush = new SolidBrush(Color.FromArgb(255, 84, 150, 224)))
+        {
+            graphics.Clear(Color.Transparent);
+            graphics.FillRectangle(brush, 12, 8, 40, 16);
+        }
+
+        using var normalizedRectangular = DockIconNormalizer.Normalize(rectangular, 80);
+        if (normalizedRectangular is null) return false;
+        var rectangularBounds = DockIconNormalizer.VisibleBounds(normalizedRectangular);
+        var rectangularRatio = rectangularBounds.Height == 0
+            ? 0
+            : (double)rectangularBounds.Width / rectangularBounds.Height;
+        if (rectangularBounds.IsEmpty || rectangularRatio < 2.1 || rectangularRatio > 2.8)
+            return false;
+
+        using var fullyTransparent = new Bitmap(40, 40, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(fullyTransparent))
+        {
+            graphics.Clear(Color.Transparent);
+        }
+        if (DockIconNormalizer.Normalize(fullyTransparent, 80) is not null) return false;
+
+        return RenderRequestedIconPair();
+    }
+
+    private static bool RenderRequestedIconPair()
+    {
+        var sourcePath = Environment.GetEnvironmentVariable("MACMAKEOVER_DOCK_ICON_RENDER_SOURCE");
+        var outputDirectory = Environment.GetEnvironmentVariable("MACMAKEOVER_DOCK_ICON_RENDER_OUTPUT");
+        if (string.IsNullOrWhiteSpace(sourcePath) && string.IsNullOrWhiteSpace(outputDirectory))
+            return true;
+        if (string.IsNullOrWhiteSpace(sourcePath) ||
+            string.IsNullOrWhiteSpace(outputDirectory) ||
+            !File.Exists(sourcePath))
+        {
+            Console.Error.WriteLine("Icon render requires valid source and output environment variables.");
+            return false;
+        }
+
+        Directory.CreateDirectory(outputDirectory);
+        using var source = Image.FromFile(sourcePath);
+        using var before = new Bitmap(source);
+        before.Save(Path.Combine(outputDirectory, "Claude-before.png"), ImageFormat.Png);
+        using var after = DockIconNormalizer.Normalize(source, 256);
+        if (after is null) return false;
+        after.Save(Path.Combine(outputDirectory, "Claude-after.png"), ImageFormat.Png);
+        return true;
     }
 
     private static bool WaitUntil(Func<bool> predicate, TimeSpan timeout)
@@ -2191,6 +2265,91 @@ internal static class DisplayScale
         Math.Max(Math.Max(1F, dpi / 96F), screen.Primary ? 1F : 1.5F);
 }
 
+internal static class DockIconNormalizer
+{
+    private const double RetainedMarginRatio = 0.04;
+    private const int MinimumRetainedMargin = 1;
+    private const int MaximumRetainedMargin = 8;
+
+    public static Bitmap? Normalize(Image source, int size)
+    {
+        if (size <= 0 || source.Width <= 0 || source.Height <= 0) return null;
+
+        using var sourceBitmap = new Bitmap(
+            source.Width,
+            source.Height,
+            PixelFormat.Format32bppPArgb);
+        using (var sourceGraphics = Graphics.FromImage(sourceBitmap))
+        {
+            sourceGraphics.CompositingMode = CompositingMode.SourceCopy;
+            sourceGraphics.DrawImage(
+                source,
+                new Rectangle(0, 0, source.Width, source.Height),
+                0,
+                0,
+                source.Width,
+                source.Height,
+                GraphicsUnit.Pixel);
+        }
+
+        var visible = VisibleBounds(sourceBitmap);
+        if (visible.IsEmpty) return null;
+
+        var margin = Math.Clamp(
+            (int)Math.Round(Math.Min(visible.Width, visible.Height) * RetainedMarginRatio),
+            MinimumRetainedMargin,
+            MaximumRetainedMargin);
+        var crop = Rectangle.FromLTRB(
+            Math.Max(0, visible.Left - margin),
+            Math.Max(0, visible.Top - margin),
+            Math.Min(sourceBitmap.Width, visible.Right + margin),
+            Math.Min(sourceBitmap.Height, visible.Bottom + margin));
+        if (crop.Width <= 0 || crop.Height <= 0) return null;
+
+        var scale = Math.Min((double)size / crop.Width, (double)size / crop.Height);
+        var destinationWidth = Math.Max(1, (int)Math.Round(crop.Width * scale));
+        var destinationHeight = Math.Max(1, (int)Math.Round(crop.Height * scale));
+        var destination = new Rectangle(
+            (size - destinationWidth) / 2,
+            (size - destinationHeight) / 2,
+            destinationWidth,
+            destinationHeight);
+
+        var result = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(result);
+        graphics.CompositingMode = CompositingMode.SourceCopy;
+        graphics.CompositingQuality = CompositingQuality.HighQuality;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.Clear(Color.Transparent);
+        graphics.DrawImage(
+            sourceBitmap,
+            destination,
+            crop.X,
+            crop.Y,
+            crop.Width,
+            crop.Height,
+            GraphicsUnit.Pixel);
+        return result;
+    }
+
+    internal static Rectangle VisibleBounds(Bitmap image)
+    {
+        var bounds = Rectangle.Empty;
+        for (var y = 0; y < image.Height; y++)
+        {
+            for (var x = 0; x < image.Width; x++)
+            {
+                if (image.GetPixel(x, y).A == 0) continue;
+                bounds = bounds.IsEmpty
+                    ? new Rectangle(x, y, 1, 1)
+                    : Rectangle.Union(bounds, new Rectangle(x, y, 1, 1));
+            }
+        }
+        return bounds;
+    }
+}
+
 internal sealed class DockItem : IDisposable
 {
     private readonly PinnedApp? _pinnedApp;
@@ -3019,7 +3178,8 @@ internal sealed class PinnedApp
             try
             {
                 using var overrideImage = Image.FromFile(overridePath);
-                return new Bitmap(overrideImage);
+                var normalized = DockIconNormalizer.Normalize(overrideImage, size);
+                if (normalized is not null) return normalized;
             }
             catch (ArgumentException) { }
         }
