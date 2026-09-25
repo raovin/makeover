@@ -69,12 +69,90 @@ test. The staged tray snapshot contained all 11 current applications, including
 Tailscale. Evidence is retained in ignored `qa/hardening-regression`,
 `qa/hardening-staged-tray.json`, and `qa/offscreen-hardening`.
 
+## Deployment and live recovery
+
+Source commit `b80f221` was pushed to `codex/native-tray-audit`. The parent backed
+up the deployed directory to
+`%LOCALAPPDATA%\MacMakeover\backups\hardening-20260925-123343`, temporarily
+disabled the five component tasks, stopped the components, copied the verified
+staged artifacts, and checked every executable against the deployment manifest.
+The tasks were re-enabled, Explorer restarted, and all five components restarted
+through the existing interactive scheduled tasks.
+
+This was a binary upgrade using the existing privileged configuration. No new
+UAC-protected promotion was completed, and old promotion markers were not treated
+as current evidence. The updated privileged scripts are source-reviewed and
+statically checked, but their full elevated execution remains unverified.
+
+`Test-NativeShellProfile.ps1` passed against the running deployment, including
+executable hashes, process presence, and work-area checks. All 21 archived pins
+passed `Test-NativeTaskbarPins.ps1`.
+
+The live recovery regression passed all 12 requested checks:
+
+| Recovery check | Observed time |
+| --- | ---: |
+| Supervisor restores MenuHost | 0.84 s |
+| Supervisor restores MenuBar | 0.54 s |
+| Supervisor restores Dock | 0.56 s |
+| Scheduled watchdog restores Supervisor | 34.70 s |
+| Restored Supervisor resumes MenuHost recovery | 0.53 s |
+
+The profile/work-area gate passed after the MenuBar and Dock restarts, and cleanup
+confirmed one instance of every recovery target. Awake was left running; its
+schedule test does not exercise live input injection. The evidence file is
+`qa/hardening-live-recovery/20260925-123454-native-shell-regression.json`.
+
+The deployed tray snapshot also contained all 11 current applications, including
+Tailscale and Awake (`qa/hardening-deployed-tray.json`).
+
+## Post-deployment resource sample
+
+The baseline used 180 samples before this hardening deployment. The follow-up
+used 300 samples (about 325 seconds elapsed); each summary excludes its first
+five samples. All five expected components were present and responsive throughout
+both samples, and each retained its PID throughout the follow-up.
+
+| Metric, five custom components | Baseline | Follow-up |
+| --- | ---: | ---: |
+| Median CPU, normalized across 16 logical processors | 0.998% | 0.264% |
+| p95 CPU | 1.491% | 0.459% |
+| Median private memory | 145.828 MB | 125.266 MB |
+| Median working set | 101.309 MB | 323.992 MB |
+| Median handles | 1,789 | 1,840 |
+
+Observed median CPU was approximately 74% lower. This is not an isolated causal
+benchmark: system CPU median was also lower (16.047% versus 7.743%), the shell had
+restarted, memory pressure differed, and concurrent audit processes had finished.
+Private memory was lower, but resident working set was higher; this does not
+support a blanket claim that every memory measure improved. The handle increase
+is small and the interval is too short to diagnose a leak.
+
+Independent per-process CPU deltas over the follow-up interval, as percent of one
+logical core, were Supervisor 0.01%, MenuHost 0.00%, MenuBar 1.39%, Dock 2.34%, and
+Awake 0.34%. Supervisor's retained observation removes the previously observed
+healthy-process polling cost. All component handle counts ended between 230 and
+607; Supervisor fell from 287 to 278 over the interval.
+
+Raw evidence is retained in:
+
+- `qa/performance/20260925-114547-hardening-baseline-summary.json`
+- `qa/performance/20260925-123621-hardening-post-deploy-summary.json` and its CSV
+- `qa/hardening-component-performance.json`
+
+These results do not justify removing useful shell features. A future performance
+pass should measure provider child-process cost and long-duration stability before
+changing provider polling or deleting functionality.
+
 ## Evidence limits and remaining acceptance work
 
 This makes the implementation more resilient; it does not guarantee compatibility
 with future Windows or third-party changes. Physical monitor hot-plug, mixed-DPI
 movement, sleep/resume, a second interactive Windows session, and interrupted
 privileged promotion/rollback still need real environment testing.
+The Windows computer-use API did not expose a targetable MacMakeover window after
+deployment. Actual-desktop screenshot signoff is therefore still outstanding;
+offscreen fixture inspection and profile geometry checks do not replace it.
 
 Tailscale and Awake have known native-menu adapters. Unknown tray applications
 remain visible/launchable when their registrations can be discovered, but there is

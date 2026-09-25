@@ -1,5 +1,9 @@
 # Deployment and performance review — 2026-09-25
 
+The follow-up source changes and live acceptance evidence are recorded in
+[Hardening Review](HARDENING-REVIEW-2026-09-25.md). This document preserves the
+measurements and recommendations made before that follow-up.
+
 ## Deployment result
 
 Source commit `d65e6b5` was pushed on `codex/native-tray-audit`. The promoter
