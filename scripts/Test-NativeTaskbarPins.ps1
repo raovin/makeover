@@ -29,3 +29,4 @@ if ($missing.Count) {
   exit 1
 }
 Write-Host "PASS: all $($results.Count) archived Seelen pins are present in the native taskbar."
+exit 0

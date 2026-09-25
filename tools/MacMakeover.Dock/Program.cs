@@ -109,7 +109,11 @@ internal static class DockRegressionTests
 {
     public static int Run()
     {
-        var probePath = Path.Combine(AppContext.BaseDirectory, "MacMakeover.QaProbe.exe");
+        // A prior run can still be releasing its probe image when the next run
+        // starts. A per-run filename keeps repeated headless runs independent.
+        var probePath = Path.Combine(
+            AppContext.BaseDirectory,
+            $"MacMakeover.QaProbe-{Guid.NewGuid():N}.exe");
         var pinStatePath = Path.Combine(Path.GetTempPath(), "MacMakeover", $"dock-pins-qa-{Environment.ProcessId}.json");
         try
         {
@@ -122,6 +126,7 @@ internal static class DockRegressionTests
             if (!TestStaleSystemPinPolicy()) return 9;
             if (!TestDisplayRebuildPolicy()) return 10;
             if (!TestExecutableIdentityMatching()) return 11;
+            if (!TestDockStateCaptureCache()) return 12;
             if (!TestDynamicApp(probePath)) return 2;
             if (!TestPinnedApp(probePath)) return 3;
             return 0;
@@ -133,12 +138,28 @@ internal static class DockRegressionTests
         }
         finally
         {
-            try { File.Delete(probePath); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            try { File.Delete(pinStatePath); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            DeleteBestEffort(probePath);
+            DeleteBestEffort(pinStatePath);
+        }
+    }
+
+    private static void DeleteBestEffort(string path)
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            try
+            {
+                File.Delete(path);
+                return;
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(25);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return;
+            }
         }
     }
 
@@ -401,17 +422,52 @@ internal static class DockRegressionTests
 
     private static bool TestDisplayRebuildPolicy()
     {
-        return DockDisplayRebuildPolicy.DebounceMilliseconds >= 100 &&
-               DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: false, dispatcherAvailable: true) &&
-               !DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: false, dispatcherAvailable: false) &&
-               !DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: true, dispatcherAvailable: true) &&
-               DockDisplayRebuildPolicy.IsUiThread(uiThreadId: 7, currentThreadId: 7) &&
-               !DockDisplayRebuildPolicy.IsUiThread(uiThreadId: 7, currentThreadId: 8) &&
-               DockDisplayRebuildPolicy.ShouldSchedule(exiting: false) &&
-               !DockDisplayRebuildPolicy.ShouldSchedule(exiting: true) &&
-               DockDisplayRebuildPolicy.ShouldRebuild(exiting: false, rebuilding: false, pending: true) &&
-               !DockDisplayRebuildPolicy.ShouldRebuild(exiting: false, rebuilding: true, pending: true) &&
-               !DockDisplayRebuildPolicy.ShouldRebuild(exiting: true, rebuilding: false, pending: true);
+        if (DockDisplayRebuildPolicy.DebounceMilliseconds < 100 ||
+            !DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: false, dispatcherAvailable: true) ||
+            DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: false, dispatcherAvailable: false) ||
+            DockDisplayRebuildPolicy.ShouldHandleDisplayChange(exiting: true, dispatcherAvailable: true) ||
+            !DockDisplayRebuildPolicy.IsUiThread(uiThreadId: 7, currentThreadId: 7) ||
+            DockDisplayRebuildPolicy.IsUiThread(uiThreadId: 7, currentThreadId: 8) ||
+            !DockDisplayRebuildPolicy.ShouldSchedule(exiting: false) ||
+            DockDisplayRebuildPolicy.ShouldSchedule(exiting: true) ||
+            !DockDisplayRebuildPolicy.ShouldRebuild(exiting: false, rebuilding: false, pending: true) ||
+            DockDisplayRebuildPolicy.ShouldRebuild(exiting: false, rebuilding: true, pending: true) ||
+            DockDisplayRebuildPolicy.ShouldRebuild(exiting: true, rebuilding: false, pending: true))
+        {
+            return false;
+        }
+
+        // An exit signal received while display forms are torn down has no dispatcher,
+        // but the request must remain pending for the replacement forms.
+        var exitRequest = new DockExitRequestState();
+        exitRequest.Request();
+        if (!exitRequest.IsRequested ||
+            exitRequest.ShouldDispatch(exiting: false, dispatcherAvailable: false) ||
+            !exitRequest.IsRequested ||
+            !exitRequest.ShouldDispatch(exiting: false, dispatcherAvailable: true) ||
+            !exitRequest.TryConsume() ||
+            exitRequest.IsRequested ||
+            exitRequest.ShouldDispatch(exiting: false, dispatcherAvailable: true) ||
+            exitRequest.TryConsume())
+        {
+            return false;
+        }
+
+        // Rebuild completion is on the UI thread even if no replacement form exists;
+        // that path must still consume the one-shot exit request.
+        var zeroFormReplacement = new DockExitRequestState();
+        zeroFormReplacement.Request();
+        if (!zeroFormReplacement.ShouldDispatchOnUiThread(exiting: false, onUiThread: true) ||
+            !zeroFormReplacement.TryConsume())
+        {
+            return false;
+        }
+
+        var exitingRequest = new DockExitRequestState();
+        exitingRequest.Request();
+        return !exitingRequest.ShouldDispatch(exiting: true, dispatcherAvailable: true) &&
+               exitingRequest.IsRequested &&
+               exitingRequest.TryConsume();
     }
 
     /// <summary>
@@ -554,6 +610,15 @@ internal static class DockRegressionTests
         return !PinnedApp.IsStaleSystemPin(new UserDockPin("Sublime Text", "sublime_text", @"C:\Apps\sublime_text.exe"));
     }
 
+    private static bool TestDockStateCaptureCache()
+    {
+        if (DockStateCapture.CacheWindowMilliseconds <= 0) return false;
+        var pinned = PinnedApp.Load();
+        var first = DockStateCapture.Capture(pinned);
+        var second = DockStateCapture.Capture(pinned);
+        return ReferenceEquals(first, second);
+    }
+
     private static bool WaitUntil(Func<bool> predicate, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -582,9 +647,11 @@ internal sealed class DockContext : ApplicationContext
     };
     private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
     private readonly RegisteredWaitHandle _exitRegistration;
+    private readonly DockExitRequestState _exitRequest = new();
+    private DockForm? _dispatcher;
     private bool _rebuilding;
     private int _displayRebuildPending;
-    private bool _exiting;
+    private volatile bool _exiting;
 
     public DockContext(bool preview, bool previewAll, bool previewHover, EventWaitHandle exit)
     {
@@ -602,8 +669,24 @@ internal sealed class DockContext : ApplicationContext
         BuildForms();
         _exitRegistration = ThreadPool.RegisterWaitForSingleObject(exit, (_, _) =>
         {
-            var dispatcher = _forms.FirstOrDefault(form => form.IsHandleCreated && !form.IsDisposed);
-            if (dispatcher is not null) dispatcher.BeginInvoke(new Action(ExitThread));
+            // The wait callback is a thread-pool callback. Do not enumerate the UI-owned
+            // form list here: display rebuilds and FormClosed handlers can mutate it at
+            // the same time. Keep one volatile dispatcher reference and treat teardown
+            // races as a normal no-op.
+            _exitRequest.Request();
+            if (_exiting) return;
+            var dispatcher = Volatile.Read(ref _dispatcher);
+            if (dispatcher is null || dispatcher.IsDisposed || !dispatcher.IsHandleCreated) return;
+            try
+            {
+                dispatcher.BeginInvoke(new Action(DispatchPendingExit));
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
         }, null, Timeout.Infinite, true);
     }
 
@@ -622,8 +705,18 @@ internal sealed class DockContext : ApplicationContext
                 gapForm.Show();
             }
             var form = new DockForm(screen, apps, _preview, _previewHover);
-            form.FormClosed += (_, _) => { _forms.Remove(form); if (!_rebuilding && !_exiting && _forms.Count == 0) ExitThread(); };
+            form.FormClosed += (_, _) =>
+            {
+                _forms.Remove(form);
+                if (ReferenceEquals(Volatile.Read(ref _dispatcher), form))
+                {
+                    Volatile.Write(ref _dispatcher,
+                        _forms.FirstOrDefault(candidate => candidate.IsHandleCreated && !candidate.IsDisposed));
+                }
+                if (!_rebuilding && !_exiting && _forms.Count == 0) ExitThread();
+            };
             _forms.Add(form);
+            if (Volatile.Read(ref _dispatcher) is null) Volatile.Write(ref _dispatcher, form);
             form.Show();
         }
         if (!_preview) HideWindowsTaskbars();
@@ -632,7 +725,9 @@ internal sealed class DockContext : ApplicationContext
     private void OnDisplayChanged(object? sender, EventArgs e)
     {
         if (!DockDisplayRebuildPolicy.ShouldSchedule(_exiting)) return;
-        var dispatcher = _forms.FirstOrDefault(form => form.IsHandleCreated && !form.IsDisposed);
+        // SystemEvents.DisplaySettingsChanged is not guaranteed to run on the
+        // WinForms thread. Read only the stable dispatcher reference here.
+        var dispatcher = Volatile.Read(ref _dispatcher);
         // During teardown both form lists are intentionally empty. The active
         // rebuild enumerates current screens, so coalesce this notification by
         // ignoring it rather than touching the UI timer from SystemEvents' thread.
@@ -673,7 +768,27 @@ internal sealed class DockContext : ApplicationContext
             DisposeFormsForRebuild();
             BuildForms();
         }
-        finally { _rebuilding = false; }
+        finally
+        {
+            _rebuilding = false;
+            DispatchPendingExit();
+        }
+    }
+
+    private void DispatchPendingExit()
+    {
+        var dispatcherAvailable =
+            Volatile.Read(ref _dispatcher) is { IsDisposed: false, IsHandleCreated: true };
+        var onUiThread = DockDisplayRebuildPolicy.IsUiThread(
+            _uiThreadId,
+            Environment.CurrentManagedThreadId);
+        if (!_exitRequest.ShouldDispatch(_exiting, dispatcherAvailable) &&
+            !_exitRequest.ShouldDispatchOnUiThread(_exiting, onUiThread))
+        {
+            return;
+        }
+
+        if (_exitRequest.TryConsume()) ExitThread();
     }
 
     private void DisposeFormsForRebuild()
@@ -693,6 +808,7 @@ internal sealed class DockContext : ApplicationContext
 
         var oldForms = _forms.ToArray();
         _forms.Clear();
+        Volatile.Write(ref _dispatcher, null);
         foreach (var form in oldForms)
         {
             if (!form.IsDisposed) form.Close();
@@ -726,6 +842,7 @@ internal sealed class DockContext : ApplicationContext
     {
         if (_exiting) return;
         _exiting = true;
+        _exitRequest.TryConsume();
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
         _exitRegistration.Unregister(null);
         _taskbarGuard.Stop();
@@ -752,6 +869,23 @@ internal static class DockDisplayRebuildPolicy
 
     internal static bool ShouldRebuild(bool exiting, bool rebuilding, bool pending) =>
         !exiting && !rebuilding && pending;
+}
+
+internal sealed class DockExitRequestState
+{
+    private int _requested;
+
+    public void Request() => Volatile.Write(ref _requested, 1);
+
+    public bool ShouldDispatch(bool exiting, bool dispatcherAvailable) =>
+        !exiting && dispatcherAvailable && Volatile.Read(ref _requested) != 0;
+
+    public bool ShouldDispatchOnUiThread(bool exiting, bool onUiThread) =>
+        !exiting && onUiThread && Volatile.Read(ref _requested) != 0;
+
+    public bool TryConsume() => Interlocked.Exchange(ref _requested, 0) != 0;
+
+    internal bool IsRequested => Volatile.Read(ref _requested) != 0;
 }
 
 internal enum AppBarRecoveryAction
@@ -1251,6 +1385,145 @@ internal sealed class WorkAreaGapForm : Form
     }
 }
 
+internal sealed record DockStateSnapshot(
+    IReadOnlyList<ProcessIdentity> PinnedProcesses,
+    IReadOnlyList<RunningAppSnapshot> RunningApps);
+
+/// <summary>
+/// Shares the expensive process/window snapshot between Dock forms that refresh in
+/// the same display tick. Each form still owns its UI application and generation
+/// checks; this cache only removes duplicate read-only discovery work.
+/// </summary>
+internal static class DockStateCapture
+{
+    internal static int CacheWindowMilliseconds => 400;
+    private static readonly long CacheWindowTicks =
+        Math.Max(1, Stopwatch.Frequency * CacheWindowMilliseconds / 1000);
+    private static CacheEntry? _cache;
+
+    public static DockStateSnapshot Capture(IReadOnlyList<PinnedApp> pinnedApps)
+    {
+        var signature = PinSignature(pinnedApps);
+        CacheEntry entry;
+        while (true)
+        {
+            var current = Volatile.Read(ref _cache);
+            if (current is not null && current.IsReusable(signature))
+            {
+                entry = current;
+                break;
+            }
+
+            var candidate = new CacheEntry(signature, pinnedApps);
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _cache, candidate, current), current))
+            {
+                entry = candidate;
+                break;
+            }
+        }
+
+        try
+        {
+            return entry.Value.Value;
+        }
+        catch
+        {
+            Interlocked.CompareExchange(ref _cache, null, entry);
+            throw;
+        }
+    }
+
+    private static DockStateSnapshot CaptureUncached(IReadOnlyList<PinnedApp> pinnedApps)
+    {
+        var pinnedProcesses = CapturePinnedProcesses(pinnedApps);
+        var runningApps = RunningAppSnapshot.Capture(pinnedApps, pinnedProcesses.ByProcessId);
+        return new DockStateSnapshot(pinnedProcesses.Identities, runningApps);
+    }
+
+    private static PinnedProcessCapture CapturePinnedProcesses(IReadOnlyList<PinnedApp> pinnedApps)
+    {
+        var pinnedProcessNames = pinnedApps
+            .SelectMany(app => app.ProcessNames)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var identities = new List<ProcessIdentity>();
+        var byProcessId = new Dictionary<uint, ProcessIdentity>();
+        foreach (var process in Process.GetProcesses())
+        {
+            try
+            {
+                var processName = process.ProcessName;
+                if (!pinnedProcessNames.Contains(processName)) continue;
+                var identity = ProcessIdentityReader.TryRead(process);
+                if (identity is null) continue;
+                identities.Add(identity);
+                byProcessId[(uint)process.Id] = identity;
+            }
+            catch (System.ComponentModel.Win32Exception) { }
+            catch (ArgumentException) { }
+            catch (InvalidOperationException) { }
+            finally { process.Dispose(); }
+        }
+        return new PinnedProcessCapture(identities, byProcessId);
+    }
+
+    private static string PinSignature(IReadOnlyList<PinnedApp> pinnedApps)
+    {
+        var signature = new StringBuilder();
+        foreach (var app in pinnedApps)
+        {
+            AppendPart(signature, app.Name);
+            AppendPart(signature, app.AppId);
+            AppendPart(signature, app.Shortcut);
+            AppendPart(signature, app.ExecutablePath);
+            AppendPart(signature, app.IsUserPin ? "1" : "0");
+            foreach (var pattern in app.Patterns) AppendPart(signature, pattern);
+            signature.Append('\u001D');
+            foreach (var processName in app.ProcessNames) AppendPart(signature, processName);
+            signature.Append('\u001E');
+        }
+        return signature.ToString();
+    }
+
+    private static void AppendPart(StringBuilder target, string? value)
+    {
+        var text = value ?? string.Empty;
+        target.Append(text.Length).Append(':').Append(text).Append('|');
+    }
+
+    private sealed class CacheEntry
+    {
+        private long _capturedTimestamp;
+
+        public CacheEntry(string signature, IReadOnlyList<PinnedApp> pinnedApps)
+        {
+            Signature = signature;
+            Value = new Lazy<DockStateSnapshot>(() =>
+            {
+                var result = CaptureUncached(pinnedApps);
+                Volatile.Write(ref _capturedTimestamp, Stopwatch.GetTimestamp());
+                return result;
+            }, LazyThreadSafetyMode.ExecutionAndPublication);
+        }
+
+        public string Signature { get; }
+        public Lazy<DockStateSnapshot> Value { get; }
+
+        public bool IsReusable(string signature)
+        {
+            if (!string.Equals(Signature, signature, StringComparison.Ordinal)) return false;
+            if (!Value.IsValueCreated) return true;
+            var capturedTimestamp = Volatile.Read(ref _capturedTimestamp);
+            var now = Stopwatch.GetTimestamp();
+            var elapsed = now - capturedTimestamp;
+            return capturedTimestamp != 0 && elapsed >= 0 && elapsed <= CacheWindowTicks;
+        }
+    }
+
+    private sealed record PinnedProcessCapture(
+        IReadOnlyList<ProcessIdentity> Identities,
+        IReadOnlyDictionary<uint, ProcessIdentity> ByProcessId);
+}
+
 internal sealed class DockForm : Form
 {
     private const int LogicalHeight = 48;
@@ -1633,32 +1906,6 @@ internal sealed class DockForm : Form
         return path;
     }
 
-    private static IReadOnlyList<ProcessIdentity> SnapshotProcesses(IReadOnlyList<PinnedApp> pinnedApps)
-    {
-        var pinnedProcessNames = pinnedApps
-            .SelectMany(app => app.ProcessNames)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var identities = new List<ProcessIdentity>();
-        foreach (var process in Process.GetProcesses())
-        {
-            try
-            {
-                var processName = process.ProcessName;
-                if (pinnedProcessNames.Contains(processName))
-                {
-                    identities.Add(new ProcessIdentity(
-                        processName,
-                        ProcessIdentityReader.TryGetExecutablePath(process)));
-                }
-            }
-            catch (System.ComponentModel.Win32Exception) { }
-            catch (ArgumentException) { }
-            catch (InvalidOperationException) { }
-            finally { process.Dispose(); }
-        }
-        return identities;
-    }
-
     private void RefreshDockState()
     {
         if (IsDisposed) return;
@@ -1681,11 +1928,13 @@ internal sealed class DockForm : Form
         var marshaledToUi = false;
         try
         {
-            var processes = SnapshotProcesses(pinnedApps);
-            var snapshots = RunningAppSnapshot.Capture(pinnedApps);
+            var captured = DockStateCapture.Capture(pinnedApps);
             try
             {
-                BeginInvoke(new Action(() => ApplyDockState(processes, snapshots, generation)));
+                BeginInvoke(new Action(() => ApplyDockState(
+                    captured.PinnedProcesses,
+                    captured.RunningApps,
+                    generation)));
                 marshaledToUi = true;
             }
             catch (ObjectDisposedException)
@@ -2134,41 +2383,57 @@ internal sealed record RunningAppSnapshot(
         "LockApp", "LogonUI", "OpenWith"
     };
 
-    public static IReadOnlyList<RunningAppSnapshot> Capture(IReadOnlyList<PinnedApp> pinnedApps)
+    public static IReadOnlyList<RunningAppSnapshot> Capture(IReadOnlyList<PinnedApp> pinnedApps) =>
+        Capture(pinnedApps, knownProcessIdentities: null);
+
+    internal static IReadOnlyList<RunningAppSnapshot> Capture(
+        IReadOnlyList<PinnedApp> pinnedApps,
+        IReadOnlyDictionary<uint, ProcessIdentity>? knownProcessIdentities)
     {
         var groups = new Dictionary<string, RunningAppAccumulator>(StringComparer.OrdinalIgnoreCase);
+        var processIdentityCache = knownProcessIdentities is null
+            ? new Dictionary<uint, ProcessIdentity?>()
+            : knownProcessIdentities.ToDictionary(
+                entry => entry.Key,
+                entry => (ProcessIdentity?)entry.Value);
         NativeMethods.EnumWindows((window, _) =>
         {
             if (!IsTaskbarWindow(window)) return true;
             NativeMethods.GetWindowThreadProcessId(window, out var processId);
             if (processId == 0 || processId == Environment.ProcessId) return true;
 
-            try
+            ProcessIdentity? identity;
+            if (!processIdentityCache.TryGetValue(processId, out identity))
             {
-                using var process = Process.GetProcessById((int)processId);
-                var identity = ProcessIdentityReader.TryRead(process);
-                if (identity is null) return true;
-                var processName = identity.ProcessName;
-                var executablePath = identity.ExecutablePath;
-                if (ExcludedProcesses.Contains(processName) || IsPinnedProcess(pinnedApps, processName, executablePath)) return true;
-
-                var title = WindowTitle(window);
-                var name = DisplayName(processName, executablePath, title);
-                // ApplicationFrameHost can own several unrelated packaged apps at once.
-                // Keep each titled surface distinct, then remove duplicate host entries
-                // when the app also exposes its concrete process below.
-                var key = processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)
-                    ? $"{processName}:{title}"
-                    : ProcessIdentityReader.NormalizeExecutablePath(executablePath) ?? processName;
-                if (!groups.TryGetValue(key, out var group))
+                try
                 {
-                    group = new RunningAppAccumulator(key, name, processName, executablePath);
-                    groups.Add(key, group);
+                    using var process = Process.GetProcessById((int)processId);
+                    identity = ProcessIdentityReader.TryRead(process);
                 }
-                group.Windows.Add(window);
+                catch (ArgumentException) { }
+                catch (InvalidOperationException) { }
+                processIdentityCache[processId] = identity;
             }
-            catch (ArgumentException) { }
-            catch (InvalidOperationException) { }
+            if (identity is null) return true;
+
+            var processName = identity.ProcessName;
+            var executablePath = identity.ExecutablePath;
+            if (ExcludedProcesses.Contains(processName) || IsPinnedProcess(pinnedApps, processName, executablePath)) return true;
+
+            var title = WindowTitle(window);
+            var name = DisplayName(processName, executablePath, title);
+            // ApplicationFrameHost can own several unrelated packaged apps at once.
+            // Keep each titled surface distinct, then remove duplicate host entries
+            // when the app also exposes its concrete process below.
+            var key = processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)
+                ? $"{processName}:{title}"
+                : ProcessIdentityReader.NormalizeExecutablePath(executablePath) ?? processName;
+            if (!groups.TryGetValue(key, out var group))
+            {
+                group = new RunningAppAccumulator(key, name, processName, executablePath);
+                groups.Add(key, group);
+            }
+            group.Windows.Add(window);
             return true;
         }, IntPtr.Zero);
 
@@ -2384,6 +2649,10 @@ internal static class DockPinStore
             {
                 return new DockPinState();
             }
+            catch (UnauthorizedAccessException)
+            {
+                return new DockPinState();
+            }
         }
     }
 
@@ -2432,11 +2701,32 @@ internal static class DockPinStore
 
     private static void Save(DockPinState state)
     {
-        var directory = Path.GetDirectoryName(StatePath)!;
-        Directory.CreateDirectory(directory);
-        var temporaryPath = StatePath + ".tmp";
-        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(state, JsonOptions));
-        File.Move(temporaryPath, StatePath, true);
+        var statePath = StatePath;
+        var directory = Path.GetDirectoryName(statePath);
+        if (string.IsNullOrWhiteSpace(directory)) directory = ".";
+        // Preview and production Dock instances intentionally have different mutexes,
+        // so their temporary files must not collide while both persist pin changes.
+        var temporaryPath = statePath + "." + Environment.ProcessId + ".tmp";
+        try
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(state, JsonOptions));
+            File.Move(temporaryPath, statePath, true);
+        }
+        catch (IOException exception)
+        {
+            System.Diagnostics.Debug.WriteLine("Could not save Dock pin state: " + exception.Message);
+            try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            System.Diagnostics.Debug.WriteLine("Could not save Dock pin state: " + exception.Message);
+            try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 }
 
@@ -2562,7 +2852,7 @@ internal sealed class PinnedApp
             // Only activate visible taskbar CabinetWClass/ExploreWClass windows.
             if (TryActivateWindows(ClosableWindows())) return;
             var launch = CreateLaunchStartInfo();
-            if (launch is not null) Process.Start(launch);
+            if (launch is not null) TryStart(launch);
             return;
         }
 
@@ -2589,7 +2879,7 @@ internal sealed class PinnedApp
             }
         }
         var startInfo = CreateLaunchStartInfo();
-        if (startInfo is not null) Process.Start(startInfo);
+        if (startInfo is not null) TryStart(startInfo);
     }
 
     /// <summary>
@@ -2606,6 +2896,32 @@ internal sealed class PinnedApp
         var target = ExecutablePath ?? Shortcut ?? (AppId is null ? null : $"shell:AppsFolder\\{AppId}");
         if (target is null) return null;
         return new ProcessStartInfo(target) { UseShellExecute = true };
+    }
+
+    private static bool TryStart(ProcessStartInfo startInfo)
+    {
+        try
+        {
+            using var process = Process.Start(startInfo);
+            return process is not null;
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine("Could not launch Dock target: " + exception.Message);
+        }
+        catch (FileNotFoundException exception)
+        {
+            System.Diagnostics.Debug.WriteLine("Could not launch Dock target: " + exception.Message);
+        }
+        catch (ArgumentException exception)
+        {
+            System.Diagnostics.Debug.WriteLine("Could not launch Dock target: " + exception.Message);
+        }
+        catch (InvalidOperationException exception)
+        {
+            System.Diagnostics.Debug.WriteLine("Could not launch Dock target: " + exception.Message);
+        }
+        return false;
     }
 
     /// <summary>

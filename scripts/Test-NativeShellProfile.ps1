@@ -8,18 +8,27 @@ $failures = [System.Collections.Generic.List[string]]::new()
 $warnings = [System.Collections.Generic.List[string]]::new()
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $deploymentRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\bin'
+$currentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+function Get-CurrentSessionProcess {
+  param([Parameter(Mandatory)][string[]]$ProcessName)
+
+  @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue |
+    Where-Object {
+      try { $_.SessionId -eq $currentSessionId } catch { $false }
+    })
+}
 $modConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'config\windhawk\native-dock.json') -Raw |
   ConvertFrom-Json -AsHashtable
 $modRegistry = "HKLM:\Software\Windhawk\Engine\Mods\$($modConfig.modId)"
 $modSettingsRegistry = Join-Path $modRegistry 'Settings'
 
-$menuBar = @(Get-Process MacMakeover.MenuBar -ErrorAction SilentlyContinue)
-$menuHost = @(Get-Process MacMakeover.MenuHost -ErrorAction SilentlyContinue)
-$dock = @(Get-Process MacMakeover.Dock -ErrorAction SilentlyContinue)
-$supervisor = @(Get-Process MacMakeover.Supervisor -ErrorAction SilentlyContinue)
-$awake = @(Get-Process AwakeAndAvailable -ErrorAction SilentlyContinue)
-$seelen = @(Get-Process seelen-ui, slu-service -ErrorAction SilentlyContinue)
-$yasb = @(Get-Process yasb -ErrorAction SilentlyContinue)
+$menuBar = @(Get-CurrentSessionProcess -ProcessName 'MacMakeover.MenuBar')
+$menuHost = @(Get-CurrentSessionProcess -ProcessName 'MacMakeover.MenuHost')
+$dock = @(Get-CurrentSessionProcess -ProcessName 'MacMakeover.Dock')
+$supervisor = @(Get-CurrentSessionProcess -ProcessName 'MacMakeover.Supervisor')
+$awake = @(Get-CurrentSessionProcess -ProcessName 'AwakeAndAvailable')
+$seelen = @(Get-CurrentSessionProcess -ProcessName @('seelen-ui', 'slu-service'))
+$yasb = @(Get-CurrentSessionProcess -ProcessName 'yasb')
 
 if ($menuBar.Count -ne 1) { $failures.Add("Expected one MenuBar process; found $($menuBar.Count).") }
 if ($menuHost.Count -ne 1) { $failures.Add("Expected one MenuHost process; found $($menuHost.Count).") }
@@ -80,7 +89,7 @@ foreach ($processDefinition in @(
 }
 if ($seelen.Count) { $failures.Add('Seelen is still running alongside the native shell.') }
 if ($yasb.Count) { $failures.Add('YASB is still running alongside the native shell.') }
-if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { $failures.Add('Windows Explorer is not running.') }
+if (-not (Get-CurrentSessionProcess -ProcessName 'explorer')) { $failures.Add('Windows Explorer is not running.') }
 
 foreach ($required in @(
     'MacMakeover.MenuBar.exe',
@@ -137,7 +146,7 @@ try {
         break
       }
     }
-    if (Get-Process AwakeAndAvailable -ErrorAction SilentlyContinue) {
+    if (Get-CurrentSessionProcess -ProcessName 'AwakeAndAvailable') {
       if ($traySnapshot.Name -notcontains 'Awake & Available') {
         $failures.Add('Running Awake & Available is missing from the MenuBar tray-app snapshot.')
       }
@@ -198,7 +207,7 @@ try {
       @{ Process = 'ApplicationFrameHost'; Name = 'Settings'; Title = 'Settings' }
     )
     foreach ($entry in $knownDynamicApps) {
-      $visible = @(Get-Process -Name $entry.Process -ErrorAction SilentlyContinue |
+      $visible = @(Get-CurrentSessionProcess -ProcessName $entry.Process |
         Where-Object {
           $_.MainWindowHandle -ne [IntPtr]::Zero -and
           [DockWindowProbe]::IsWindowVisible($_.MainWindowHandle) -and
@@ -530,7 +539,10 @@ if ($virtualDesktopWallpapers | Where-Object {
 }
 
 $hotCornerProcesses = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
-  Where-Object { $_.CommandLine -match '(?i)(?:^|\s)-File\s+["'']?[^"'']*start-hot-corners\.ps1(?:["'']|\s|$)' }
+  Where-Object {
+    $_.SessionId -eq $currentSessionId -and
+    $_.CommandLine -match '(?i)(?:^|\s)-File\s+["'']?[^"'']*start-hot-corners\.ps1(?:["'']|\s|$)'
+  }
 if ($hotCornerProcesses) {
   $failures.Add('The polling hot-corner helper is still running.')
 }

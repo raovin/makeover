@@ -13,8 +13,9 @@ Read first:
 
 - `MacMakeover.MenuBar` owns the top AppBar.
 - `MacMakeover.MenuHost` owns Apple and system panels.
-- Windows Explorer owns Alt+Tab, window lifecycle, and the bottom taskbar.
-- Windhawk's pinned Windows 11 Taskbar Styler changes dock appearance only.
+- `MacMakeover.Dock` owns the visible dock and pin actions.
+- Windows Explorer owns Alt+Tab, native taskbar state, and window lifecycle.
+- Windhawk's Taskbar Styler is disabled in production and retained for rollback.
 - Seelen UI is not part of production. Its last known profile and historical notes
   live under `archive/seelen-ui/` for optional rollback research.
 
@@ -26,7 +27,8 @@ Read first:
 - Keep `Alt+Space` on Command Palette / PowerToys Run.
 - One top-bar control opens one intended surface. Network and Bluetooth remain
   independent; telemetry remains informational.
-- Preserve Explorer's native taskbar pins, previews, badges, and lifecycle.
+- Preserve Explorer's native taskbar pin state and window lifecycle; keep native
+  taskbar behavior available when the custom Dock exits.
 - Visual changes require real desktop captures in restored and maximized states.
 - Exercise real Alt+Tab after shell, work-area, or dock changes.
 - Run both native-shell tests before declaring completion.

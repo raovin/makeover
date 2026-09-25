@@ -10,6 +10,8 @@ internal static class Program
 {
     private const string PipeName = "MacMakeover.MenuHost";
     private const string MutexName = "Local\\MacMakeover.MenuHost";
+    internal const int MaxPipeCommandLength = 64;
+    internal const int PipeClientReadTimeoutMilliseconds = 750;
     internal const int PipeServerCapacity = 8;
 
     [STAThread]
@@ -92,6 +94,7 @@ internal static class Program
             var original = new IntPtr(10);
             var current = new IntPtr(20);
             var own = new IntPtr(30);
+            var validCommand = TryNormalizeCommand("  NETWORK  ", out var normalizedCommand);
             var decisionMatrix =
                 MenuForm.ShouldDismissSystemSwitcher(true, TimeSpan.Zero, original, original, own) &&
                 !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(200), original, current, own) &&
@@ -99,9 +102,14 @@ internal static class Program
                 !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, original, own) &&
                 !MenuForm.ShouldDismissSystemSwitcher(false, TimeSpan.FromMilliseconds(500), original, own, own) &&
                 MenuForm.SleepActionSelfTest() &&
+                validCommand && normalizedCommand == "network" &&
+                !TryNormalizeCommand("unknown", out _) &&
+                !TryNormalizeCommand(new string('x', MaxPipeCommandLength + 1), out _) &&
+                MenuContext.MaxCommandsPerDrain == 1 &&
                 PipeServerCapacity >= 2;
             if (!decisionMatrix) return 4;
-            if (!interactiveAltTab) return 0;
+            if (!interactiveAltTab)
+                return RunPipeIsolationSelfTest() ? 0 : 7;
 
             using var form = MenuForm.CreateApple();
             form.Show();
@@ -158,7 +166,20 @@ internal static class Program
         }
     }
 
-    private static async Task RunPipeServerAsync(MenuContext context)
+    internal static bool TryNormalizeCommand(string? rawCommand, out string command)
+    {
+        command = string.Empty;
+        if (string.IsNullOrWhiteSpace(rawCommand) || rawCommand.Length > MaxPipeCommandLength)
+            return false;
+
+        command = rawCommand.Trim().ToLowerInvariant();
+        return command is "apple" or "control" or "network" or "bluetooth" or "desktop";
+    }
+
+    private static Task RunPipeServerAsync(MenuContext context) =>
+        RunPipeServerAsync(context, PipeName);
+
+    private static async Task RunPipeServerAsync(MenuContext context, string pipeName)
     {
         while (!context.IsDisposed)
         {
@@ -166,11 +187,11 @@ internal static class Program
             try
             {
                 server = new NamedPipeServerStream(
-                    PipeName,
+                    pipeName,
                     PipeDirection.In,
                     PipeServerCapacity,
                     PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous);
+                    PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await server.WaitForConnectionAsync(context.Token).ConfigureAwait(false);
                 _ = HandlePipeClientAsync(server, context);
                 server = null;
@@ -178,6 +199,10 @@ internal static class Program
             catch (OperationCanceledException)
             {
                 return;
+            }
+            catch (ObjectDisposedException)
+            {
+                if (context.IsDisposed) return;
             }
             catch
             {
@@ -197,7 +222,9 @@ internal static class Program
             try
             {
                 using var reader = new StreamReader(server, Encoding.UTF8, leaveOpen: true);
-                var command = await reader.ReadLineAsync(context.Token).ConfigureAwait(false);
+                using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(context.Token);
+                readTimeout.CancelAfter(PipeClientReadTimeoutMilliseconds);
+                var command = await ReadBoundedCommandAsync(reader, readTimeout.Token).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(command))
                 {
                     context.Post(command);
@@ -211,17 +238,58 @@ internal static class Program
             {
                 Log("Pipe client failed: " + exception.Message);
             }
+            catch (ObjectDisposedException)
+            {
+                // Shutdown can dispose a client while its bounded read is pending.
+            }
+            catch (Exception exception)
+            {
+                Log("Pipe client failed: " + exception.Message);
+            }
         }
     }
 
-    internal static bool SendCommand(string command, int timeoutMs)
+    private static async Task<string?> ReadBoundedCommandAsync(
+        StreamReader reader,
+        CancellationToken cancellationToken)
     {
+        var buffer = new char[MaxPipeCommandLength + 1];
+        var length = 0;
+        while (length < buffer.Length)
+        {
+            var read = await reader.ReadAsync(
+                buffer.AsMemory(length, buffer.Length - length),
+                cancellationToken).ConfigureAwait(false);
+            if (read == 0) break;
+
+            var newline = Array.IndexOf(buffer, '\n', length, read);
+            if (newline >= 0)
+                return new string(buffer, 0, newline).TrimEnd('\r');
+
+            length += read;
+        }
+
+        // Reject an overlong line without retaining or dispatching it. The client
+        // stream is disposed by the caller, so the unread tail cannot be reused.
+        return length <= MaxPipeCommandLength ? new string(buffer, 0, length) : null;
+    }
+
+    internal static bool SendCommand(string command, int timeoutMs)
+        => SendCommand(PipeName, command, timeoutMs);
+
+    private static bool SendCommand(string pipeName, string command, int timeoutMs)
+    {
+        if (!TryNormalizeCommand(command, out var normalizedCommand)) return false;
         try
         {
-            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
+            using var client = new NamedPipeClientStream(
+                ".",
+                pipeName,
+                PipeDirection.Out,
+                PipeOptions.CurrentUserOnly);
             client.Connect(timeoutMs);
             using var writer = new StreamWriter(client, Encoding.UTF8) { AutoFlush = true };
-            writer.WriteLine(command);
+            writer.WriteLine(normalizedCommand);
             return true;
         }
         catch
@@ -229,19 +297,204 @@ internal static class Program
             return false;
         }
     }
+
+    private static bool SendRawCommand(string pipeName, string payload, int timeoutMs)
+    {
+        try
+        {
+            using var client = new NamedPipeClientStream(
+                ".",
+                pipeName,
+                PipeDirection.Out,
+                PipeOptions.CurrentUserOnly);
+            client.Connect(timeoutMs);
+            using var writer = new StreamWriter(client, Encoding.UTF8) { AutoFlush = true };
+            writer.Write(payload);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool RunPipeIsolationSelfTest()
+    {
+        var pipeName = "MacMakeover.MenuHost.Test." + Guid.NewGuid().ToString("N");
+        MenuContext? context = null;
+        Task? server = null;
+        Task? flood = null;
+        CancellationTokenSource? floodStop = null;
+        Exception? uiFailure = null;
+        var contextReady = new ManualResetEventSlim(false);
+        var uiStopped = new ManualResetEventSlim(false);
+        var heartbeatTicks = 0;
+        var handledCommands = 0;
+        var uiThread = new Thread(() =>
+        {
+            try
+            {
+                using var localContext = new MenuContext(_ => Interlocked.Increment(ref handledCommands));
+                using var heartbeat = new System.Windows.Forms.Timer { Interval = 20 };
+                heartbeat.Tick += (_, _) => Interlocked.Increment(ref heartbeatTicks);
+                context = localContext;
+                contextReady.Set();
+                heartbeat.Start();
+                Application.Run(localContext);
+            }
+            catch (Exception exception)
+            {
+                uiFailure = exception;
+                contextReady.Set();
+            }
+            finally
+            {
+                uiStopped.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "MenuHost isolated regression UI"
+        };
+        uiThread.SetApartmentState(ApartmentState.STA);
+        uiThread.Start();
+
+        var idleClients = new List<NamedPipeClientStream>();
+        try
+        {
+            if (!contextReady.Wait(2000) || context is null || uiFailure is not null)
+                return false;
+
+            server = RunPipeServerAsync(context, pipeName);
+
+            // Eight clients that never send a newline must be released by the
+            // per-client timeout, allowing a ninth client to connect afterward.
+            for (var index = 0; index < PipeServerCapacity; index++)
+            {
+                var idle = new NamedPipeClientStream(
+                    ".",
+                    pipeName,
+                    PipeDirection.Out,
+                    PipeOptions.CurrentUserOnly);
+                idle.Connect(500);
+                idleClients.Add(idle);
+            }
+
+            Thread.Sleep(PipeClientReadTimeoutMilliseconds + 200);
+
+            // Keep the eight idle clients open while connecting the ninth. If
+            // the server-side read timeout regresses, this connect will fail.
+            var handledBeforeValid = Volatile.Read(ref handledCommands);
+            var validAfterIdle = SendCommand(pipeName, "network", 500);
+            var validDeadline = DateTime.UtcNow.AddSeconds(1);
+            while (Volatile.Read(ref handledCommands) == handledBeforeValid &&
+                   DateTime.UtcNow < validDeadline)
+            {
+                Thread.Sleep(10);
+            }
+
+            var handledAfterValid = Volatile.Read(ref handledCommands);
+            var invalidWasTransportAccepted = SendRawCommand(pipeName, "not-a-menu-command\n", 500);
+            var oversizedWasAcceptedByTransport = SendRawCommand(
+                pipeName,
+                new string('x', MaxPipeCommandLength + 10) + "\n",
+                500);
+            Thread.Sleep(100);
+            var handledAfterInvalid = Volatile.Read(ref handledCommands);
+
+            for (var index = 0; index < 32; index++)
+            {
+                SendCommand(pipeName, index % 2 == 0 ? "network" : "bluetooth", 500);
+            }
+
+            Thread.Sleep(100);
+            var pipeChecks = validAfterIdle &&
+                             handledAfterValid > handledBeforeValid &&
+                             invalidWasTransportAccepted &&
+                             oversizedWasAcceptedByTransport &&
+                             handledAfterInvalid == handledAfterValid &&
+                             context.PendingCommandCount <= MenuContext.MaxPendingCommands;
+
+            // Keep a valid command producer active while the isolated UI thread
+            // drains. A timer heartbeat must continue to tick, and the injected
+            // handler makes this test side-effect-free: no real menu is opened.
+            var heartbeatBeforeFlood = Volatile.Read(ref heartbeatTicks);
+            var handledBeforeFlood = Volatile.Read(ref handledCommands);
+            floodStop = new CancellationTokenSource();
+            flood = Task.Run(() =>
+            {
+                var index = 0;
+                var commands = new[] { "apple", "control", "network", "bluetooth", "desktop" };
+                while (!floodStop.IsCancellationRequested)
+                {
+                    context.Post(commands[index++ % commands.Length]);
+                    Thread.Yield();
+                }
+            });
+            Thread.Sleep(300);
+            floodStop.Cancel();
+            try { flood.Wait(2000); } catch { }
+
+            var heartbeatAfterFlood = Volatile.Read(ref heartbeatTicks);
+            var handledAfterFlood = Volatile.Read(ref handledCommands);
+            var uiYieldChecks = heartbeatAfterFlood > heartbeatBeforeFlood &&
+                                handledAfterFlood > handledBeforeFlood &&
+                                context.PendingCommandCount <= MenuContext.MaxPendingCommands;
+
+            return pipeChecks && uiYieldChecks && uiFailure is null;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            floodStop?.Cancel();
+            try { flood?.Wait(2000); } catch { }
+            foreach (var idle in idleClients) idle.Dispose();
+            context?.RequestExitForTest();
+            if (context is not null)
+            {
+                try { uiStopped.Wait(2000); } catch { }
+            }
+            if (server is not null)
+            {
+                try { server.GetAwaiter().GetResult(); } catch { }
+            }
+            if (uiThread.IsAlive)
+            {
+                try { uiThread.Join(1000); } catch { }
+            }
+            floodStop?.Dispose();
+            contextReady.Dispose();
+            uiStopped.Dispose();
+        }
+    }
 }
 
 internal sealed class MenuContext : ApplicationContext
 {
+    internal const int MaxPendingCommands = 8;
+    internal const int MaxCommandsPerDrain = 1;
+    internal const int CommandDrainIntervalMilliseconds = 10;
     private readonly CancellationTokenSource _cts = new();
     private readonly Control _invoker = new();
     private readonly object _commandGate = new();
     private readonly Queue<string> _pendingCommands = new();
+    private readonly System.Windows.Forms.Timer _commandDrainTimer;
+    private readonly Action<string>? _commandHandler;
     private Form? _current;
     private bool _commandDrainScheduled;
+    private bool _managedResourcesDisposed;
 
-    public MenuContext()
+    public MenuContext(Action<string>? commandHandler = null)
     {
+        _commandHandler = commandHandler;
+        _commandDrainTimer = new System.Windows.Forms.Timer
+        {
+            Interval = CommandDrainIntervalMilliseconds
+        };
+        _commandDrainTimer.Tick += (_, _) => DrainCommands();
         _invoker.CreateControl();
     }
 
@@ -249,20 +502,60 @@ internal sealed class MenuContext : ApplicationContext
 
     public bool IsDisposed { get; private set; }
 
+    internal int PendingCommandCount
+    {
+        get
+        {
+            lock (_commandGate) return _pendingCommands.Count;
+        }
+    }
+
+    internal void RequestExitForTest()
+    {
+        try
+        {
+            if (!_invoker.IsDisposed)
+                _invoker.BeginInvoke(new Action(ExitThread));
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
     public void Post(string command)
     {
+        if (!Program.TryNormalizeCommand(command, out var normalizedCommand))
+            return;
+
+        var scheduleDrain = false;
         lock (_commandGate)
         {
             if (IsDisposed || _invoker.IsDisposed) return;
-            _pendingCommands.Enqueue(command);
-            if (_commandDrainScheduled) return;
-            _commandDrainScheduled = true;
+            if (_pendingCommands.Contains(normalizedCommand) ||
+                _pendingCommands.Count >= MaxPendingCommands)
+            {
+                return;
+            }
+
+            _pendingCommands.Enqueue(normalizedCommand);
+            if (!_commandDrainScheduled)
+            {
+                _commandDrainScheduled = true;
+                scheduleDrain = true;
+            }
         }
 
-        Program.Log("Post " + command);
+        if (!scheduleDrain) return;
+        Program.Log("Post " + normalizedCommand);
         try
         {
-            _invoker.BeginInvoke(new Action(DrainCommands));
+            // BeginInvoke is used exactly once to arm the timer. Subsequent work
+            // resumes on a later timer message rather than recursively adding
+            // callbacks to WinForms' marshaled-callback queue.
+            _invoker.BeginInvoke(new Action(ArmCommandDrain));
         }
         catch (ObjectDisposedException)
         {
@@ -274,22 +567,56 @@ internal sealed class MenuContext : ApplicationContext
         }
     }
 
+    private void ArmCommandDrain()
+    {
+        if (IsDisposed || _invoker.IsDisposed)
+        {
+            lock (_commandGate) _commandDrainScheduled = false;
+            return;
+        }
+
+        lock (_commandGate)
+        {
+            if (_pendingCommands.Count == 0)
+            {
+                _commandDrainScheduled = false;
+                return;
+            }
+        }
+
+        _commandDrainTimer.Start();
+    }
+
     private void DrainCommands()
     {
-        while (true)
+        string command;
+        lock (_commandGate)
         {
-            string command;
-            lock (_commandGate)
+            if (_pendingCommands.Count == 0)
             {
-                if (_pendingCommands.Count == 0)
-                {
-                    _commandDrainScheduled = false;
-                    return;
-                }
-                command = _pendingCommands.Dequeue();
+                _commandDrainScheduled = false;
+                _commandDrainTimer.Stop();
+                return;
             }
+            command = _pendingCommands.Dequeue();
+        }
 
-            ShowCommand(command);
+        try
+        {
+            (_commandHandler ?? ShowCommand)(command);
+        }
+        catch (Exception exception)
+        {
+            Program.Log("Command handler failed: " + exception.Message);
+        }
+
+        lock (_commandGate)
+        {
+            if (_pendingCommands.Count == 0)
+            {
+                _commandDrainScheduled = false;
+                _commandDrainTimer.Stop();
+            }
         }
     }
 
@@ -297,8 +624,13 @@ internal sealed class MenuContext : ApplicationContext
     {
         try
         {
-            Program.Log("ShowCommand " + command);
-            var normalizedCommand = command.Trim().ToLowerInvariant();
+            if (!Program.TryNormalizeCommand(command, out var normalizedCommand))
+            {
+                Program.Log("Ignored invalid queued menu command");
+                return;
+            }
+
+            Program.Log("ShowCommand " + normalizedCommand);
             var previous = _current;
             _current = null;
             previous?.Close();
@@ -352,14 +684,17 @@ internal sealed class MenuContext : ApplicationContext
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !_managedResourcesDisposed)
         {
+            _managedResourcesDisposed = true;
             IsDisposed = true;
             lock (_commandGate)
             {
                 _pendingCommands.Clear();
                 _commandDrainScheduled = false;
             }
+            _commandDrainTimer.Stop();
+            _commandDrainTimer.Dispose();
             _cts.Cancel();
             _current?.Dispose();
             _invoker.Dispose();

@@ -1,6 +1,10 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
-param()
+param(
+  [Parameter(Mandatory)]
+  [ValidatePattern('^[0-9a-fA-F]{32}$')]
+  [string]$PromotionRunId
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -19,6 +23,16 @@ $hotCornersStartup = Join-Path $hotCornersStartupRoot $hotCornersStartupName
 $hotCornersStartupBackup = Join-Path $stateRoot 'hot-corners-startup.lnk'
 $wallpaperGuardRoot = Join-Path $env:LOCALAPPDATA 'MacMakeover\maintenance'
 $wallpaperGuardScript = Join-Path $wallpaperGuardRoot 'Repair-NativeWallpaperPolicy.ps1'
+$currentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+
+function Get-CurrentSessionProcess {
+  param([Parameter(Mandatory)][string[]]$ProcessName)
+
+  @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue |
+    Where-Object {
+      try { $_.SessionId -eq $currentSessionId } catch { $false }
+    })
+}
 
 if (-not (Test-Path -LiteralPath $preparedPath)) {
   throw 'The unelevated user-profile preparation has not completed.'
@@ -27,6 +41,11 @@ $prepared = Get-Content -LiteralPath $preparedPath -Raw | ConvertFrom-Json
 $managedPolicyWallpaper = [string]$prepared.policyWallpaper
 if (-not (Test-Path -LiteralPath $managedPolicyWallpaper)) {
   throw "The managed MDM-compatible wallpaper is missing: $managedPolicyWallpaper"
+}
+$preparedRunIdProperty = $prepared.PSObject.Properties['promotionRunId']
+$preparedRunId = if ($preparedRunIdProperty) { [string]$preparedRunIdProperty.Value } else { '' }
+if ($preparedRunId -ne $PromotionRunId) {
+  throw 'The promotion run ID does not match the prepared native-shell profile.'
 }
 
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
@@ -44,7 +63,9 @@ try {
   }
   $policyWallpaperPath = [IO.Path]::GetFullPath($policyWallpaperPath)
   $allowedWallpaperRoot = [IO.Path]::GetFullPath((Join-Path $env:WINDIR 'web\wallpaper'))
-  if (-not $policyWallpaperPath.StartsWith($allowedWallpaperRoot, [StringComparison]::OrdinalIgnoreCase)) {
+  $allowedWallpaperPrefix = $allowedWallpaperRoot.TrimEnd('\') + '\'
+  if (-not ([string]::Equals($policyWallpaperPath, $allowedWallpaperRoot, [StringComparison]::OrdinalIgnoreCase) -or
+      $policyWallpaperPath.StartsWith($allowedWallpaperPrefix, [StringComparison]::OrdinalIgnoreCase))) {
     throw "Refusing to replace an MDM wallpaper outside the Windows wallpaper directory: $policyWallpaperPath"
   }
   $policyWallpaperBackup = Join-Path $stateRoot 'wallpaper-policy-original.png'
@@ -120,7 +141,7 @@ try {
   )
   $hotCornersStartupVariants | Remove-Item -Force
   & (Join-Path $PSScriptRoot 'stop-hot-corners.ps1')
-  Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, seelen-ui, slu-service, yasb -ErrorAction SilentlyContinue |
+  Get-CurrentSessionProcess -ProcessName @('MacMakeover.MenuBar', 'MacMakeover.MenuHost', 'MacMakeover.Dock', 'seelen-ui', 'slu-service', 'yasb') |
     Stop-Process -Force -ErrorAction SilentlyContinue
 
   $result = [ordered]@{
@@ -139,6 +160,7 @@ try {
     hotCornersStartupVariantsRemoved = $hotCornersStartupVariants.Count
     wallpaperGuardTaskName = $wallpaperGuardTaskName
     wallpaperGuardScript = $wallpaperGuardScript
+    promotionRunId = $PromotionRunId
   } | ConvertTo-Json
   [System.IO.File]::WriteAllText($systemPath, $result, (New-Object System.Text.UTF8Encoding($false)))
 }

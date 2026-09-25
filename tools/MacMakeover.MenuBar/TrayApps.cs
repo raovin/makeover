@@ -15,7 +15,10 @@ internal sealed record TrayAppSnapshot(
 internal static class TrayAppProvider
 {
     private const string NotifyIconRegistryPath = @"Control Panel\NotifyIconSettings";
+    private const int VersionMetadataCacheLimit = 64;
     private static readonly object Gate = new();
+    private static readonly Dictionary<string, VersionMetadataCacheEntry> VersionMetadataCache =
+        new(StringComparer.OrdinalIgnoreCase);
     private static DateTime _registryReadAt;
     private static IReadOnlyList<TrayAppSnapshot> _registrations = [];
     private static DateTime _captureReadAt;
@@ -30,28 +33,65 @@ internal static class TrayAppProvider
             if ((DateTime.UtcNow - _captureReadAt).TotalSeconds < 2) return _capture;
             _captureReadAt = DateTime.UtcNow;
             var registrations = Registrations();
-            var runningPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var process in Process.GetProcesses())
-            {
-                using (process)
-                {
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(process.MainModule?.FileName))
-                        {
-                            runningPaths.Add(NormalizeExecutablePath(process.MainModule.FileName));
-                        }
-                    }
-                    catch (System.ComponentModel.Win32Exception) { }
-                    catch (InvalidOperationException) { }
-                    catch (NotSupportedException) { }
-                    catch (UnauthorizedAccessException) { }
-                    catch (System.Security.SecurityException) { }
-                }
-            }
+            var runningPaths = FindRunningCandidatePaths(registrations, Process.GetProcesses);
 
             return _capture = SelectLive(registrations, runningPaths);
         }
+    }
+
+    /// <summary>
+    /// Only query process modules for names represented in the tray registry. The
+    /// final normalized-path comparison still protects against same-name processes
+    /// and PID reuse, while avoiding a MainModule read for every process on the box.
+    /// </summary>
+    internal static HashSet<string> FindRunningCandidatePaths(
+        IReadOnlyList<TrayAppSnapshot> registrations,
+        Func<Process[]> processSnapshot)
+    {
+        var candidatePaths = registrations
+            .Select(item => item.ExecutablePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var candidateProcessNames = candidatePaths
+            .Select(path => Path.GetFileNameWithoutExtension(path))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var runningPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        Process[] processes;
+        try
+        {
+            processes = processSnapshot();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or
+                                  System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            return runningPaths;
+        }
+
+        foreach (var process in processes)
+        {
+            using (process)
+            {
+                try
+                {
+                    if (!candidateProcessNames.Contains(process.ProcessName)) continue;
+                    var livePath = process.MainModule?.FileName;
+                    if (string.IsNullOrWhiteSpace(livePath)) continue;
+
+                    var normalizedPath = NormalizeExecutablePath(livePath);
+                    if (candidatePaths.Contains(normalizedPath))
+                        runningPaths.Add(normalizedPath);
+                }
+                catch (System.ComponentModel.Win32Exception) { }
+                catch (InvalidOperationException) { }
+                catch (NotSupportedException) { }
+                catch (UnauthorizedAccessException) { }
+                catch (System.Security.SecurityException) { }
+            }
+        }
+
+        return runningPaths;
     }
 
     internal static string ExpandExecutablePath(string path)
@@ -124,29 +164,40 @@ internal static class TrayAppProvider
                 if (root is null) return _registrations = [];
                 foreach (var keyName in root.GetSubKeyNames())
                 {
-                    using var key = root.OpenSubKey(keyName);
-                    var tooltip = key?.GetValue("InitialTooltip") as string;
-                    var rawPath = key?.GetValue("ExecutablePath") as string;
-                    if (string.IsNullOrWhiteSpace(rawPath)) continue;
-                    var executablePath = NormalizeExecutablePath(rawPath);
-                    var processName = Path.GetFileNameWithoutExtension(executablePath);
-                    if (string.IsNullOrWhiteSpace(processName) || IsShellOwned(processName)) continue;
-                    var promoted = key?.GetValue("IsPromoted", 0) is int promotedValue && promotedValue != 0;
-                    var iconSnapshot = key?.GetValue("IconSnapshot") as byte[];
-                    var version = string.IsNullOrWhiteSpace(tooltip)
-                        ? TryReadVersionInfo(executablePath)
-                        : null;
-                    registrations.Add(new TrayAppSnapshot(
-                        keyName,
-                        ResolveDisplayName(
-                            tooltip,
+                    try
+                    {
+                        using var key = root.OpenSubKey(keyName);
+                        var tooltip = key?.GetValue("InitialTooltip") as string;
+                        var rawPath = key?.GetValue("ExecutablePath") as string;
+                        if (string.IsNullOrWhiteSpace(rawPath)) continue;
+                        var executablePath = NormalizeExecutablePath(rawPath);
+                        var processName = Path.GetFileNameWithoutExtension(executablePath);
+                        if (string.IsNullOrWhiteSpace(processName) || IsShellOwned(processName)) continue;
+                        var promoted = key?.GetValue("IsPromoted", 0) is int promotedValue && promotedValue != 0;
+                        var iconSnapshot = key?.GetValue("IconSnapshot") as byte[];
+                        var version = string.IsNullOrWhiteSpace(tooltip)
+                            ? TryReadVersionInfo(executablePath)
+                            : null;
+                        registrations.Add(new TrayAppSnapshot(
+                            keyName,
+                            ResolveDisplayName(
+                                tooltip,
+                                executablePath,
+                                version?.ProductName,
+                                version?.FileDescription),
                             executablePath,
-                            version?.ProductName,
-                            version?.FileDescription),
-                        executablePath,
-                        promoted,
-                        TrayIconCache.GetIconSnapshotIdentity(iconSnapshot),
-                        ParseIconGuid(key?.GetValue("IconGuid"))));
+                            promoted,
+                            TrayIconCache.GetIconSnapshotIdentity(iconSnapshot),
+                            ParseIconGuid(key?.GetValue("IconGuid"))));
+                    }
+                    catch (Exception ex) when (ex is ArgumentException or IOException or
+                                              NotSupportedException or UnauthorizedAccessException or
+                                              System.Security.SecurityException or
+                                              System.ComponentModel.Win32Exception)
+                    {
+                        // One stale or malformed history row must not hide all other
+                        // live tray registrations.
+                    }
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -203,17 +254,45 @@ internal static class TrayAppProvider
         return candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate)) ?? "Tray application";
     }
 
-    private static FileVersionInfo? TryReadVersionInfo(string executablePath)
+    private static VersionMetadata? TryReadVersionInfo(string executablePath)
     {
+        var identity = TrayIconCache.GetSourceIdentity(executablePath);
+        if (VersionMetadataCache.TryGetValue(executablePath, out var cached) &&
+            cached.SourceIdentity.Equals(identity, StringComparison.OrdinalIgnoreCase))
+        {
+            return cached.Metadata;
+        }
+
+        VersionMetadata? metadata = null;
         try
         {
-            return File.Exists(executablePath) ? FileVersionInfo.GetVersionInfo(executablePath) : null;
+            if (File.Exists(executablePath))
+            {
+                var version = FileVersionInfo.GetVersionInfo(executablePath);
+                metadata = new VersionMetadata(version.ProductName, version.FileDescription);
+            }
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or
+                                   NotSupportedException or System.ComponentModel.Win32Exception or
+                                   System.Security.SecurityException)
         {
-            return null;
+            // Keep a negative result for this file identity as well; inaccessible
+            // protected processes otherwise trigger metadata IO every two seconds.
         }
+
+        if (!VersionMetadataCache.ContainsKey(executablePath) &&
+            VersionMetadataCache.Count >= VersionMetadataCacheLimit)
+        {
+            VersionMetadataCache.Remove(VersionMetadataCache.Keys.First());
+        }
+
+        VersionMetadataCache[executablePath] = new VersionMetadataCacheEntry(identity, metadata);
+        return metadata;
     }
+
+    private sealed record VersionMetadata(string? ProductName, string? FileDescription);
+
+    private sealed record VersionMetadataCacheEntry(string SourceIdentity, VersionMetadata? Metadata);
 
     private static string? CleanDisplayName(string? value)
     {

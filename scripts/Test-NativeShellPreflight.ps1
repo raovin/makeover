@@ -38,26 +38,15 @@ if ((Test-Path -LiteralPath $wallpaperAsset) -and
   $failures.Add('The managed wallpaper is not the archived Seelen Big Sur (Day) asset.')
 }
 
-$scriptNames = @(
-  'Build-NativeShell.ps1',
-  'Capture-Desktop.ps1',
-  'install-apps.ps1',
-  'Install-NativeDock.ps1',
-  'NativeShellTasks.ps1',
-  'Prepare-NativeShellUserProfile.ps1',
-  'Promote-NativeShell.ps1',
-  'Request-NativeShellPromotion.ps1',
-  'Switch-To-NativeShell.ps1',
-  'Invoke-NativeShellPromotion.ps1',
-  'Complete-NativeShellPromotion.ps1',
-  'Repair-NativeWallpaperPolicy.ps1',
-  'Measure-ShellPerformance.ps1',
-  'Test-NativeShellRegression.ps1',
-  'Test-NativeShellProfile.ps1',
-  'verify.ps1'
+$archiveScriptsRoot = Join-Path $repoRoot 'archive\seelen-ui\scripts'
+$scriptPaths = @(
+  Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -File | Select-Object -ExpandProperty FullName
+  if (Test-Path -LiteralPath $archiveScriptsRoot) {
+    Get-ChildItem -LiteralPath $archiveScriptsRoot -Filter '*.ps1' -File | Select-Object -ExpandProperty FullName
+  }
 )
-foreach ($scriptName in $scriptNames) {
-  $scriptPath = Join-Path $PSScriptRoot $scriptName
+foreach ($scriptPath in $scriptPaths) {
+  $scriptName = [IO.Path]::GetRelativePath($repoRoot, $scriptPath)
   $tokens = $null
   $parseErrors = $null
   [void][System.Management.Automation.Language.Parser]::ParseFile(
@@ -92,6 +81,9 @@ $dockSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.D
 $buildSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Build-NativeShell.ps1') -Raw
 $promoteSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Promote-NativeShell.ps1') -Raw
 $prepareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Prepare-NativeShellUserProfile.ps1') -Raw
+$installSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Install-NativeShell.ps1') -Raw
+$requestSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Request-NativeShellPromotion.ps1') -Raw
+$invokeSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Invoke-NativeShellPromotion.ps1') -Raw
 $completeSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Complete-NativeShellPromotion.ps1') -Raw
 $taskSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'NativeShellTasks.ps1') -Raw
 $profileSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeShellProfile.ps1') -Raw
@@ -124,6 +116,24 @@ if ($prepareSource -notmatch "MacMakeoverMenuHost', 'MacMakeoverMenuBar', 'MacMa
     $prepareSource -notmatch 'Remove-ItemProperty' -or
     $prepareSource -notmatch 'Register-NativeShellTasks') {
   $failures.Add('Legacy Run-key startup entries can race the persistent native-shell tasks.')
+}
+if ($installSource -notmatch 'Promote-NativeShell\.ps1' -or
+    $installSource -notmatch 'InstallLegacyIntegrations' -or
+    $installSource -notmatch 'Native-only installation' -or
+    $installSource -match 'Optional dock skin') {
+  $failures.Add('The primary native-shell installer must be native-only by default and must not advertise the retired Windhawk dock path.')
+}
+if ($prepareSource -notmatch 'promotionRunId' -or
+    $requestSource -notmatch 'STATE=REQUESTED' -or
+    $requestSource -notmatch '\[regex\]::IsMatch' -or
+    $requestSource -notmatch '\{32\}' -or
+    $requestSource -notmatch '-PromotionRunId' -or
+    $invokeSource -notmatch 'STATE=RUNNING' -or
+    $invokeSource -notmatch 'STATE=SUCCEEDED' -or
+    $invokeSource -notmatch 'STATE=FAILED' -or
+    $switchSource -notmatch 'preparedRunId' -or
+    $completeSource -notmatch 'STATE=SUCCEEDED') {
+  $failures.Add('Promotion completion must correlate a fresh prepared/run/system state instead of trusting a historical EXIT=0 marker.')
 }
 if ($seelenRestoreSource -notmatch 'MacMakeover Shell - MenuHost' -or
     $seelenRestoreSource -notmatch 'Unregister-ScheduledTask' -or
@@ -162,9 +172,13 @@ if ($trayAppsSource -notmatch 'NotifyIconSettings' -or
     $menuBarProgramSource -notmatch '--snapshot-tray') {
   $failures.Add('MenuBar no longer discovers and renders live notification-area applications.')
 }
-if ($menuBarSource -match 'TrayOverflow|Take\(3\)|Skip\(3\)' -or
-    $menuBarSource -notmatch 'foreach \(var app in snapshot\.TrayApps\)') {
-  $failures.Add('MenuBar must render every live notification-area app inline without an overflow control.')
+if ($menuBarSource -notmatch 'ComputeTrayLayout' -or
+    $menuBarSource -notmatch 'snapshot\.TrayApps\.Take\(layout\.VisibleCount\)' -or
+    $menuBarSource -notmatch 'snapshot\.TrayApps\.Skip\(layout\.VisibleCount\)' -or
+    $menuBarSource -notmatch 'DrawTrayOverflow' -or
+    $menuBarSource -notmatch 'ShowTrayOverflowMenu' -or
+    $menuBarSource -notmatch '_trayOverflowApps') {
+  $failures.Add('MenuBar must render the reachable tray apps inline and expose bounded overflow for compact/high-DPI bars.')
 }
 $awakeDirectMenuShow = $awakeContextSource -match 'menu\.Show\(Cursor\.Position\)'
 $awakeAnchorMenuShow = $awakeContextSource -match 'menu\.Show\(\s*_menuAnchor\s*,\s*Point\.Empty\s*\)' -and
@@ -248,7 +262,7 @@ if ($trayAppsSource -notmatch 'IconSnapshotIdentity' -or
 if ($systemStateSource -notmatch 'BuildRenderedNotificationToken' -or
     $systemStateSource -notmatch 'FormatNetworkRate' -or
     $systemStateSource -notmatch '_lastNotificationToken' -or
-    $systemStateSource -notmatch 'if \(raiseChanged\) Changed\?\.Invoke' -or
+    $systemStateSource -notmatch 'if \(raiseChanged && !_disposed\) Changed\?\.Invoke' -or
     $systemStateSource -notmatch 'yyyy-MM-dd HH:mm' -or
     $systemStateSource -notmatch '_cachedForegroundPid' -or
     $systemStateSource -notmatch 'ApplicationFrameHost' -or
@@ -300,7 +314,8 @@ if ($performanceSource -notmatch "'MacMakeover\.Supervisor'" -or
     $performanceSource -notmatch 'function Get-CpuDelta' -or
     $performanceSource -notmatch 'Previous\.ContainsKey' -or
     $performanceSource -notmatch 'MissingCustomProcesses' -or
-    $performanceSource -notmatch 'CustomProcessCount') {
+    $performanceSource -notmatch 'CustomProcessCount' -or
+    $performanceSource -notmatch 'ShellOnlyCpuPercent') {
   $failures.Add('The performance sampler no longer handles missing/restarted processes safely or measure the Supervisor.')
 }
 if ($dockSource -notmatch '--regression-test' -or
@@ -375,7 +390,8 @@ if ($profileSource -notmatch 'Round\(48 \* \$visualScale\)' -or
   $failures.Add('Profile verifier does not assert exact expected bottom reservation based on Dock scaling policy.')
 }
 if ($promoteSource -notmatch 'Restore-InteractiveNativeShell' -or
-    $promoteSource -notmatch 'Get-Process explorer.*Stop-Process' -or
+    (($promoteSource -notmatch 'Get-Process explorer.*Stop-Process') -and
+     ($promoteSource -notmatch 'Get-NativeShellCurrentSessionProcess.*explorer')) -or
     $promoteSource -notmatch 'Explorer was restored, but the custom shell could not be restarted' -or
     $promoteSource -notmatch 'Native-shell promotion failed; restoring the interactive shell') {
   $failures.Add('Promotion no longer restores Explorer and the native shell after cancellation or failure.')
@@ -497,6 +513,8 @@ if ($supervisorSource -notmatch 'SupervisorRetryPolicy' -or
     $supervisorSource -notmatch 'NextBackoffMs' -or
     $supervisorSource -notmatch 'MaxBackoffMs' -or
     $supervisorSource -notmatch 'IsExplorerRunningInCurrentSession' -or
+    $supervisorSource -notmatch 'ProcessLifetimeObserver' -or
+    $supervisorSource -notmatch 'WaitForRunning' -or
     $supervisorSource -notmatch 'LauncherFailure' -or
     $supervisorSource -notmatch 'ChildStillAbsent' -or
     $supervisorSource -notmatch '0xC0000142' -or
@@ -575,3 +593,4 @@ if ($failures.Count) {
 Write-Host ("PASS: native-shell static/staged preflight is ready. {0} display(s); {1} native pinned shortcuts." -f `
     $screens.Count,
     $nativePins.Count)
+exit 0

@@ -11,7 +11,11 @@ $scriptPath = Join-Path $PSScriptRoot "start-hot-corners.ps1"
 $startupShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\Mac Makeover Hot Corners.lnk"
 $pwsh = "$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe"
 if (-not (Test-Path -LiteralPath $pwsh)) {
-  $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+  $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
+  $pwsh = if ($pwshCommand) { $pwshCommand.Source } else { $null }
+}
+if ([string]::IsNullOrWhiteSpace($pwsh) -or -not (Test-Path -LiteralPath $pwsh)) {
+  throw 'Windows PowerShell 5.1 or PowerShell 7 is required for the hot-corners helper.'
 }
 
 $arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -ConfigPath `"$ConfigPath`""
@@ -43,7 +47,7 @@ function Install-KeepaliveTask {
     $action = New-ScheduledTaskAction -Execute $conhost -Argument $taskArgs
     $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
     $logon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
     Register-ScheduledTask -TaskName "MacMakeover Hot Corners Keepalive" -Action $action -Trigger @($repeat, $logon) -Settings $settings -Force | Out-Null
     Write-Host "Installed keepalive scheduled task: MacMakeover Hot Corners Keepalive (every 5 minutes)"
   } catch {

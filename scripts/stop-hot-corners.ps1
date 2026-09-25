@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $keepaliveTaskName = "MacMakeover Hot Corners Keepalive"
 $startupRoot = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
 $startupShortcutName = "Mac Makeover Hot Corners.lnk"
+$currentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
 
 # The keepalive task relaunches the helper every 5 minutes, so stopping the helper
 # without pausing the task would just resurrect it. Disable on stop, remove on unregister.
@@ -40,7 +41,11 @@ if ($Unregister) {
 
 if (-not $StopTaskOnly) {
   Get-CimInstance Win32_Process |
-    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "* -File *start-hot-corners.ps1*" } |
+    Where-Object {
+      $_.ProcessId -ne $PID -and
+      $_.SessionId -eq $currentSessionId -and
+      $_.CommandLine -like "* -File *start-hot-corners.ps1*"
+    } |
     ForEach-Object {
       Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
       Write-Host "Stopped hot-corners process: $($_.ProcessId)"

@@ -43,15 +43,17 @@ internal static class Program
         if (args.Length == 2 && args[0] == "--verify-input")
         {
             Thread.Sleep(1500);
-            var before = NativeMethods.GetIdleTime();
+            var beforeAvailable = NativeMethods.TryGetIdleTime(out var before);
             var accepted = NativeMethods.SendKeyboardAndMousePulse();
             Thread.Sleep(150);
-            var after = NativeMethods.GetIdleTime();
+            var afterAvailable = NativeMethods.TryGetIdleTime(out var after);
             File.WriteAllText(args[1],
                 $"Accepted={accepted}{Environment.NewLine}" +
+                $"IdleMeasurementAvailable={beforeAvailable && afterAvailable}{Environment.NewLine}" +
                 $"IdleBeforeMs={before.TotalMilliseconds:F0}{Environment.NewLine}" +
                 $"IdleAfterMs={after.TotalMilliseconds:F0}{Environment.NewLine}");
-            Environment.ExitCode = accepted && after < TimeSpan.FromSeconds(2) ? 0 : 2;
+            Environment.ExitCode = accepted && beforeAvailable && afterAvailable &&
+                                   after < TimeSpan.FromSeconds(2) ? 0 : 2;
             return;
         }
 

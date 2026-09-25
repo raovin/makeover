@@ -5,6 +5,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$script:CurrentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
 
 # Single-instance guard: only one hot-corners helper may poll the mouse. A second copy
 # (e.g. the Startup shortcut plus a manual launch) makes every menu/corner click fire
@@ -413,7 +414,9 @@ function Start-MacMakeoverMenuHost {
   param([object]$Config)
 
   if (-not (Build-MacMakeoverMenuHost -Config $Config)) { return $false }
-  if (Get-Process -Name "MacMakeover.MenuHost" -ErrorAction SilentlyContinue) { return $true }
+  $menuHost = @(Get-Process -Name "MacMakeover.MenuHost" -ErrorAction SilentlyContinue |
+    Where-Object { try { $_.SessionId -eq $script:CurrentSessionId } catch { $false } })
+  if ($menuHost.Count -gt 0) { return $true }
 
   try {
     $process = Start-Process -FilePath $script:MenuHostExePath -WindowStyle Hidden -PassThru

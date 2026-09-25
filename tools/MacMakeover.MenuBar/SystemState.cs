@@ -63,8 +63,10 @@ internal sealed class SystemStateProvider : IDisposable
     private string _cachedExecutableDescription = string.Empty;
     private string _cachedFrameHostTitle = string.Empty;
     private int _polling;
+    private int _started;
+    private int _disposeStarted;
     private bool _eventsSubscribed;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     public SystemStateProvider()
     {
@@ -83,7 +85,9 @@ internal sealed class SystemStateProvider : IDisposable
 
     public void Start()
     {
+        if (_disposed || Interlocked.Exchange(ref _started, 1) != 0) return;
         Poll();
+        if (_disposed) return;
         SubscribeRefreshEvents();
         _aiUsage.Start();
         // Keep the established telemetry cadence; Changed is suppressed when the
@@ -155,6 +159,7 @@ internal sealed class SystemStateProvider : IDisposable
             var raiseChanged = false;
             lock (_gate)
             {
+                if (_disposed) return;
                 _snapshot = snapshot;
                 if (!string.Equals(token, _lastNotificationToken, StringComparison.Ordinal))
                 {
@@ -162,7 +167,7 @@ internal sealed class SystemStateProvider : IDisposable
                     raiseChanged = true;
                 }
             }
-            if (raiseChanged) Changed?.Invoke(this, EventArgs.Empty);
+            if (raiseChanged && !_disposed) Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)
         {
@@ -468,6 +473,7 @@ internal sealed class SystemStateProvider : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
         _disposed = true;
         if (_eventsSubscribed)
         {

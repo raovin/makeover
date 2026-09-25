@@ -23,6 +23,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private bool _menuRefreshPending;
     private bool _isExiting;
     private DateTime _lastMenuClosedUtc = DateTime.MinValue;
+    private readonly HashSet<System.Windows.Forms.Timer> _transientTimers = [];
+    private readonly List<(System.Windows.Forms.Timer Timer, Point ClickPoint, Point Original)> _pendingPointerRestores = [];
 
     internal TrayApplicationContext(EventWaitHandle showMenuEvent)
     {
@@ -234,6 +236,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void OnGlobalMouseDown(Point screenPoint)
     {
+        if (_isExiting) return;
         if (_trayIcon.ContextMenuStrip is not { IsDisposed: false, Visible: true } menu ||
             IsInsideDropDown(menu, screenPoint) ||
             !_menuAnchor.IsHandleCreated ||
@@ -246,7 +249,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // hook, which is this WinForms UI thread. Close immediately so the normal
         // ToolStrip auto-close path cannot dispose the menu before a queued
         // callback runs.
-        menu.Close(ToolStripDropDownCloseReason.AppClicked);
+        try
+        {
+            menu.Close(ToolStripDropDownCloseReason.AppClicked);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 
     private static bool IsInsideDropDown(ToolStripDropDown dropDown, Point screenPoint)
@@ -443,11 +455,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _isCapturingPoint = true;
         ShowBalloon("Capturing in 3 seconds", "Move the pointer to a harmless blank area and leave it there until you hear the beep.");
 
-        var captureTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+        var captureTimer = TrackTransientTimer(3000);
         captureTimer.Tick += (_, _) =>
         {
-            captureTimer.Stop();
-            captureTimer.Dispose();
+            DisposeTransientTimer(captureTimer);
             var point = Cursor.Position;
             _settings.SafePointX = point.X;
             _settings.SafePointY = point.Y;
@@ -462,15 +473,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void TestTeamsPulse()
     {
-        var before = NativeMethods.GetIdleTime();
+        var beforeAvailable = NativeMethods.TryGetIdleTime(out var before);
         var accepted = PerformTeamsActivity(force: true);
-        var after = NativeMethods.GetIdleTime();
-        var reset = after < before || after < TimeSpan.FromSeconds(2);
+        var afterAvailable = NativeMethods.TryGetIdleTime(out var after);
+        var reset = beforeAvailable && afterAvailable &&
+                    (after < before || after < TimeSpan.FromSeconds(2));
         ShowBalloon(
             accepted && reset ? "Teams pulse verified" : "Teams pulse failed",
             accepted && reset
                 ? $"Windows accepted the input and its idle timer reset from {before.TotalSeconds:F1}s to {after.TotalSeconds:F1}s."
-                : $"Input accepted: {accepted}. Idle before: {before.TotalSeconds:F1}s; after: {after.TotalSeconds:F1}s.");
+                : $"Input accepted: {accepted}. Idle measurement available: {beforeAvailable && afterAvailable}. " +
+                  $"Idle before: {before.TotalSeconds:F1}s; after: {after.TotalSeconds:F1}s.");
     }
 
     private bool PerformTeamsActivity(bool force = false)
@@ -516,11 +529,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
             accepted = NativeMethods.SendLeftClick();
             RecordPulse(accepted);
 
-            var restoreTimer = new System.Windows.Forms.Timer { Interval = 75 };
+            var restoreTimer = TrackTransientTimer(75);
+            _pendingPointerRestores.Add((restoreTimer, clickPoint, original));
             restoreTimer.Tick += (_, _) =>
             {
-                restoreTimer.Stop();
-                restoreTimer.Dispose();
+                _pendingPointerRestores.RemoveAll(item => ReferenceEquals(item.Timer, restoreTimer));
+                DisposeTransientTimer(restoreTimer);
                 // Do not drag the pointer away if the user returned during the click.
                 if (Cursor.Position == clickPoint) Cursor.Position = original;
             };
@@ -539,6 +553,33 @@ internal sealed class TrayApplicationContext : ApplicationContext
         ShowBalloon("Teams activity stopped", message);
         RebuildMenu();
         return false;
+    }
+
+    private System.Windows.Forms.Timer TrackTransientTimer(int interval)
+    {
+        var timer = new System.Windows.Forms.Timer { Interval = interval };
+        _transientTimers.Add(timer);
+        return timer;
+    }
+
+    private void DisposeTransientTimer(System.Windows.Forms.Timer timer)
+    {
+        _transientTimers.Remove(timer);
+        timer.Stop();
+        timer.Dispose();
+    }
+
+    private void DisposeTransientResources()
+    {
+        foreach (var pending in _pendingPointerRestores.ToArray())
+        {
+            _pendingPointerRestores.Remove(pending);
+            DisposeTransientTimer(pending.Timer);
+            if (Cursor.Position == pending.ClickPoint) Cursor.Position = pending.Original;
+        }
+
+        foreach (var timer in _transientTimers.ToArray()) DisposeTransientTimer(timer);
+        _pendingPointerRestores.Clear();
     }
 
     private void RecordPulse(bool accepted)
@@ -572,6 +613,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _activityTimer.Stop();
         _scheduleTimer.Stop();
         _showMenuTimer.Stop();
+        DisposeTransientResources();
         NativeMethods.SetThreadExecutionState(NativeMethods.ExecutionState.Continuous);
         _trayIcon.Visible = false;
 

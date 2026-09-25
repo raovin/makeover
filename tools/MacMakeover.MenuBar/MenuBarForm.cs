@@ -31,6 +31,14 @@ internal enum TelemetryKind
 
 internal sealed record TelemetrySegment(TelemetryKind Kind, string Text);
 
+internal readonly record struct TrayLayout(
+    int VisibleCount,
+    int OverflowCount,
+    int OverflowButtonWidth)
+{
+    internal bool HasOverflow => OverflowCount > 0;
+}
+
 internal static class OpenAiBlossomAsset
 {
     internal static GraphicsPath? TryLoad(string path)
@@ -68,10 +76,11 @@ internal static class SvgPathParser
 
     internal static GraphicsPath? TryParse(string data)
     {
+        GraphicsPath? path = null;
         try
         {
             var tokens = OpenAiBlossomAssetTokenize(data);
-            var path = new GraphicsPath { FillMode = FillMode.Winding };
+            path = new GraphicsPath { FillMode = FillMode.Winding };
             var index = 0;
             var command = '\0';
             var current = PointF.Empty;
@@ -145,6 +154,7 @@ internal static class SvgPathParser
         }
         catch
         {
+            path?.Dispose();
             return null;
         }
     }
@@ -212,6 +222,7 @@ internal sealed class MenuBarForm : Form
     private readonly List<(Rectangle Bounds, TrayAppSnapshot App)> _trayHits = [];
     private readonly TrayIconCache _trayIcons = new();
     private readonly ToolTip _toolTip = new() { InitialDelay = 400, ReshowDelay = 100, AutoPopDelay = 5000 };
+    private readonly CancellationTokenSource _lifetimeCts = new();
     private Typography? _typography;
     private Font _textFont = null!;
     private Font _semiboldFont = null!;
@@ -226,6 +237,12 @@ internal sealed class MenuBarForm : Form
     private bool _appBarRegistered;
     private BarAction? _hovered;
     private string? _hoveredTrayKey;
+    private bool _trayOverflowHovered;
+    private Rectangle? _trayOverflowBounds;
+    private IReadOnlyList<TrayAppSnapshot> _trayOverflowApps = [];
+    private ContextMenuStrip? _trayOverflowMenu;
+    private float? _renderScaleOverride;
+    private int _managedResourcesDisposed;
 
     public MenuBarForm(Screen screen, SystemStateProvider state, bool preview, string? previewPower)
     {
@@ -269,6 +286,7 @@ internal sealed class MenuBarForm : Form
         {
             _hovered = null;
             _hoveredTrayKey = null;
+            _trayOverflowHovered = false;
             _toolTip.SetToolTip(this, string.Empty);
             Invalidate();
         };
@@ -492,30 +510,68 @@ internal sealed class MenuBarForm : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-        var client = ClientRectangle;
+        RenderFrame(e.Graphics, ApplyPowerPreview(_state.Snapshot, _previewPower));
+    }
+
+    /// <summary>
+    /// Paint the same frame used by the live form onto an arbitrary bitmap. This is
+    /// intentionally a preview-only path: it never creates a window handle, registers
+    /// an AppBar, or moves a desktop window.
+    /// </summary>
+    internal static Bitmap RenderOffscreen(SystemSnapshot snapshot, int width, float visualScale)
+    {
+        var screen = Screen.PrimaryScreen ?? Screen.AllScreens.FirstOrDefault()
+            ?? throw new InvalidOperationException("No display is available for offscreen rendering.");
+        using var state = new SystemStateProvider();
+        using var form = new MenuBarForm(screen, state, preview: true, previewPower: null)
+        {
+            _renderScaleOverride = Math.Max(1F, visualScale)
+        };
+        form.Width = Math.Max(1, width);
+        form.Height = form.Scale(LogicalHeight);
+        form.ConfigureTypography();
+
+        var bitmap = new Bitmap(form.Width, form.Height);
+        try
+        {
+            using var graphics = Graphics.FromImage(bitmap);
+            form.RenderFrame(graphics, snapshot);
+            return bitmap;
+        }
+        catch
+        {
+            bitmap.Dispose();
+            throw;
+        }
+    }
+
+    private void RenderFrame(Graphics graphics, SystemSnapshot snapshot)
+    {
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        var client = new Rectangle(0, 0, Width, Height);
         using (var background = new SolidBrush(Color.FromArgb(255, 24, 27, 32)))
         {
-            e.Graphics.FillRectangle(background, client);
+            graphics.FillRectangle(background, client);
         }
         using (var topLine = new Pen(Color.FromArgb(24, 255, 255, 255), 1F))
         {
-            e.Graphics.DrawLine(topLine, 0, 0, Width, 0);
+            graphics.DrawLine(topLine, 0, 0, Width, 0);
         }
         using (var bottomLine = new Pen(Color.FromArgb(92, 125, 135, 149), Math.Max(1, ScaleValue(0.55F))))
         {
-            e.Graphics.DrawLine(bottomLine, 0, Height - 1, Width, Height - 1);
+            graphics.DrawLine(bottomLine, 0, Height - 1, Width, Height - 1);
         }
 
         if (_typography is null) return;
 
         _hits.Clear();
         _trayHits.Clear();
-        var snapshot = ApplyPowerPreview(_state.Snapshot, _previewPower);
-        var leftEnd = DrawLeft(e.Graphics, snapshot);
-        var rightStart = DrawRight(e.Graphics, snapshot);
-        DrawCenter(e.Graphics, snapshot, leftEnd, rightStart);
+        _trayOverflowBounds = null;
+        _trayOverflowApps = [];
+        var leftEnd = DrawLeft(graphics, snapshot);
+        var rightStart = DrawRight(graphics, snapshot, leftEnd);
+        DrawCenter(graphics, snapshot, leftEnd, rightStart);
     }
 
     private int DrawLeft(Graphics graphics, SystemSnapshot snapshot)
@@ -535,7 +591,9 @@ internal sealed class MenuBarForm : Form
         _hits.Add((appleRect, BarAction.Apple));
         x = appleRect.Right + Scale(3);
 
-        var maxWidth = Math.Min(Scale(240), Math.Max(Scale(80), Width / 5));
+        var preferredMaxWidth = Math.Min(Scale(240), Math.Max(Scale(24), Width / 5));
+        var availableWidth = Math.Max(1, Width - x - Scale(8));
+        var maxWidth = Math.Max(1, Math.Min(preferredMaxWidth, availableWidth));
         var appSize = TextRenderer.MeasureText(snapshot.ActiveApp, _semiboldFont, new Size(maxWidth, Height),
             TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         var appRect = new Rectangle(x, 0, Math.Min(maxWidth, appSize.Width + Scale(6)), Height);
@@ -550,21 +608,58 @@ internal sealed class MenuBarForm : Form
         return appRect.Right + Scale(10);
     }
 
-    private int DrawRight(Graphics graphics, SystemSnapshot snapshot)
+    private int DrawRight(Graphics graphics, SystemSnapshot snapshot, int leftEnd)
     {
         var x = Width - Scale(8);
         x = DrawRightItem(graphics, x, "\uEA8F", _iconFont, BarAction.Notifications, Scale(28));
-        var dateText = DateTime.Now.ToString("ddd d MMM HH:mm");
+        var now = DateTime.Now;
+        var dateText = now.ToString("ddd d MMM HH:mm");
         var dateWidth = TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(12);
+        var trailingControlsWidth = Scale(28) + Scale(28) + Scale(27) + Scale(29);
+        var projectedNetworkLeft = x - dateWidth - trailingControlsWidth;
+        if (snapshot.TrayApps.Count > 0 &&
+            projectedNetworkLeft - (leftEnd + Scale(8)) < Scale(20))
+        {
+            // Preserve a reachable tray-overflow control on compact/high-DPI bars by
+            // reducing the calendar label before allowing tray items to crowd it.
+            dateText = now.ToString("HH:mm");
+            dateWidth = Math.Max(
+                Scale(28),
+                TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(12));
+        }
         x = DrawRightItem(graphics, x, dateText, _textFont, BarAction.Calendar, dateWidth);
         x = DrawRightItem(graphics, x, "\uE713", _iconFont, BarAction.ControlCenter, Scale(28));
         x = DrawRightItem(graphics, x, "\uE767", _iconFont, BarAction.Volume, Scale(28));
         x = DrawRightItem(graphics, x, "\uE702", _iconFont, BarAction.Bluetooth, Scale(27));
         x = DrawRightItem(graphics, x, ConnectionGlyph(snapshot.Connection), _iconFont, BarAction.Network, Scale(29));
-        foreach (var app in snapshot.TrayApps)
+
+        var trayLeftBoundary = leftEnd + Scale(8);
+        if (snapshot.TrayApps.Count > 0 && x - trayLeftBoundary < Scale(20))
+        {
+            // The fixed controls cannot be removed from the native bar contract. If
+            // the remaining strip is smaller than a compact overflow button, let the
+            // overflow own that compact strip rather than returning an offscreen tray
+            // hit region. Normal supported widths retain the usual left-side gap.
+            trayLeftBoundary = Math.Max(Scale(4), x - Scale(20));
+        }
+
+        var layout = ComputeTrayLayout(
+            trayLeftBoundary,
+            x,
+            snapshot.TrayApps.Count,
+            Scale(24),
+            Scale(30));
+        foreach (var app in snapshot.TrayApps.Take(layout.VisibleCount))
         {
             x = DrawTrayItem(graphics, x, app);
         }
+
+        if (layout.HasOverflow)
+        {
+            _trayOverflowApps = snapshot.TrayApps.Skip(layout.VisibleCount).ToArray();
+            x = DrawTrayOverflow(graphics, x, layout.OverflowButtonWidth, layout.OverflowCount);
+        }
+
         return x - Scale(8);
     }
 
@@ -587,11 +682,59 @@ internal sealed class MenuBarForm : Form
         }
         else
         {
-            DrawCenteredText(graphics, app.Name[..1].ToUpperInvariant(), _smallFont, rect, Color.FromArgb(241, 246, 251));
+            var fallback = string.IsNullOrWhiteSpace(app.Name)
+                ? "?"
+                : app.Name[..1].ToUpperInvariant();
+            DrawCenteredText(graphics, fallback, _smallFont, rect, Color.FromArgb(241, 246, 251));
         }
         _trayHits.Add((rect, app));
         return rect.Left;
     }
+
+    private int DrawTrayOverflow(Graphics graphics, int right, int width, int hiddenCount)
+    {
+        width = Math.Max(1, Math.Min(width, Math.Max(1, right)));
+        var rect = new Rectangle(Math.Max(0, right - width), 0, width, Height);
+        if (_trayOverflowHovered && rect.Width >= Scale(6))
+        {
+            var inset = Rectangle.Inflate(rect, -Scale(2), -Scale(3));
+            using var hover = new SolidBrush(Color.FromArgb(34, 255, 255, 255));
+            using var path = RoundedRectangle(inset, Scale(4));
+            graphics.FillPath(hover, path);
+        }
+
+        var label = hiddenCount > 99 ? "..." : $"+{hiddenCount}";
+        DrawCenteredText(graphics, label, _smallFont, rect, Color.FromArgb(241, 246, 251));
+        _trayOverflowBounds = rect;
+        return rect.Left;
+    }
+
+    internal static TrayLayout ComputeTrayLayout(
+        int leftBoundary,
+        int networkLeft,
+        int appCount,
+        int appSlotWidth,
+        int overflowButtonWidth)
+    {
+        appCount = Math.Max(0, appCount);
+        appSlotWidth = Math.Max(1, appSlotWidth);
+        overflowButtonWidth = Math.Max(1, overflowButtonWidth);
+        var available = Math.Max(0, networkLeft - leftBoundary);
+        if (appCount == 0) return new(0, 0, 0);
+        if ((long)appCount * appSlotWidth <= available)
+            return new(appCount, 0, 0);
+
+        var actualOverflowWidth = available == 0
+            ? Math.Max(4, overflowButtonWidth / 2)
+            : Math.Min(overflowButtonWidth, available);
+        var visible = Math.Min(
+            appCount,
+            Math.Max(0, (available - actualOverflowWidth) / appSlotWidth));
+        return new(visible, appCount - visible, actualOverflowWidth);
+    }
+
+    internal static bool BeginManagedDispose(ref int state) =>
+        Interlocked.Exchange(ref state, 1) == 0;
 
     private int DrawRightItem(Graphics graphics, int right, string text, Font font, BarAction action, int width)
     {
@@ -1069,7 +1212,16 @@ internal sealed class MenuBarForm : Form
 
     private static GraphicsPath RoundedRectangle(Rectangle rectangle, float radius)
     {
-        var diameter = Math.Max(2, radius * 2);
+        rectangle = new Rectangle(
+            rectangle.Left,
+            rectangle.Top,
+            Math.Max(1, rectangle.Width),
+            Math.Max(1, rectangle.Height));
+        var diameter = Math.Max(
+            1,
+            Math.Min(
+                Math.Min(rectangle.Width, rectangle.Height),
+                (int)Math.Ceiling(Math.Max(1F, radius * 2F))));
         var path = new GraphicsPath();
         path.AddArc(rectangle.Left, rectangle.Top, diameter, diameter, 180, 90);
         path.AddArc(rectangle.Right - diameter, rectangle.Top, diameter, diameter, 270, 90);
@@ -1100,9 +1252,22 @@ internal sealed class MenuBarForm : Form
 
     private void OnMouseMove(object? sender, MouseEventArgs e)
     {
+        if (_trayOverflowBounds is { } overflow && overflow.Contains(e.Location))
+        {
+            if (_trayOverflowHovered) return;
+            _hovered = null;
+            _hoveredTrayKey = null;
+            _trayOverflowHovered = true;
+            Cursor = Cursors.Hand;
+            _toolTip.SetToolTip(this, $"Show {_trayOverflowApps.Count} more tray apps");
+            Invalidate();
+            return;
+        }
+
         var trayHit = _trayHits.FirstOrDefault(hit => hit.Bounds.Contains(e.Location));
         if (trayHit.App is not null)
         {
+            _trayOverflowHovered = false;
             if (_hoveredTrayKey == trayHit.App.Key) return;
             _hovered = null;
             _hoveredTrayKey = trayHit.App.Key;
@@ -1113,9 +1278,10 @@ internal sealed class MenuBarForm : Form
         }
         var hovered = _hits.FirstOrDefault(hit => hit.Bounds.Contains(e.Location)).Action;
         BarAction? next = _hits.Any(hit => hit.Bounds.Contains(e.Location)) ? hovered : null;
-        if (_hovered == next && _hoveredTrayKey is null) return;
+        if (_hovered == next && _hoveredTrayKey is null && !_trayOverflowHovered) return;
         _hovered = next;
         _hoveredTrayKey = null;
+        _trayOverflowHovered = false;
         _toolTip.SetToolTip(this, string.Empty);
         Cursor = next is null ? Cursors.Default : Cursors.Hand;
         Invalidate();
@@ -1128,6 +1294,14 @@ internal sealed class MenuBarForm : Form
         {
             AppLog.Write($"Show Desktop corner clicked on {_screen.DeviceName}: x={e.X} width={Width}");
             MenuRouter.Send("desktop");
+            return;
+        }
+
+        if (e.Button == MouseButtons.Left &&
+            _trayOverflowBounds is { } overflow &&
+            overflow.Contains(e.Location))
+        {
+            ShowTrayOverflowMenu();
             return;
         }
 
@@ -1175,6 +1349,84 @@ internal sealed class MenuBarForm : Form
         }
     }
 
+    private void ShowTrayOverflowMenu()
+    {
+        if (_trayOverflowApps.Count == 0) return;
+
+        _trayOverflowMenu?.Dispose();
+        var menu = new ContextMenuStrip
+        {
+            ShowImageMargin = false,
+            ShowCheckMargin = false
+        };
+        _trayOverflowMenu = menu;
+        menu.Items.Add(new ToolStripMenuItem($"{_trayOverflowApps.Count} more tray apps")
+        {
+            Enabled = false
+        });
+        menu.Items.Add(new ToolStripSeparator());
+
+        foreach (var app in _trayOverflowApps)
+        {
+            var appItem = new ToolStripMenuItem(app.Name)
+            {
+                ToolTipText = app.ExecutablePath
+            };
+            var openItem = new ToolStripMenuItem("Open");
+            openItem.Click += (_, _) => TryActivateTrayApp(app);
+            appItem.DropDownItems.Add(openItem);
+
+            TrayAppLauncher.ContextMenuDispatch dispatch;
+            try
+            {
+                dispatch = TrayAppLauncher.GetContextMenuDispatch(app);
+            }
+            catch
+            {
+                dispatch = TrayAppLauncher.ContextMenuDispatch.Unavailable;
+            }
+
+            if (dispatch != TrayAppLauncher.ContextMenuDispatch.Unavailable)
+            {
+                var nativeItem = new ToolStripMenuItem("Show native menu");
+                nativeItem.Click += (_, _) =>
+                {
+                    var anchor = PointToScreen(new Point(
+                        _trayOverflowBounds?.Left ?? 0,
+                        Height));
+                    try
+                    {
+                        TrayAppLauncher.TryShowContextMenu(app, anchor);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog.Write($"Tray overflow native menu failed for {app.Name}: {ex.Message}");
+                    }
+                };
+                appItem.DropDownItems.Add(nativeItem);
+            }
+
+            menu.Items.Add(appItem);
+        }
+
+        if (_trayOverflowBounds is { } bounds)
+        {
+            menu.Show(this, new Point(bounds.Left, Height), ToolStripDropDownDirection.BelowRight);
+        }
+    }
+
+    private static void TryActivateTrayApp(TrayAppSnapshot app)
+    {
+        try
+        {
+            TrayAppLauncher.Activate(app);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write($"Tray overflow activation failed for {app.Name}: {ex.Message}");
+        }
+    }
+
     internal static bool IsShowDesktopCorner(Point location, Size clientSize, int hitSize) =>
         location.Y >= 0 && location.Y < hitSize &&
         (location.X >= 0 && location.X < hitSize ||
@@ -1210,46 +1462,53 @@ internal sealed class MenuBarForm : Form
     {
         // Bounded startup reassert only (1s and 4s). Unregistered bars retry ABM_NEW here;
         // do not add a resident recovery timer or Dock-style retry loop.
-        foreach (var delay in new[] { 1000, 4000 })
+        try
         {
-            await Task.Delay(delay);
-            if (IsDisposed || !IsHandleCreated) return;
-
-            var wasRegistered = _appBarRegistered;
-            if (!wasRegistered)
+            foreach (var delay in new[] { 1000, 4000 })
             {
-                RegisterAppBar();
-                if (!_appBarRegistered)
+                await Task.Delay(delay, _lifetimeCts.Token);
+                if (IsDisposed || !IsHandleCreated) return;
+
+                var wasRegistered = _appBarRegistered;
+                if (!wasRegistered)
                 {
-                    AppLog.Write(
-                        $"Startup reassert could not register appbar {_screen.DeviceName} handle={Handle} dpi={DeviceDpi}");
+                    RegisterAppBar();
+                    if (!_appBarRegistered)
+                    {
+                        AppLog.Write(
+                            $"Startup reassert could not register appbar {_screen.DeviceName} handle={Handle} dpi={DeviceDpi}");
+                    }
                 }
-            }
 
-            // Exactly one position path per iteration:
-            // - already registered → one reassert PositionAppBar
-            // - newly registered → RegisterAppBar already positioned once (None)
-            // - still unregistered → visible DPI bounds only, never ABM_SETPOS
-            switch (DecideStartupReassertFollowUp(wasRegistered, _appBarRegistered))
-            {
-                case StartupReassertFollowUp.PositionAppBar:
-                    PositionAppBar();
-                    break;
-                case StartupReassertFollowUp.ApplyVisibleBoundsOnly:
-                    ApplyVisibleTopBarBounds();
-                    break;
-            }
+                // Exactly one position path per iteration:
+                // - already registered → one reassert PositionAppBar
+                // - newly registered → RegisterAppBar already positioned once (None)
+                // - still unregistered → visible DPI bounds only, never ABM_SETPOS
+                switch (DecideStartupReassertFollowUp(wasRegistered, _appBarRegistered))
+                {
+                    case StartupReassertFollowUp.PositionAppBar:
+                        PositionAppBar();
+                        break;
+                    case StartupReassertFollowUp.ApplyVisibleBoundsOnly:
+                        ApplyVisibleTopBarBounds();
+                        break;
+                }
 
-            EnsureTopmost();
-            AppLog.Write(
-                _appBarRegistered
-                    ? $"Reasserted appbar {_screen.DeviceName} bounds={Bounds}"
-                    : $"Applied visible top-bar bounds without reservation {_screen.DeviceName} bounds={Bounds}");
+                EnsureTopmost();
+                AppLog.Write(
+                    _appBarRegistered
+                        ? $"Reasserted appbar {_screen.DeviceName} bounds={Bounds}"
+                        : $"Applied visible top-bar bounds without reservation {_screen.DeviceName} bounds={Bounds}");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Display rebuild or shutdown canceled the bounded reassert task.
         }
     }
 
     private float DpiScale => Math.Max(1F, DeviceDpi / 96F);
-    private float VisualScale => Math.Max(DpiScale, _screen.Primary ? 1F : 1.5F);
+    private float VisualScale => _renderScaleOverride ?? Math.Max(DpiScale, _screen.Primary ? 1F : 1.5F);
     private int Scale(int logical) => ScaleLogical(logical, VisualScale);
     private float ScaleValue(float logical) => Math.Max(1F, logical * VisualScale);
 
@@ -1273,9 +1532,11 @@ internal sealed class MenuBarForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && BeginManagedDispose(ref _managedResourcesDisposed))
         {
             _state.Changed -= OnStateChanged;
+            _lifetimeCts.Cancel();
+            _trayOverflowMenu?.Dispose();
             _appleMark?.Dispose();
             _claudeMark?.Dispose();
             _grokMark?.Dispose();
@@ -1283,6 +1544,7 @@ internal sealed class MenuBarForm : Form
             _trayIcons.Dispose();
             _toolTip.Dispose();
             _typography?.Dispose();
+            _lifetimeCts.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -1296,7 +1558,11 @@ internal static class MenuRouter
     {
         try
         {
-            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
+            using var client = new NamedPipeClientStream(
+                ".",
+                PipeName,
+                PipeDirection.Out,
+                PipeOptions.CurrentUserOnly);
             client.Connect(120);
             using var writer = new StreamWriter(client, Encoding.UTF8) { AutoFlush = true };
             writer.WriteLine(command);
@@ -1314,7 +1580,18 @@ internal static class MenuRouter
         }
         if (File.Exists(host))
         {
-            Process.Start(new ProcessStartInfo(host, $"--show {command}") { UseShellExecute = false, CreateNoWindow = true });
+            try
+            {
+                Process.Start(new ProcessStartInfo(host, $"--show {command}")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write($"Menu host launch failed for {command}: {ex.Message}");
+            }
         }
     }
 
@@ -1326,7 +1603,14 @@ internal static class MenuRouter
         }
         catch
         {
-            Process.Start(new ProcessStartInfo("ms-actioncenter:") { UseShellExecute = true });
+            try
+            {
+                Process.Start(new ProcessStartInfo("ms-actioncenter:") { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("Notification center launch failed: " + ex.Message);
+            }
         }
     }
 }

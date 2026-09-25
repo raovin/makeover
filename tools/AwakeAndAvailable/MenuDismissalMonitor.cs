@@ -36,10 +36,20 @@ internal sealed class MenuDismissalMonitor : IDisposable
 
     private nint OnMouseHook(int code, nuint message, nint data)
     {
-        if (code >= 0 && IsMouseDownMessage((uint)message))
+        try
         {
-            var details = Marshal.PtrToStructure<LowLevelMouseHookData>(data);
-            _mouseDown(new Point(details.Point.X, details.Point.Y));
+            if (code >= 0 && IsMouseDownMessage((uint)message))
+            {
+                var details = Marshal.PtrToStructure<LowLevelMouseHookData>(data);
+                _mouseDown(new Point(details.Point.X, details.Point.Y));
+            }
+        }
+        catch (Exception exception)
+        {
+            // A low-level hook must always return to user32. Teardown can race a
+            // final callback, and a callback exception must not take down the tray.
+            System.Diagnostics.Debug.WriteLine(
+                "Awake menu dismissal callback failed: " + exception.Message);
         }
 
         return CallNextHookEx(_hook, code, message, data);

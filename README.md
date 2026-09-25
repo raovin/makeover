@@ -15,6 +15,9 @@ generation is preserved under `archive/seelen-ui/` only for reference or rollbac
   preserve room for the right-side controls, followed by explicit battery,
   charging-source, and Windows power-mode state.
 - Separate Wi-Fi, Bluetooth, volume, Control Center, date, and notification controls.
+- Live tray applications with fallback names for missing tooltips and a `+N`
+  overflow menu when space is limited. Tailscale and Awake expose their supported
+  native menus; other discovered applications remain launchable.
 - Apple-style power and session commands without the old full-screen launcher.
 - A centered opaque dock with the inherited pin set, live running apps and
   persistent `Pin to Dock` / `Remove from Dock` actions.
@@ -59,6 +62,8 @@ follow-up are recorded in
 [System Reliability Audit](docs/SYSTEM-RELIABILITY-AUDIT-2026-07-22.md).
 Platform-specific failure modes and the recovery runbook are recorded in
 [Known Quirks](docs/NATIVE-SHELL-KNOWN-QUIRKS.md).
+The latest source audit, hardening changes, and validation limits are recorded in
+[Hardening Review](docs/HARDENING-REVIEW-2026-09-25.md).
 
 ## Install Or Upgrade
 
@@ -108,7 +113,7 @@ and remain local.
 
 Run rollback from a normal PowerShell session. It requests elevation only to
 disable the native profile and re-enable the Seelen scheduled task; user-profile state
-is restored after returning to the normal token. Rollback also removes all four
+is restored after returning to the normal token. Rollback also removes all five
 native-shell startup tasks so the two shells cannot race at the next sign-in.
 
 ```powershell

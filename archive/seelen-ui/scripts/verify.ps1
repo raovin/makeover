@@ -35,6 +35,16 @@ $NetworkCommandPath = "HKCU:\Software\Classes\macmakeover-network\shell\open\com
 $BluetoothCommandPath = "HKCU:\Software\Classes\macmakeover-bluetooth\shell\open\command"
 $NotificationCenterCommandPath = "HKCU:\Software\Classes\macmakeover-notification-center\shell\open\command"
 $VerificationFailed = $false
+$currentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+
+function Get-CurrentSessionProcess {
+  param([Parameter(Mandatory)][string[]]$ProcessName)
+
+  @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue |
+    Where-Object {
+      try { $_.SessionId -eq $currentSessionId } catch { $false }
+    })
+}
 
 function Get-ImageAverageLuma {
   param(
@@ -98,11 +108,15 @@ function Save-Crop {
 }
 
 Write-Host "Seelen processes:"
-Get-Process | Where-Object { $_.ProcessName -match "seelen|slu" } | Select-Object ProcessName,Id,Responding,StartTime | Format-Table -AutoSize
+Get-Process -ErrorAction SilentlyContinue |
+  Where-Object { try { $_.SessionId -eq $currentSessionId -and $_.ProcessName -match "seelen|slu" } catch { $false } } |
+  Select-Object ProcessName,Id,Responding,StartTime | Format-Table -AutoSize
 
 Write-Host ""
 Write-Host "PowerToys / launcher processes:"
-Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPalette|PowerLauncher" } | Select-Object ProcessName,Id,Responding,StartTime | Format-Table -AutoSize
+Get-Process -ErrorAction SilentlyContinue |
+  Where-Object { try { $_.SessionId -eq $currentSessionId -and $_.ProcessName -match "PowerToys|CmdPal|CommandPalette|PowerLauncher" } catch { $false } } |
+  Select-Object ProcessName,Id,Responding,StartTime | Format-Table -AutoSize
 
 Write-Host ""
 Write-Host "Core files:"
@@ -660,13 +674,13 @@ if (Test-Path -LiteralPath $hotCornerStartup) {
 }
 $hotCornerProcesses = @(
   Get-CimInstance Win32_Process |
-    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*start-hot-corners.ps1*" }
+    Where-Object { $_.ProcessId -ne $PID -and $_.SessionId -eq $currentSessionId -and $_.CommandLine -like "*start-hot-corners.ps1*" }
 )
 $hotCornerProcesses |
   Select-Object ProcessId,Name,CommandLine |
   Format-List
 
-$menuHostProcesses = @(Get-Process -Name MacMakeover.MenuHost -ErrorAction SilentlyContinue)
+$menuHostProcesses = @(Get-CurrentSessionProcess -ProcessName 'MacMakeover.MenuHost')
 if ($menuHostProcesses.Count) {
   Write-Host "MenuHost resident process:"
   $menuHostProcesses | Select-Object Id,Responding,CPU,StartTime | Format-Table -AutoSize
@@ -803,7 +817,7 @@ public static class MacMakeoverVerifyDpi {
   Copy-Item -LiteralPath $primaryCapture.Top -Destination $top -Force
   Copy-Item -LiteralPath $primaryCapture.Bottom -Destination $bottom -Force
 
-  $lockProcesses = @(Get-Process -Name LockApp,LogonUI -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName)
+  $lockProcesses = @(Get-CurrentSessionProcess -ProcessName @('LockApp', 'LogonUI') | Select-Object -ExpandProperty ProcessName)
   $topLuma = $primaryCapture.TopLuma
   $bottomLuma = $primaryCapture.BottomLuma
 

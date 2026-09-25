@@ -19,6 +19,18 @@ function Restore-RegistrySnapshot([string]$Path, [string]$Name, $Snapshot) {
   New-ItemProperty -LiteralPath $Path -Name $Name -Value $Snapshot.value -PropertyType $kind -Force | Out-Null
 }
 
+function Get-StateProperty {
+  param(
+    [Parameter(Mandatory)]$Object,
+    [Parameter(Mandatory)][string]$Name
+  )
+
+  if ($null -eq $Object) { return $null }
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) { return $null }
+  return $property.Value
+}
+
 & (Join-Path $repoRoot 'scripts\Install-NativeDock.ps1') -Disable
 $task = Get-ScheduledTask -TaskPath '\Seelen\' -TaskName 'Seelen UI Service' -ErrorAction SilentlyContinue
 if ($task) {
@@ -29,36 +41,40 @@ $hotCorners = Get-ScheduledTask -TaskName 'MacMakeover Hot Corners Keepalive' -E
 if ($hotCorners) { Enable-ScheduledTask -TaskName 'MacMakeover Hot Corners Keepalive' -ErrorAction SilentlyContinue | Out-Null }
 if (Test-Path -LiteralPath $systemStatePath) {
   $systemState = Get-Content -LiteralPath $systemStatePath -Raw | ConvertFrom-Json
-  $wallpaperGuardTaskName = if ($systemState.PSObject.Properties.Name -contains 'wallpaperGuardTaskName') {
-    [string]$systemState.wallpaperGuardTaskName
-  } else { 'MacMakeover Wallpaper Guard' }
+  $wallpaperGuardTaskName = [string](Get-StateProperty $systemState 'wallpaperGuardTaskName')
+  if ([string]::IsNullOrWhiteSpace($wallpaperGuardTaskName)) { $wallpaperGuardTaskName = 'MacMakeover Wallpaper Guard' }
   Unregister-ScheduledTask -TaskName $wallpaperGuardTaskName -Confirm:$false -ErrorAction SilentlyContinue
-  if ($systemState.PSObject.Properties.Name -contains 'wallpaperGuardScript' -and
-      $systemState.wallpaperGuardScript -and
-      (Test-Path -LiteralPath ([string]$systemState.wallpaperGuardScript))) {
-    Remove-Item -LiteralPath ([string]$systemState.wallpaperGuardScript) -Force
+  $wallpaperGuardScript = [string](Get-StateProperty $systemState 'wallpaperGuardScript')
+  if (-not [string]::IsNullOrWhiteSpace($wallpaperGuardScript) -and
+      (Test-Path -LiteralPath $wallpaperGuardScript)) {
+    Remove-Item -LiteralPath $wallpaperGuardScript -Force
   }
-  if ($systemState.PSObject.Properties.Name -contains 'hotCornersStartupExisted' -and
-      $systemState.hotCornersStartupExisted -and
-      (Test-Path -LiteralPath ([string]$systemState.hotCornersStartupBackup))) {
-    Copy-Item -LiteralPath ([string]$systemState.hotCornersStartupBackup) `
-      -Destination ([string]$systemState.hotCornersStartupPath) -Force
+  $hotCornersStartupBackup = [string](Get-StateProperty $systemState 'hotCornersStartupBackup')
+  $hotCornersStartupPath = [string](Get-StateProperty $systemState 'hotCornersStartupPath')
+  if ([bool](Get-StateProperty $systemState 'hotCornersStartupExisted') -and
+      -not [string]::IsNullOrWhiteSpace($hotCornersStartupBackup) -and
+      -not [string]::IsNullOrWhiteSpace($hotCornersStartupPath) -and
+      (Test-Path -LiteralPath $hotCornersStartupBackup)) {
+    Copy-Item -LiteralPath $hotCornersStartupBackup -Destination $hotCornersStartupPath -Force
   }
-  if ($systemState.windhawkUiTaskExisted -and $systemState.windhawkUiTaskWasEnabled) {
+  if ([bool](Get-StateProperty $systemState 'windhawkUiTaskExisted') -and
+      [bool](Get-StateProperty $systemState 'windhawkUiTaskWasEnabled')) {
     Enable-ScheduledTask -TaskName 'WindhawkRunUITask' -ErrorAction SilentlyContinue | Out-Null
   }
-  if ($systemState.PSObject.Properties.Name -contains 'policyWallpaperPath' -and
-      $systemState.PSObject.Properties.Name -contains 'policyWallpaperBackup' -and
-      (Test-Path -LiteralPath ([string]$systemState.policyWallpaperBackup))) {
-    Copy-Item -LiteralPath ([string]$systemState.policyWallpaperBackup) `
-      -Destination ([string]$systemState.policyWallpaperPath) -Force
+  $policyWallpaperPath = [string](Get-StateProperty $systemState 'policyWallpaperPath')
+  $policyWallpaperBackup = [string](Get-StateProperty $systemState 'policyWallpaperBackup')
+  if (-not [string]::IsNullOrWhiteSpace($policyWallpaperPath) -and
+      -not [string]::IsNullOrWhiteSpace($policyWallpaperBackup) -and
+      (Test-Path -LiteralPath $policyWallpaperBackup)) {
+    Copy-Item -LiteralPath $policyWallpaperBackup -Destination $policyWallpaperPath -Force
   }
-  if ($systemState.PSObject.Properties.Name -contains 'policyManagerProviderPath' -and
-      $systemState.PSObject.Properties.Name -contains 'policyManagerProviderBackup' -and
-      $systemState.policyManagerProviderPath -and
-      (Test-Path -LiteralPath ([string]$systemState.policyManagerProviderBackup))) {
-    $providerWallpaper = Get-Content -LiteralPath ([string]$systemState.policyManagerProviderBackup) -Raw
-    Set-ItemProperty -LiteralPath ([string]$systemState.policyManagerProviderPath) `
+  $policyManagerProviderPath = [string](Get-StateProperty $systemState 'policyManagerProviderPath')
+  $policyManagerProviderBackup = [string](Get-StateProperty $systemState 'policyManagerProviderBackup')
+  if (-not [string]::IsNullOrWhiteSpace($policyManagerProviderPath) -and
+      -not [string]::IsNullOrWhiteSpace($policyManagerProviderBackup) -and
+      (Test-Path -LiteralPath $policyManagerProviderBackup)) {
+    $providerWallpaper = Get-Content -LiteralPath $policyManagerProviderBackup -Raw
+    Set-ItemProperty -LiteralPath $policyManagerProviderPath `
       -Name Wallpaper -Value $providerWallpaper -Type String
   }
 }

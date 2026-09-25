@@ -125,14 +125,22 @@ internal static class NativeMethods
     private static bool Send(Input[] inputs) =>
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) == inputs.Length;
 
-    internal static TimeSpan GetIdleTime()
+    internal static bool TryGetIdleTime(out TimeSpan idleTime)
     {
         var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
-        if (!GetLastInputInfo(ref info)) return TimeSpan.Zero;
+        if (!GetLastInputInfo(ref info))
+        {
+            idleTime = default;
+            return false;
+        }
 
         // LASTINPUTINFO and GetTickCount share the same wrapping 32-bit clock.
         var current = unchecked((uint)Environment.TickCount);
         var elapsed = unchecked(current - info.Time);
-        return TimeSpan.FromMilliseconds(elapsed);
+        idleTime = TimeSpan.FromMilliseconds(elapsed);
+        return true;
     }
+
+    internal static TimeSpan GetIdleTime() =>
+        TryGetIdleTime(out var idleTime) ? idleTime : TimeSpan.Zero;
 }

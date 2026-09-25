@@ -34,3 +34,4 @@ try {
   $bitmap.Dispose()
 }
 Write-Host $target
+exit 0

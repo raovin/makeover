@@ -21,6 +21,11 @@ internal static class Program
                 new JsonSerializerOptions { WriteIndented = true }));
             return;
         }
+        if (args.Length >= 2 && args[0].Equals("--render-qa", StringComparison.OrdinalIgnoreCase))
+        {
+            Environment.ExitCode = RenderOffscreenQa(args[1]);
+            return;
+        }
         if (args.Any(arg => arg.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
         {
             Environment.ExitCode = PowerStateSelfTest() ? 0 : 2;
@@ -70,7 +75,9 @@ internal static class Program
                TrayAppProviderSelfTest() &&
                TrayNativeDispatchSelfTest() &&
                TrayIconCacheSelfTest() &&
-                DisplayRebuildSelfTest() &&
+               TrayLayoutSelfTest() &&
+               ManagedDisposeSelfTest() &&
+               DisplayRebuildSelfTest() &&
                 TelemetryLayoutSelfTest() &&
                 OpenAiBlossomSelfTest() &&
                 ProviderLogoSelfTest() &&
@@ -82,6 +89,111 @@ internal static class Program
                !MenuBarForm.IsShowDesktopCorner(new Point(8, 0), new Size(1280, 20), 8) &&
                !MenuBarForm.IsShowDesktopCorner(new Point(1271, 8), new Size(1280, 20), 8);
     }
+
+    private static int RenderOffscreenQa(string outputDirectory)
+    {
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            Directory.CreateDirectory(outputDirectory);
+            var executablePath = Environment.ProcessPath ?? string.Empty;
+            var elevenApps = BuildQaTrayApps(executablePath, 11);
+            var manyApps = BuildQaTrayApps(executablePath, 32);
+            var scenarios = new[]
+            {
+                new QaRenderScenario("normal-1280-11", 1280, 1F, elevenApps),
+                new QaRenderScenario("narrow-800-11", 800, 1F, elevenApps),
+                new QaRenderScenario("highdpi-1280-11", 1280, 2F, elevenApps),
+                new QaRenderScenario("highdpi-1280-32", 1280, 2F, manyApps)
+            };
+            var manifest = new List<object>(scenarios.Length);
+            foreach (var scenario in scenarios)
+            {
+                var snapshot = BuildQaSnapshot(scenario.TrayApps);
+                using var bitmap = MenuBarForm.RenderOffscreen(
+                    snapshot,
+                    scenario.Width,
+                    scenario.VisualScale);
+                var outputPath = Path.Combine(outputDirectory, scenario.Name + ".png");
+                bitmap.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
+                manifest.Add(new
+                {
+                    scenario.Name,
+                    scenario.Width,
+                    scenario.VisualScale,
+                    TrayCount = scenario.TrayApps.Count,
+                    Output = outputPath
+                });
+            }
+
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "manifest.json"),
+                JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("Offscreen render QA failed: " + ex);
+            return 1;
+        }
+    }
+
+    private static SystemSnapshot BuildQaSnapshot(IReadOnlyList<TrayAppSnapshot> trayApps) =>
+        SystemSnapshot.Empty with
+        {
+            CpuPercent = 42,
+            UsedMemoryGb = 11.0,
+            TotalMemoryGb = 32.0,
+            DownloadBytesPerSecond = 1024L * 1024L,
+            UploadBytesPerSecond = 16L * 1024L,
+            BatteryPercent = 77,
+            OnAcPower = true,
+            Charging = true,
+            PowerMode = PowerModeKind.Performance,
+            Connection = ConnectionKind.Wifi,
+            ConnectionName = "Wi-Fi",
+            ActiveApp = "Visual Studio Code",
+            TrayApps = trayApps
+        };
+
+    private static IReadOnlyList<TrayAppSnapshot> BuildQaTrayApps(string executablePath, int count)
+    {
+        var apps = new List<TrayAppSnapshot>(count);
+        for (var index = 0; index < count; index++)
+        {
+            var name = index switch
+            {
+                0 => "Awake & Available",
+                1 => "Cloud Drive",
+                2 => "Bluetooth Helper",
+                3 => "Update Service",
+                4 => "Security Agent",
+                5 => "Audio Console",
+                6 => "Sync Client",
+                7 => "Power Utility",
+                8 => "Display Manager",
+                9 => "Chat Client",
+                10 => "Tailscale",
+                _ => $"Tray App {index + 1:00}"
+            };
+            var path = index == 10
+                ? @"C:\Program Files\Tailscale\tailscale-ipn.exe"
+                : executablePath;
+            apps.Add(new TrayAppSnapshot(
+                $"qa-{index:00}",
+                name,
+                path,
+                index == 0));
+        }
+
+        return apps;
+    }
+
+    private sealed record QaRenderScenario(
+        string Name,
+        int Width,
+        float VisualScale,
+        IReadOnlyList<TrayAppSnapshot> TrayApps);
 
     private static bool TrayAppProviderSelfTest()
     {
@@ -101,11 +213,21 @@ internal static class Program
             new TrayAppSnapshot("legacy-a", "Legacy", legacyPath, false, "snapshot-a"),
             new TrayAppSnapshot("legacy-b", "Legacy", legacyPath, true, "snapshot-b")
         };
+        var processSnapshotCalls = 0;
+        var noRunningCandidates = TrayAppProvider.FindRunningCandidatePaths(
+            registrations,
+            () =>
+            {
+                processSnapshotCalls++;
+                return [];
+            });
         var selected = TrayAppProvider.SelectLive(
             registrations,
             new HashSet<string>(new[] { multiPath, legacyPath }, StringComparer.OrdinalIgnoreCase),
             guid => guid == liveGuid || guid == secondLiveGuid);
         return selected.Count == 3 &&
+               processSnapshotCalls == 1 &&
+               noRunningCandidates.Count == 0 &&
                selected.Any(item => item.Key == "live-duplicate" && item.IconGuid == liveGuid) &&
                selected.Any(item => item.Key == "live-two" && item.IconGuid == secondLiveGuid) &&
                selected.Any(item => item.Key == "legacy-b" && item.IconGuid is null) &&
@@ -159,6 +281,60 @@ internal static class Program
                !firstSource.Equals(changedSource, StringComparison.OrdinalIgnoreCase) &&
                TrayIconCache.ShouldRefresh(firstSource, changedSource) &&
                !TrayIconCache.ShouldRefresh(firstSource, firstSource);
+    }
+
+    private static bool TrayLayoutSelfTest()
+    {
+        var normal = MenuBarForm.ComputeTrayLayout(
+            leftBoundary: 220,
+            networkLeft: 620,
+            appCount: 11,
+            appSlotWidth: 24,
+            overflowButtonWidth: 30);
+        if (normal.VisibleCount != 11 || normal.OverflowCount != 0 || normal.HasOverflow)
+            return false;
+
+        var narrow = MenuBarForm.ComputeTrayLayout(
+            leftBoundary: 220,
+            networkLeft: 340,
+            appCount: 11,
+            appSlotWidth: 24,
+            overflowButtonWidth: 30);
+        if (!narrow.HasOverflow || narrow.VisibleCount + narrow.OverflowCount != 11 ||
+            narrow.OverflowButtonWidth != 30)
+        {
+            return false;
+        }
+
+        var highDpi = MenuBarForm.ComputeTrayLayout(
+            leftBoundary: 320,
+            networkLeft: 720,
+            appCount: 11,
+            appSlotWidth: 48,
+            overflowButtonWidth: 60);
+        if (!highDpi.HasOverflow || highDpi.VisibleCount + highDpi.OverflowCount != 11 ||
+            highDpi.VisibleCount * 48 + highDpi.OverflowButtonWidth > 400)
+        {
+            return false;
+        }
+
+        var many = MenuBarForm.ComputeTrayLayout(
+            leftBoundary: 220,
+            networkLeft: 620,
+            appCount: 32,
+            appSlotWidth: 24,
+            overflowButtonWidth: 30);
+        return many.HasOverflow &&
+               many.VisibleCount + many.OverflowCount == 32 &&
+               MenuBarForm.ComputeTrayLayout(100, 100, 5, 24, 30).OverflowButtonWidth >= 4 &&
+               MenuBarForm.ComputeTrayLayout(10, 100, 0, 24, 30) == new TrayLayout(0, 0, 0);
+    }
+
+    private static bool ManagedDisposeSelfTest()
+    {
+        var state = 0;
+        return MenuBarForm.BeginManagedDispose(ref state) &&
+               !MenuBarForm.BeginManagedDispose(ref state);
     }
 
     private static bool DisplayRebuildSelfTest() =>
@@ -1037,13 +1213,14 @@ internal sealed class MenuBarContext : ApplicationContext
     private readonly string? _previewPower;
     private readonly SystemStateProvider _state = new();
     private readonly List<MenuBarForm> _bars = [];
+    private readonly object _barsGate = new();
     private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
     private readonly System.Windows.Forms.Timer _displayRebuildTimer = new()
     {
         Interval = DisplayRebuildPolicy.DebounceMilliseconds
     };
     private bool _displayRebuildPending;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     public MenuBarContext(bool preview, bool previewAll, string? previewPower)
     {
@@ -1058,8 +1235,12 @@ internal sealed class MenuBarContext : ApplicationContext
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
-        if (DisplayRebuildPolicy.Decide(_disposed, _displayRebuildPending) == DisplayRebuildAction.Ignore) return;
-        var dispatcher = _bars.FirstOrDefault(form => !form.IsDisposed && form.IsHandleCreated);
+        if (DisplayRebuildPolicy.Decide(_disposed, Volatile.Read(ref _displayRebuildPending)) == DisplayRebuildAction.Ignore) return;
+        MenuBarForm? dispatcher;
+        lock (_barsGate)
+        {
+            dispatcher = _bars.FirstOrDefault(form => !form.IsDisposed && form.IsHandleCreated);
+        }
         // During teardown the list is intentionally empty. The active rebuild
         // enumerates current screens, so this concurrent notification is safely
         // coalesced instead of touching the UI timer from SystemEvents' thread.
@@ -1076,7 +1257,7 @@ internal sealed class MenuBarContext : ApplicationContext
     private void ScheduleDisplayRebuild()
     {
         if (!DisplayRebuildPolicy.IsUiThread(_uiThreadId, Environment.CurrentManagedThreadId) || _disposed) return;
-        _displayRebuildPending = true;
+        Volatile.Write(ref _displayRebuildPending, true);
         _displayRebuildTimer.Stop();
         _displayRebuildTimer.Start();
     }
@@ -1085,12 +1266,12 @@ internal sealed class MenuBarContext : ApplicationContext
     {
         if (!DisplayRebuildPolicy.IsUiThread(_uiThreadId, Environment.CurrentManagedThreadId)) return;
         _displayRebuildTimer.Stop();
-        if (DisplayRebuildPolicy.Decide(_disposed, _displayRebuildPending) != DisplayRebuildAction.Rebuild)
+        if (DisplayRebuildPolicy.Decide(_disposed, Volatile.Read(ref _displayRebuildPending)) != DisplayRebuildAction.Rebuild)
         {
             return;
         }
 
-        _displayRebuildPending = false;
+        Volatile.Write(ref _displayRebuildPending, false);
         DisposeBarsForRebuild();
         RebuildBars();
     }
@@ -1100,8 +1281,12 @@ internal sealed class MenuBarContext : ApplicationContext
         // Explicit ABM_REMOVE happens in ReleaseAppBarForDisplayRebuild while each
         // HWND is valid; Close and Dispose then complete synchronously on this UI
         // thread before replacement bars can be shown.
-        var oldBars = _bars.ToArray();
-        _bars.Clear();
+        MenuBarForm[] oldBars;
+        lock (_barsGate)
+        {
+            oldBars = _bars.ToArray();
+            _bars.Clear();
+        }
         foreach (var bar in oldBars)
         {
             bar.ReleaseAppBarForDisplayRebuild();
@@ -1116,11 +1301,26 @@ internal sealed class MenuBarContext : ApplicationContext
             ? Screen.AllScreens.Where(screen => screen.Primary).Take(1)
             : Screen.AllScreens.AsEnumerable();
 
-        foreach (var screen in screens)
+        foreach (var screen in screens.ToArray())
         {
-            var bar = new MenuBarForm(screen, _state, _preview, _previewPower);
-            _bars.Add(bar);
-            bar.Show();
+            MenuBarForm? bar = null;
+            try
+            {
+                bar = new MenuBarForm(screen, _state, _preview, _previewPower);
+                lock (_barsGate) _bars.Add(bar);
+                bar.Show();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write($"Could not create menu bar for {screen.DeviceName}: {ex.Message}");
+                if (bar is not null)
+                {
+                    lock (_barsGate) _bars.Remove(bar);
+                    try { bar.ReleaseAppBarForDisplayRebuild(); } catch { }
+                    try { bar.Close(); } catch { }
+                    try { bar.Dispose(); } catch { }
+                }
+            }
         }
     }
 

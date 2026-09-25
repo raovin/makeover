@@ -40,7 +40,9 @@ try {
   }
 
   $policyTarget = [IO.Path]::GetFullPath($policyTarget)
-  if (-not $policyTarget.StartsWith($allowedWallpaperRoot, [StringComparison]::OrdinalIgnoreCase)) {
+  $allowedWallpaperPrefix = $allowedWallpaperRoot.TrimEnd('\') + '\'
+  if (-not ([string]::Equals($policyTarget, $allowedWallpaperRoot, [StringComparison]::OrdinalIgnoreCase) -or
+      $policyTarget.StartsWith($allowedWallpaperPrefix, [StringComparison]::OrdinalIgnoreCase))) {
     throw "Refusing to repair an MDM wallpaper outside $allowedWallpaperRoot"
   }
 

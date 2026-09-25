@@ -20,6 +20,28 @@ $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $advancedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
 $searchKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search'
 $stuckRectsPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'
+$currentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+
+function Get-CurrentSessionProcess {
+  param([Parameter(Mandatory)][string[]]$ProcessName)
+
+  @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue |
+    Where-Object {
+      try { $_.SessionId -eq $currentSessionId } catch { $false }
+    })
+}
+
+function Get-StateProperty {
+  param(
+    [Parameter(Mandatory)]$Object,
+    [Parameter(Mandatory)][string]$Name
+  )
+
+  if ($null -eq $Object) { return $null }
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) { return $null }
+  return $property.Value
+}
 
 if (-not $SkipElevation) {
   $pwsh = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
@@ -36,16 +58,19 @@ foreach ($taskName in 'MacMakeover Shell - MenuHost', 'MacMakeover Shell - MenuB
   Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 if (Test-Path -LiteralPath $dock) {
-  Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
+  $shutdown = Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+  if ($shutdown -and $shutdown.ExitCode -ne 0) {
+    Write-Warning "Dock shutdown command failed with exit code $($shutdown.ExitCode)."
+  }
   Start-Sleep -Milliseconds 500
 }
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, MacMakeover.Supervisor, AwakeAndAvailable -ErrorAction SilentlyContinue |
+Get-CurrentSessionProcess -ProcessName @('MacMakeover.MenuBar', 'MacMakeover.MenuHost', 'MacMakeover.Dock', 'MacMakeover.Supervisor', 'AwakeAndAvailable') |
   Stop-Process -Force -ErrorAction SilentlyContinue
 $remainingNativeTasks = @(Get-ScheduledTask -TaskName 'MacMakeover Shell -*' -ErrorAction SilentlyContinue)
 if ($remainingNativeTasks.Count -gt 0) {
   throw "Native-shell startup tasks remain after rollback: $($remainingNativeTasks.TaskName -join ', ')"
 }
-$remainingNativeProcesses = @(Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, MacMakeover.Supervisor, AwakeAndAvailable -ErrorAction SilentlyContinue)
+$remainingNativeProcesses = @(Get-CurrentSessionProcess -ProcessName @('MacMakeover.MenuBar', 'MacMakeover.MenuHost', 'MacMakeover.Dock', 'MacMakeover.Supervisor', 'AwakeAndAvailable'))
 if ($remainingNativeProcesses.Count -gt 0) {
   throw "Native-shell processes remain after rollback: $($remainingNativeProcesses.ProcessName -join ', ')"
 }
@@ -63,26 +88,29 @@ function Restore-RegistrySnapshot([string]$Path, [string]$Name, $Snapshot) {
 
 if (Test-Path -LiteralPath $statePath) {
   $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-  if ($state.PSObject.Properties.Name -contains 'advanced') {
+  $advancedState = Get-StateProperty $state 'advanced'
+  if ($null -ne $advancedState) {
     foreach ($name in 'TaskbarAl', 'TaskbarDa', 'ShowTaskViewButton', 'SearchboxTaskbarMode', 'MMTaskbarEnabled') {
-      Restore-RegistrySnapshot $advancedKey $name $state.advanced.$name
+      Restore-RegistrySnapshot $advancedKey $name (Get-StateProperty $advancedState $name)
     }
   }
-  if ($state.PSObject.Properties.Name -contains 'search') {
+  $searchState = Get-StateProperty $state 'search'
+  if ($null -ne $searchState) {
     foreach ($name in 'SearchboxTaskbarMode', 'SearchboxTaskbarModeCache') {
-      Restore-RegistrySnapshot $searchKey $name $state.search.$name
+      Restore-RegistrySnapshot $searchKey $name (Get-StateProperty $searchState $name)
     }
   }
-  if ($state.taskbarAutoHide) {
+  if ([bool](Get-StateProperty $state 'taskbarAutoHide')) {
     $settings = (Get-ItemProperty -LiteralPath $stuckRectsPath -ErrorAction SilentlyContinue).Settings
     if ($settings -and $settings.Length -gt 8) {
       $settings[8] = [byte]($settings[8] -bor 1)
       Set-ItemProperty -LiteralPath $stuckRectsPath -Name Settings -Value $settings
     }
   }
-  if ($state.wallpaper -and (Test-Path -LiteralPath $state.wallpaper)) {
+  $savedWallpaper = [string](Get-StateProperty $state 'wallpaper')
+  if (-not [string]::IsNullOrWhiteSpace($savedWallpaper) -and (Test-Path -LiteralPath $savedWallpaper)) {
     Get-ChildItem -LiteralPath $virtualDesktopsPath -ErrorAction SilentlyContinue | ForEach-Object {
-      Set-ItemProperty -LiteralPath $_.PSPath -Name Wallpaper -Value ([string]$state.wallpaper) -Type String
+      Set-ItemProperty -LiteralPath $_.PSPath -Name Wallpaper -Value $savedWallpaper -Type String
     }
     Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
@@ -91,13 +119,13 @@ public static class RestoredUserWallpaper {
   public static extern bool SystemParametersInfo(int action, int parameter, string path, int flags);
 }
 '@
-    [void][RestoredUserWallpaper]::SystemParametersInfo(20, 0, [string]$state.wallpaper, 3)
+    [void][RestoredUserWallpaper]::SystemParametersInfo(20, 0, $savedWallpaper, 3)
   }
 }
 
 & (Join-Path $repoRoot 'scripts\install-hot-corners.ps1') -StartNow
-Get-Process explorer -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-CurrentSessionProcess -ProcessName 'explorer' | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
-if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
+if (-not (Get-CurrentSessionProcess -ProcessName 'explorer')) { Start-Process explorer.exe }
 Remove-Item -LiteralPath (Join-Path $stateRoot 'user-profile-prepared.json'), (Join-Path $stateRoot 'system-profile-enabled.json') -Force -ErrorAction SilentlyContinue
 Write-Host 'Previous Seelen session restored.'

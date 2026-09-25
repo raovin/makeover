@@ -45,20 +45,29 @@ function Invoke-CheckedProcess {
     return $false
   }
   $timer = [Diagnostics.Stopwatch]::StartNew()
-  $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru -WindowStyle Hidden
-  if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-    $process.Kill($true)
-    $process.WaitForExit()
+  $process = $null
+  try {
+    $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru -WindowStyle Hidden -ErrorAction Stop
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+      try { $process.Kill($true) } catch { }
+      try { $process.WaitForExit(1000) } catch { }
+      $timer.Stop()
+      Add-Result $Name $false "Timed out after $TimeoutSeconds seconds." $timer.Elapsed.TotalMilliseconds
+      return $false
+    }
+    $exitCode = $process.ExitCode
     $timer.Stop()
-    Add-Result $Name $false "Timed out after $TimeoutSeconds seconds." $timer.Elapsed.TotalMilliseconds
-    $process.Dispose()
+    Add-Result $Name ($exitCode -eq 0) "Exit code $exitCode." $timer.Elapsed.TotalMilliseconds
+    return $exitCode -eq 0
+  }
+  catch {
+    $timer.Stop()
+    Add-Result $Name $false $_.Exception.Message $timer.Elapsed.TotalMilliseconds
     return $false
   }
-  $exitCode = $process.ExitCode
-  $process.Dispose()
-  $timer.Stop()
-  Add-Result $Name ($exitCode -eq 0) "Exit code $exitCode." $timer.Elapsed.TotalMilliseconds
-  return $exitCode -eq 0
+  finally {
+    if ($process) { $process.Dispose() }
+  }
 }
 
 function Invoke-AwakeScheduleCheck {
@@ -78,7 +87,7 @@ function Invoke-AwakeScheduleCheck {
   $process = $null
   try {
     $process = Start-Process -FilePath $FilePath `
-      -ArgumentList @('--verify-schedule', $outputPath) `
+      -ArgumentList @('--verify-schedule', ('"{0}"' -f $outputPath)) `
       -PassThru -WindowStyle Hidden
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
       $process.Kill($true)
@@ -130,7 +139,13 @@ function Wait-ForReplacement {
     $previous = Get-Process -Id $PreviousId -ErrorAction SilentlyContinue
     $replacement = @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue |
       Where-Object { $_.SessionId -eq $sessionId -and $_.Id -ne $PreviousId })
-    if (-not $previous -and $replacement.Count -eq 1) { return $replacement[0] }
+    try {
+      if (-not $previous -and $replacement.Count -eq 1) { return [int]$replacement[0].Id }
+    }
+    finally {
+      if ($previous) { $previous.Dispose() }
+      $replacement | ForEach-Object { $_.Dispose() }
+    }
   } while ([DateTime]::UtcNow -lt $deadline)
   return $null
 }
@@ -151,13 +166,14 @@ function Test-ForceStopAndRecover {
   }
 
   $timer = [Diagnostics.Stopwatch]::StartNew()
-  $oldId = $process.Id
+  $oldId = [int]$process[0].Id
+  $process | ForEach-Object { $_.Dispose() }
   Stop-Process -Id $oldId -Force
-  $replacement = Wait-ForReplacement -ProcessName $ProcessName -PreviousId $oldId -TimeoutSeconds $TimeoutSeconds
+  $replacementId = Wait-ForReplacement -ProcessName $ProcessName -PreviousId $oldId -TimeoutSeconds $TimeoutSeconds
   $timer.Stop()
-  $replacementId = if ($replacement) { $replacement.Id } else { 'none' }
-  Add-Result $ResultName ($null -ne $replacement) "Automatic recovery only. Old PID $oldId; new PID $replacementId." $timer.Elapsed.TotalMilliseconds
-  return ($null -ne $replacement)
+  $replacementDisplayId = if ($null -ne $replacementId) { $replacementId } else { 'none' }
+  Add-Result $ResultName ($null -ne $replacementId) "Automatic recovery only. Old PID $oldId; new PID $replacementDisplayId." $timer.Elapsed.TotalMilliseconds
+  return ($null -ne $replacementId)
 }
 
 function Restore-LiveRecoveryTargets {
@@ -189,10 +205,16 @@ function Restore-LiveRecoveryTargets {
 
 if (-not $SkipBuild) {
   $buildTimer = [Diagnostics.Stopwatch]::StartNew()
-  & (Join-Path $PSScriptRoot 'Build-NativeShell.ps1')
-  $buildExit = $LASTEXITCODE
-  $buildTimer.Stop()
-  Add-Result 'Build native shell' ($buildExit -eq 0) "Exit code $buildExit." $buildTimer.Elapsed.TotalMilliseconds
+  try {
+    & (Join-Path $PSScriptRoot 'Build-NativeShell.ps1')
+    $buildTimer.Stop()
+    Add-Result 'Build native shell' $true 'Build script completed.' $buildTimer.Elapsed.TotalMilliseconds
+  }
+  catch {
+    $buildTimer.Stop()
+    Add-Result 'Build native shell' $false $_.Exception.Message $buildTimer.Elapsed.TotalMilliseconds
+    throw
+  }
 }
 
 $releaseRoot = Join-Path $repoRoot 'tools'

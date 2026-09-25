@@ -5,6 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $settingsPath = Join-Path $env:LOCALAPPDATA 'Microsoft\PowerToys\settings.json'
+$currentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
 if (-not (Test-Path -LiteralPath $settingsPath)) {
   Write-Host 'PowerToys settings not found; nothing to disable.'
   return
@@ -22,5 +23,7 @@ $settings.enabled.Awake = $false
   ($settings | ConvertTo-Json -Depth 20 -Compress),
   [Text.UTF8Encoding]::new($false))
 
-Get-Process PowerToys.Awake -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process PowerToys.Awake -ErrorAction SilentlyContinue |
+  Where-Object { try { $_.SessionId -eq $currentSessionId } catch { $false } } |
+  Stop-Process -Force -ErrorAction SilentlyContinue
 Write-Host 'Disabled PowerToys Awake; other PowerToys modules remain enabled.'

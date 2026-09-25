@@ -21,6 +21,25 @@ $AssetsRoot = Join-Path $PackageRoot "assets"
 $SeelenRoot = Join-Path $env:APPDATA "com.seelen.seelen-ui"
 $BackupRoot = Join-Path $env:TEMP ("mac-makeover-seelen-backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $PowerToysBackupRoot = Join-Path $env:TEMP ("mac-makeover-powertoys-backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+$currentSessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+
+function Get-CurrentSessionProcess {
+  param([Parameter(Mandatory)][string[]]$ProcessName)
+
+  @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue |
+    Where-Object {
+      try { $_.SessionId -eq $currentSessionId } catch { $false }
+    })
+}
+
+function Import-RegistryFile {
+  param([Parameter(Mandatory)][string]$Path)
+
+  & reg.exe import $Path | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Registry import failed for $Path with exit code $LASTEXITCODE."
+  }
+}
 
 function Ensure-Directory {
   param([string]$Path)
@@ -226,7 +245,8 @@ if (-not (Test-Path -LiteralPath $ConfigRoot)) {
 }
 
 if (-not $SkipSeelenRestart) {
-  Get-Process | Where-Object { $_.ProcessName -match "seelen|slu" } | Stop-Process -Force -ErrorAction SilentlyContinue
+  Get-CurrentSessionProcess -ProcessName @('seelen-ui', 'slu-service') |
+    Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 2
 }
 
@@ -265,8 +285,8 @@ Register-MacMakeoverNotificationCenter
 if ($ApplyAccent) {
   $accentReg = Join-Path $PackageRoot "registry\hkcu-explorer-accent.reg"
   $dwmReg = Join-Path $PackageRoot "registry\hkcu-dwm.reg"
-  if (Test-Path -LiteralPath $accentReg) { reg import "$accentReg" | Out-Null }
-  if (Test-Path -LiteralPath $dwmReg) { reg import "$dwmReg" | Out-Null }
+  if (Test-Path -LiteralPath $accentReg) { Import-RegistryFile -Path $accentReg }
+  if (Test-Path -LiteralPath $dwmReg) { Import-RegistryFile -Path $dwmReg }
 }
 
 if (-not $SkipSearchTweaks) {
@@ -288,7 +308,7 @@ if (-not $SkipSearchTweaks) {
     Write-Warning "Could not write the managed Search policy key. Normal per-user SearchSettings were still applied. Details: $($_.Exception.Message)"
   }
 
-  Get-Process SearchHost -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Get-CurrentSessionProcess -ProcessName 'SearchHost' | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
 if (-not $SkipPowerToysRestore) {
@@ -298,7 +318,14 @@ if (-not $SkipPowerToysRestore) {
     Select-Object -First 1
 
   if ((Test-Path -LiteralPath $PowerToysConfigRoot) -or (Test-Path -LiteralPath $CommandPaletteConfigRoot)) {
-    Get-Process | Where-Object { $_.ProcessName -match "PowerToys|CmdPal|CommandPalette" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -ErrorAction SilentlyContinue |
+      Where-Object {
+        try {
+          $_.SessionId -eq $currentSessionId -and
+            $_.ProcessName -match 'PowerToys|CmdPal|CommandPalette'
+        } catch { $false }
+      } |
+      Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
   }
 

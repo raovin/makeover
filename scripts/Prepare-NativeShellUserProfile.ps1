@@ -98,6 +98,7 @@ public static class NativeUserWallpaper {
 }
 
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
+Remove-Item -LiteralPath $preparedPath -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path -LiteralPath $statePath)) {
   $stuckRects = (Get-ItemProperty -LiteralPath $stuckRectsPath -ErrorAction SilentlyContinue).Settings
   $state = [ordered]@{
@@ -186,10 +187,13 @@ foreach ($required in @(
 $deployedDock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
 Stop-NativeShellTasks -DeploymentRoot $deploymentRoot
 if (Test-Path -LiteralPath $deployedDock) {
-  Start-Process -FilePath $deployedDock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden
+  $shutdown = Start-Process -FilePath $deployedDock -ArgumentList '--shutdown' -Wait -PassThru -WindowStyle Hidden
+  if ($shutdown.ExitCode -ne 0) {
+    throw "Dock shutdown command failed with exit code $($shutdown.ExitCode)."
+  }
   Start-Sleep -Milliseconds 500
 }
-Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, MacMakeover.Supervisor, AwakeAndAvailable -ErrorAction SilentlyContinue |
+Get-NativeShellCurrentSessionProcess -ProcessName @('MacMakeover.MenuBar', 'MacMakeover.MenuHost', 'MacMakeover.Dock', 'MacMakeover.Supervisor', 'AwakeAndAvailable') |
   Stop-Process -Force -ErrorAction SilentlyContinue
 if ($artifactRoot -ne $deploymentRoot) {
   New-Item -ItemType Directory -Force -Path $deploymentRoot | Out-Null
@@ -259,8 +263,11 @@ foreach ($legacyRunValue in 'MacMakeoverMenuHost', 'MacMakeoverMenuBar', 'MacMak
   Remove-ItemProperty -LiteralPath $runKey -Name $legacyRunValue -ErrorAction SilentlyContinue
 }
 
+$promotionRunId = [guid]::NewGuid().ToString('N')
+$preparedAt = (Get-Date).ToUniversalTime().ToString('o')
 $prepared = [ordered]@{
-  preparedAt = (Get-Date).ToString('o')
+  preparedAt = $preparedAt
+  promotionRunId = $promotionRunId
   deploymentRoot = $deploymentRoot
   policyWallpaper = (Join-Path $env:LOCALAPPDATA 'MacMakeover\wallpapers\mac-wallpaper-policy.png')
 } | ConvertTo-Json

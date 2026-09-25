@@ -18,18 +18,21 @@ function Restore-InteractiveNativeShell {
   $dock = Join-Path $deploymentRoot 'MacMakeover.Dock.exe'
   Stop-NativeShellTasks -DeploymentRoot $deploymentRoot
   if (Test-Path -LiteralPath $dock) {
-    Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+    $shutdown = Start-Process -FilePath $dock -ArgumentList '--shutdown' -Wait -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+    if ($shutdown -and $shutdown.ExitCode -ne 0) {
+      Write-Warning "Dock shutdown command failed with exit code $($shutdown.ExitCode)."
+    }
     Start-Sleep -Milliseconds 500
   }
 
-  Get-Process MacMakeover.MenuBar, MacMakeover.MenuHost, MacMakeover.Dock, AwakeAndAvailable -ErrorAction SilentlyContinue |
+  Get-NativeShellCurrentSessionProcess -ProcessName @('MacMakeover.MenuBar', 'MacMakeover.MenuHost', 'MacMakeover.Dock', 'AwakeAndAvailable') |
     Stop-Process -Force -ErrorAction SilentlyContinue
 
   # Explorer owns the AppBar registry. Restarting it removes reservations left by a
   # process stopped for deployment before UAC was cancelled or failed.
-  Get-Process explorer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Get-NativeShellCurrentSessionProcess -ProcessName 'explorer' | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 2
-  if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
+  if (-not (Get-NativeShellCurrentSessionProcess -ProcessName 'explorer')) { Start-Process explorer.exe }
   Start-Sleep -Seconds 4
 
   try {

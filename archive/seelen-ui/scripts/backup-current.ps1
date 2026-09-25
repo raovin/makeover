@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [string]$SourceProject = "C:\Users\VineethRao\source\repos\mac-makeover"
+  [string]$SourceProject = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 )
 
 Set-StrictMode -Version Latest
@@ -77,7 +77,10 @@ function Export-RegKeyIfExists {
   $null = reg query $Key 2>$null
   if ($LASTEXITCODE -eq 0) {
     Ensure-Directory (Split-Path -Parent $Destination)
-    $null = reg export $Key $Destination /y
+    & reg.exe export $Key $Destination /y | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      throw "Registry export failed for $Key with exit code $LASTEXITCODE."
+    }
   }
 }
 

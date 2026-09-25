@@ -18,7 +18,10 @@ function Install-WingetPackage {
   }
 
   Write-Host "Installing/checking $Name ($Id)..."
-  winget install --id $Id --exact --accept-package-agreements --accept-source-agreements
+  & winget install --id $Id --exact --accept-package-agreements --accept-source-agreements
+  if ($LASTEXITCODE -ne 0) {
+    throw "winget failed to install/check $Name ($Id) with exit code $LASTEXITCODE."
+  }
 }
 
 Install-WingetPackage -Id "Microsoft.PowerToys" -Name "Microsoft PowerToys"

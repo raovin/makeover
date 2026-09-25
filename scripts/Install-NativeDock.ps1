@@ -52,7 +52,21 @@ New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 $tempDll = Join-Path $tempRoot $targetDllName
 $tempSource = Join-Path $tempRoot "$modId.wh.cpp"
 
-if ($ForceDownload -or -not (Test-Path -LiteralPath $targetDll)) {
+$binaryNeedsDownload = $ForceDownload -or -not (Test-Path -LiteralPath $targetDll)
+if (-not $binaryNeedsDownload) {
+  try {
+    $existingHash = (Get-FileHash -LiteralPath $targetDll -Algorithm SHA256).Hash
+    $binaryNeedsDownload = $existingHash -ne $config.binarySha256
+    if ($binaryNeedsDownload) {
+      Write-Warning "Existing Windhawk mod hash does not match the pinned binary; downloading a verified copy."
+    }
+  }
+  catch {
+    $binaryNeedsDownload = $true
+    Write-Warning "Existing Windhawk mod could not be hashed; downloading a verified copy."
+  }
+}
+if ($binaryNeedsDownload) {
   Invoke-WebRequest -Uri $config.binaryUrl -OutFile $tempDll -UseBasicParsing -TimeoutSec 60
   $actualHash = (Get-FileHash -LiteralPath $tempDll -Algorithm SHA256).Hash
   if ($actualHash -ne $config.binarySha256) {

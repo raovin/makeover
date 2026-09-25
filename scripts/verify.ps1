@@ -22,7 +22,9 @@ if ($CaptureScreenshot) {
   New-Item -ItemType Directory -Path $qaRoot -Force | Out-Null
   $path = Join-Path $qaRoot ("native-shell-{0}.png" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
   & (Join-Path $PSScriptRoot 'Capture-Desktop.ps1') -Path $path
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   Write-Host "Visual QA capture: $path"
 }
 
 Write-Host 'PASS: native shell verification completed.'
+exit 0
