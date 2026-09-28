@@ -13,6 +13,28 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        var hungProbeWindowArgument = Array.FindIndex(
+            args,
+            value => value.Equals("--probe-window-hung", StringComparison.OrdinalIgnoreCase));
+        if (hungProbeWindowArgument >= 0)
+        {
+            var probeTitle = hungProbeWindowArgument + 1 < args.Length
+                ? args[hungProbeWindowArgument + 1]
+                : "MacMakeover Hung Icon Probe";
+            ApplicationConfiguration.Initialize();
+            using var probeIcon = (Icon)SystemIcons.Application.Clone();
+            using var probe = new HungIconProbeForm
+            {
+                Text = probeTitle,
+                StartPosition = FormStartPosition.Manual,
+                Location = new Point(-30000, -30000),
+                Size = new Size(320, 180),
+                Icon = probeIcon,
+                ShowInTaskbar = true
+            };
+            Application.Run(probe);
+            return;
+        }
         var probeWindowArgument = Array.FindIndex(
             args,
             value => value.Equals("--probe-window", StringComparison.OrdinalIgnoreCase));
@@ -22,14 +44,17 @@ internal static class Program
                 ? args[probeWindowArgument + 1]
                 : "MacMakeover Dynamic Dock Probe";
             ApplicationConfiguration.Initialize();
-            Application.Run(new Form
+            using var probeIcon = (Icon)SystemIcons.Application.Clone();
+            using var probe = new Form
             {
                 Text = probeTitle,
                 StartPosition = FormStartPosition.Manual,
                 Location = new Point(-30000, -30000),
                 Size = new Size(320, 180),
+                Icon = probeIcon,
                 ShowInTaskbar = true
-            });
+            };
+            Application.Run(probe);
             return;
         }
         if (args.Any(value => value.Equals("--regression-test", StringComparison.OrdinalIgnoreCase)))
@@ -105,6 +130,18 @@ internal static class Program
     }
 }
 
+internal sealed class HungIconProbeForm : Form
+{
+    protected override void WndProc(ref Message message)
+    {
+        if (message.Msg == NativeMethods.WmGetIcon)
+        {
+            Thread.Sleep(2000);
+        }
+        base.WndProc(ref message);
+    }
+}
+
 internal static class DockRegressionTests
 {
     public static int Run()
@@ -128,6 +165,8 @@ internal static class DockRegressionTests
             if (!TestExecutableIdentityMatching()) return 11;
             if (!TestDockStateCaptureCache()) return 12;
             if (!TestOverrideIconNormalization()) return 13;
+            if (!TestRunningAppIconFallback(probePath)) return 14;
+            if (!TestHungIconLookup(probePath)) return 15;
             if (!TestDynamicApp(probePath)) return 2;
             if (!TestPinnedApp(probePath)) return 3;
             return 0;
@@ -324,6 +363,33 @@ internal static class DockRegressionTests
         {
             process.Dispose();
             throw new InvalidOperationException("Dock QA probe did not expose a window.");
+        }
+        return process;
+    }
+
+    private static Process StartHungProbe(string probePath)
+    {
+        var startInfo = new ProcessStartInfo(probePath)
+        {
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add("--probe-window-hung");
+        var process = Process.Start(startInfo) ??
+                      throw new InvalidOperationException("Could not start Dock hung-icon probe.");
+        if (!WaitUntil(() =>
+            {
+                process.Refresh();
+                return process.HasExited || process.MainWindowHandle != IntPtr.Zero;
+            }, TimeSpan.FromSeconds(5)) || process.HasExited)
+        {
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException) { }
+            catch (System.ComponentModel.Win32Exception) { }
+            process.Dispose();
+            throw new InvalidOperationException("Dock hung-icon probe did not expose a window.");
         }
         return process;
     }
@@ -691,6 +757,134 @@ internal static class DockRegressionTests
         if (after is null) return false;
         after.Save(Path.Combine(outputDirectory, "Claude-after.png"), ImageFormat.Png);
         return true;
+    }
+
+    private static bool TestRunningAppIconFallback(string probePath)
+    {
+        using var probe = StartProbe(probePath, "MacMakeover Icon Recovery Probe");
+        var validWindow = IntPtr.Zero;
+        try
+        {
+            probe.Refresh();
+            validWindow = probe.MainWindowHandle;
+            if (validWindow == IntPtr.Zero) return false;
+
+            var snapshot = new RunningAppSnapshot(
+                "icon-recovery",
+                "Icon Recovery Probe",
+                "MacMakeover.QaProbe",
+                null,
+                [new IntPtr(1), validWindow]);
+            using (var recovered = new RunningApp(snapshot).LoadIcon(56))
+            {
+                if (recovered is null) return false;
+            }
+
+            // A running app with only stale handles must remain a live Dock item and render its
+            // initials instead of allowing icon decoding to escape through the UI callback.
+            var noIconSnapshot = new RunningAppSnapshot(
+                "no-icon",
+                "No Icon",
+                "MacMakeover.QaProbe",
+                null,
+                [new IntPtr(1)]);
+            using (var item = new DockItem(noIconSnapshot, 28))
+            using (var surface = new Bitmap(64, 64, PixelFormat.Format32bppArgb))
+            using (var graphics = Graphics.FromImage(surface))
+            {
+                item.SetLayout(new Rectangle(0, 0, 64, 64), 1F);
+                item.Draw(graphics, hovered: false);
+                if (!item.IsRunning || item.Name != "No Icon") return false;
+            }
+
+            using var sourceIcon = (Icon)SystemIcons.Application.Clone();
+            using (var borrowedCopy = DockIconHandle.Copy(sourceIcon.Handle, 56, ownsHandle: false))
+            {
+                if (borrowedCopy is null) return false;
+            }
+            using (var borrowedCheck = sourceIcon.ToBitmap())
+            {
+                if (borrowedCheck.Width <= 0 || borrowedCheck.Height <= 0) return false;
+            }
+
+            var staleHandle = NativeMethods.CopyIcon(sourceIcon.Handle);
+            if (staleHandle == IntPtr.Zero) return false;
+            NativeMethods.DestroyIcon(staleHandle);
+            using (var staleCopy = DockIconHandle.Copy(staleHandle, 56, ownsHandle: false))
+            {
+                if (staleCopy is not null) return false;
+            }
+
+            var ownedHandle = NativeMethods.CopyIcon(sourceIcon.Handle);
+            if (ownedHandle == IntPtr.Zero) return false;
+            using (var controlledFailure = DockIconHandle.Copy(
+                       ownedHandle,
+                       56,
+                       ownsHandle: true,
+                       decoder: _ => throw new ArgumentException("controlled malformed icon")))
+            {
+                if (controlledFailure is not null) return false;
+            }
+            var releasedCopy = NativeMethods.CopyIcon(ownedHandle);
+            if (releasedCopy != IntPtr.Zero)
+            {
+                NativeMethods.DestroyIcon(releasedCopy);
+                return false;
+            }
+
+            return true;
+        }
+        finally
+        {
+            if (validWindow != IntPtr.Zero && NativeMethods.IsWindow(validWindow))
+            {
+                NativeMethods.PostMessage(validWindow, NativeMethods.WmClose, IntPtr.Zero, IntPtr.Zero);
+            }
+            StopProbe(probe);
+        }
+    }
+
+    private static bool TestHungIconLookup(string probePath)
+    {
+        using var probe = StartHungProbe(probePath);
+        var window = IntPtr.Zero;
+        try
+        {
+            probe.Refresh();
+            window = probe.MainWindowHandle;
+            if (window == IntPtr.Zero) return false;
+
+            var start = Stopwatch.GetTimestamp();
+            using var icon = new RunningApp(new RunningAppSnapshot(
+                "hung-icon",
+                "Hung Icon Probe",
+                "MacMakeover.QaProbe",
+                null,
+                [window])).LoadIcon(56);
+            var elapsedMilliseconds = (Stopwatch.GetTimestamp() - start) * 1000D / Stopwatch.Frequency;
+            return elapsedMilliseconds < 1000D;
+        }
+        finally
+        {
+            if (window != IntPtr.Zero && NativeMethods.IsWindow(window))
+            {
+                NativeMethods.PostMessage(window, NativeMethods.WmClose, IntPtr.Zero, IntPtr.Zero);
+            }
+            StopProbe(probe);
+        }
+    }
+
+    private static void StopProbe(Process probe)
+    {
+        if (probe.WaitForExit(3000)) return;
+        try
+        {
+            if (!probe.HasExited) probe.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
+        try { probe.WaitForExit(1000); }
+        catch (InvalidOperationException) { }
     }
 
     private static bool WaitUntil(Func<bool> predicate, TimeSpan timeout)
@@ -2350,6 +2544,69 @@ internal static class DockIconNormalizer
     }
 }
 
+internal static class DockIconErrors
+{
+    public static bool IsExpected(Exception exception) =>
+        exception is ArgumentException or ExternalException or InvalidOperationException or OutOfMemoryException;
+
+    public static Image? TryLoad(Func<Image?> loader, string context)
+    {
+        try
+        {
+            return loader();
+        }
+        catch (Exception exception) when (IsExpected(exception))
+        {
+            Debug.WriteLine($"Could not load Dock icon for {context}: {exception.Message}");
+            return null;
+        }
+    }
+}
+
+internal static class DockIconHandle
+{
+    public static Image? Copy(
+        IntPtr iconHandle,
+        int size,
+        bool ownsHandle,
+        Func<IntPtr, Icon>? decoder = null)
+    {
+        var ownedCopy = IntPtr.Zero;
+        try
+        {
+            if (iconHandle == IntPtr.Zero || size <= 0) return null;
+
+            if (!ownsHandle)
+            {
+                ownedCopy = NativeMethods.CopyIcon(iconHandle);
+                if (ownedCopy == IntPtr.Zero) return null;
+                iconHandle = ownedCopy;
+            }
+
+            var decode = decoder ?? (handle => Icon.FromHandle(handle));
+            using var icon = decode(iconHandle);
+            using var bitmap = icon.ToBitmap();
+            return new Bitmap(bitmap, new Size(size, size));
+        }
+        catch (Exception exception) when (DockIconErrors.IsExpected(exception))
+        {
+            Debug.WriteLine($"Could not decode Dock icon handle: {exception.Message}");
+            return null;
+        }
+        finally
+        {
+            if (ownedCopy != IntPtr.Zero)
+            {
+                NativeMethods.DestroyIcon(ownedCopy);
+            }
+            else if (ownsHandle && iconHandle != IntPtr.Zero)
+            {
+                NativeMethods.DestroyIcon(iconHandle);
+            }
+        }
+    }
+}
+
 internal sealed class DockItem : IDisposable
 {
     private readonly PinnedApp? _pinnedApp;
@@ -2361,13 +2618,13 @@ internal sealed class DockItem : IDisposable
     public DockItem(PinnedApp app, int iconSize)
     {
         _pinnedApp = app;
-        _icon = app.LoadIcon(iconSize * 3);
+        _icon = DockIconErrors.TryLoad(() => app.LoadIcon(iconSize * 3), app.Name);
     }
 
     public DockItem(RunningAppSnapshot app, int iconSize)
     {
         _runningApp = new RunningApp(app);
-        _icon = _runningApp.LoadIcon(iconSize * 3);
+        _icon = DockIconErrors.TryLoad(() => _runningApp.LoadIcon(iconSize * 3), app.Name);
         _running = true;
     }
 
@@ -2692,6 +2949,8 @@ internal sealed record RunningAppSnapshot(
 
 internal sealed class RunningApp
 {
+    private const int IconMessageTimeoutMilliseconds = 100;
+    private const int IconLookupBudgetMilliseconds = 250;
     private IntPtr[] _windows;
 
     public RunningApp(RunningAppSnapshot snapshot)
@@ -2746,20 +3005,71 @@ internal sealed class RunningApp
     {
         if (!string.IsNullOrWhiteSpace(ExecutablePath) && File.Exists(ExecutablePath))
         {
-            var fileIcon = PinnedApp.LoadFileIcon(ExecutablePath, size);
+            var fileIcon = DockIconErrors.TryLoad(
+                () => PinnedApp.LoadFileIcon(ExecutablePath, size),
+                Name);
             if (fileIcon is not null) return fileIcon;
         }
 
+        var deadline = IconLookupDeadline();
         foreach (var window in _windows)
         {
-            var iconHandle = NativeMethods.SendMessage(window, NativeMethods.WmGetIcon, new IntPtr(NativeMethods.IconBig2), IntPtr.Zero);
-            if (iconHandle == IntPtr.Zero) iconHandle = NativeMethods.SendMessage(window, NativeMethods.WmGetIcon, new IntPtr(NativeMethods.IconBig), IntPtr.Zero);
-            if (iconHandle == IntPtr.Zero) iconHandle = NativeMethods.GetClassLongPtr(window, NativeMethods.GclpHIcon);
-            if (iconHandle == IntPtr.Zero) continue;
-            using var icon = Icon.FromHandle(iconHandle);
-            return new Bitmap(icon.ToBitmap(), new Size(size, size));
+            if (RemainingIconTimeout(deadline) == 0) break;
+            if (window == IntPtr.Zero || !NativeMethods.IsWindow(window)) continue;
+
+            var icon = TryLoadMessageIcon(window, NativeMethods.IconBig, size, deadline);
+            if (icon is not null) return icon;
+            icon = TryLoadMessageIcon(window, NativeMethods.IconSmall2, size, deadline);
+            if (icon is not null) return icon;
+
+            try
+            {
+                icon = DockIconHandle.Copy(
+                    NativeMethods.GetClassLongPtr(window, NativeMethods.GclpHIcon),
+                    size,
+                    ownsHandle: false);
+            }
+            catch (Exception exception) when (DockIconErrors.IsExpected(exception))
+            {
+                Debug.WriteLine($"Could not read Dock class icon for {Name}: {exception.Message}");
+                icon = null;
+            }
+            if (icon is not null) return icon;
         }
         return null;
+    }
+
+    private static Image? TryLoadMessageIcon(IntPtr window, int iconType, int size, long deadline)
+    {
+        var timeout = RemainingIconTimeout(deadline);
+        if (timeout == 0 || !NativeMethods.TrySendMessageTimeout(
+                window,
+                NativeMethods.WmGetIcon,
+                new IntPtr(iconType),
+                IntPtr.Zero,
+                timeout,
+                out var iconHandle))
+        {
+            return null;
+        }
+
+        return DockIconHandle.Copy(iconHandle, size, ownsHandle: false);
+    }
+
+    private static long IconLookupDeadline()
+    {
+        var budgetTicks = Math.Max(
+            1L,
+            (long)Math.Ceiling(Stopwatch.Frequency * (IconLookupBudgetMilliseconds / 1000D)));
+        return Stopwatch.GetTimestamp() + budgetTicks;
+    }
+
+    private static uint RemainingIconTimeout(long deadline)
+    {
+        var remainingTicks = deadline - Stopwatch.GetTimestamp();
+        if (remainingTicks <= 0) return 0;
+        var milliseconds = (long)Math.Ceiling(remainingTicks * 1000D / Stopwatch.Frequency);
+        return (uint)Math.Clamp(milliseconds, 1L, IconMessageTimeoutMilliseconds);
     }
 }
 
@@ -3203,8 +3513,7 @@ internal sealed class PinnedApp
     {
         var result = NativeMethods.SHGetFileInfo(source, 0, out var info, (uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.ShFileInfo>(), NativeMethods.ShgfiIcon | NativeMethods.ShgfiLargeIcon);
         if (result == IntPtr.Zero || info.Icon == IntPtr.Zero) return null;
-        try { using var icon = Icon.FromHandle(info.Icon); return new Bitmap(icon.ToBitmap(), new Size(size, size)); }
-        finally { NativeMethods.DestroyIcon(info.Icon); }
+        return DockIconHandle.Copy(info.Icon, size, ownsHandle: true);
     }
 
     private static string? ResolveShortcutTarget(string path)
