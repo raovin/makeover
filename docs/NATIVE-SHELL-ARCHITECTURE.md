@@ -55,8 +55,11 @@ synthetic window movers. Telemetry rejects overlapping samples.
 
 ## Menus
 
-The bar sends commands over the resident MenuHost named pipe. If the host is
-missing, it starts the deployed executable without a console window.
+The bar sends commands over the resident MenuHost named pipe, qualified by the
+current Windows session so same-user logons cannot deliver a panel command to a
+different desktop. Protocol handlers invoke `MenuHost --show <command>`, which
+routes to that session's resident host or starts one there. If the host is missing,
+the bar starts the deployed executable without a console window.
 
 - Apple opens only the Apple menu.
 - Network opens only the live nearby-network panel.

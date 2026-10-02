@@ -87,10 +87,14 @@ after a successful interactive installation.
 To verify an existing installation without changing it:
 
 ```powershell
-.\scripts\Test-NativeShellPreflight.ps1 -SkipDownloadCheck
-.\scripts\Test-NativeShellProfile.ps1
+.\scripts\Test-NativeShellPreflight.ps1 -SkipDownloadCheck -SkipLiveAudioCheck
+.\scripts\Test-NativeShellProfile.ps1 -SkipLiveAudioCheck
 .\scripts\Test-NativeTaskbarPins.ps1
 ```
+
+The optional Core Audio check briefly adjusts the master volume and restores its
+original level. Leave out `-SkipLiveAudioCheck` when you want to run that hardware
+check; use the switch for source and read-only profile verification.
 
 To run the repeatable native-shell regression suite, including a safe missing-process
 performance smoke test:

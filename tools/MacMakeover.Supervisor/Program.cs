@@ -34,7 +34,7 @@ internal static class Program
         using var singleton = new Mutex(true, @"Local\MacMakeover.Supervisor", out var ownsMutex);
         if (!ownsMutex) return;
 
-        Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
+        _ = TryCreateLogDirectory(Path.GetDirectoryName(LogPath) ?? string.Empty);
         Log("Supervisor started.");
         var sessionId = Process.GetCurrentProcess().SessionId;
         using var explorerObserver = new ProcessLifetimeObserver("explorer", sessionId);
@@ -194,9 +194,29 @@ internal static class Program
         {
             File.AppendAllText(LogPath, $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}");
         }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (Exception exception) when (IsExpectedLogFailure(exception))
+        {
+            Trace.WriteLine("Supervisor logging unavailable: " + exception.Message);
+        }
     }
+
+    internal static bool TryCreateLogDirectory(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            return true;
+        }
+        catch (Exception exception) when (IsExpectedLogFailure(exception))
+        {
+            Trace.WriteLine("Supervisor log directory unavailable: " + exception.Message);
+            return false;
+        }
+    }
+
+    private static bool IsExpectedLogFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or ArgumentException or
+            NotSupportedException or System.Security.SecurityException;
 
     internal sealed record Component(string TaskName, string ProcessName);
 }
@@ -572,6 +592,7 @@ internal static class SupervisorSelfTest
         missingObserver.Refresh();
         var lifecycle = RunProcessLifetimeSelfTest();
         var registrationFailure = RunProcessRegistrationFailureSelfTest();
+        var loggingFailure = RunLogDirectoryFailureSelfTest();
 
         return taskNames.Length == 4 &&
                taskNames.Distinct().Count() == taskNames.Length &&
@@ -601,7 +622,30 @@ internal static class SupervisorSelfTest
                 nextObservationUtc == attemptCompletedUtc.AddMilliseconds(SupervisorRetryPolicy.MissingProcessProbeDelayMs) &&
                 !missingObserver.IsRunning &&
                 lifecycle &&
-                registrationFailure;
+                registrationFailure &&
+                loggingFailure;
+    }
+
+    private static bool RunLogDirectoryFailureSelfTest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "MacMakeover.Supervisor.LogFailure." + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var blockerPath = Path.Combine(root, "not-a-directory");
+            File.WriteAllText(blockerPath, "fixture");
+            return !Program.TryCreateLogDirectory(Path.Combine(blockerPath, "child"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     private static bool RunProcessRegistrationFailureSelfTest()

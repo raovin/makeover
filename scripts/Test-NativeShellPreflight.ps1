@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$DeploymentRoot = (Join-Path $env:LOCALAPPDATA 'MacMakeover\bin'),
-  [switch]$SkipDownloadCheck
+  [switch]$SkipDownloadCheck,
+  [switch]$SkipLiveAudioCheck
 )
 
 Set-StrictMode -Version Latest
@@ -96,6 +97,7 @@ $seelenRestoreSource = Get-Content -LiteralPath (Join-Path $repoRoot 'archive\se
 $performanceSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Measure-ShellPerformance.ps1') -Raw
 $regressionSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-NativeShellRegression.ps1') -Raw
 $supervisorSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Supervisor\Program.cs') -Raw
+$prepareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Prepare-NativeShellUserProfile.ps1') -Raw
 if ($buildSource -notmatch 'MacMakeover\\native-shell-build') {
   $failures.Add('The standalone build must default to staging and must not overwrite the running shell.')
 }
@@ -429,6 +431,50 @@ if ($displaySubscription -lt 0 -or $initialBarBuild -lt 0 -or $displaySubscripti
 if ($menuHostSource -notmatch 'PowerLineStatus\.Online && pct < 100') {
   $failures.Add('MenuHost charging state can disagree with the menu-bar battery state at 100 percent.')
 }
+if ($regressionSource -notmatch [regex]::Escape("-Destination `$testDeploymentRoot") -or
+    $regressionSource -match 'Resolve-ReleaseExecutable|bin\\Release|net10\.0-windows' -or
+    $regressionSource -notmatch [regex]::Escape("Join-Path `$testDeploymentRoot 'MacMakeover.Dock.exe'") -or
+    $regressionSource -notmatch [regex]::Escape("Join-Path `$testDeploymentRoot 'MacMakeover.MenuHost.exe'") -or
+    $regressionSource -notmatch [regex]::Escape("Join-Path `$testDeploymentRoot 'MacMakeover.MenuBar.exe'") -or
+    $regressionSource -notmatch [regex]::Escape("Join-Path `$testDeploymentRoot 'MacMakeover.Supervisor.exe'") -or
+    $regressionSource -notmatch [regex]::Escape("Join-Path `$testDeploymentRoot 'AwakeAndAvailable.exe'")) {
+  $failures.Add('Native-shell regression checks must use the exact executables from their selected staging/deployment root without falling back to repository Release binaries.')
+}
+if ($menuHostSource -notmatch 'PipeNameForSession' -or
+    $menuHostSource -notmatch 'CurrentSessionPipeName' -or
+    $menuHostSource -notmatch 'SessionPipeNameSelfTest' -or
+    $menuBarSource -notmatch 'PipeNameForSession' -or
+    $menuBarSource -notmatch 'CurrentSessionPipeName' -or
+    $menuBarSource -notmatch 'SessionPipeNameSelfTest') {
+  $failures.Add('MenuHost and MenuBar pipe clients must address the host in their own Windows session.')
+}
+$legacyMenuHostPipe = [regex]::Escape('\\.\pipe\MacMakeover.MenuHost')
+foreach ($handlerName in @(
+    'Install-AppleMenuHandler.ps1',
+    'Install-MacControlCenterHandler.ps1',
+    'Install-MacNetworkHandler.ps1',
+    'Install-MacBluetoothHandler.ps1'
+  )) {
+  $handlerSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot $handlerName) -Raw
+  if ($handlerSource -match $legacyMenuHostPipe -or
+      $handlerSource -notmatch '--show (apple|control|network|bluetooth)') {
+    $failures.Add("$handlerName must preserve its command while routing through the session-aware MenuHost entry point.")
+  }
+}
+if ($prepareSource -notmatch [regex]::Escape("Get-RegistryValueSnapshot([string]`$Path, [string]`$Name, [scriptblock]`$GetItem = `$null)") -or
+    $prepareSource -notmatch [regex]::Escape("`$value = `$key.GetValue(`$Name)") -or
+    $prepareSource -notmatch [regex]::Escape("Get-TaskbarAutoHideFromSnapshot `$stuckRectsSnapshot") -or
+    $prepareSource -notmatch [regex]::Escape("Get-RegistrySnapshotValue `$wallpaperSnapshot") -or
+    $prepareSource -notmatch 'function Test-ProfileSnapshotFixtures' -or
+    $prepareSource -notmatch '\$enabledSnapshot\.value -is \[byte\[\]\]' -or
+    $prepareSource -notmatch '\$disabledSnapshot\.value -is \[byte\[\]\]' -or
+    $prepareSource -match '\)\.(Settings|Wallpaper)') {
+  $failures.Add('Initial user-profile state capture must tolerate missing and malformed registry values under strict mode.')
+}
+if ($menuHostSource -notmatch 'RunVolumeSelfTest' -or
+    $menuHostSource -notmatch 'VolumeRestoreFailureSelfTest') {
+  $failures.Add('MenuHost Core Audio self-test must restore the original volume after failed probes.')
+}
 
 $dockSource = Get-Content -LiteralPath (Join-Path $repoRoot 'tools\MacMakeover.Dock\Program.cs') -Raw
 $workAreaSource = [regex]::Match(
@@ -534,7 +580,9 @@ if ($menuHostSource -notmatch 'PipeServerCapacity = 8' -or
 }
 
 $hostPath = Join-Path $DeploymentRoot 'MacMakeover.MenuHost.exe'
-if (Test-Path -LiteralPath $hostPath) {
+if ($SkipLiveAudioCheck) {
+  Write-Host 'SKIP: live Core Audio volume test omitted by -SkipLiveAudioCheck.'
+} elseif (Test-Path -LiteralPath $hostPath) {
   $hostSelfTest = $null
   foreach ($attempt in 1..3) {
     $hostSelfTest = Start-Process -FilePath $hostPath -ArgumentList '--self-test' `

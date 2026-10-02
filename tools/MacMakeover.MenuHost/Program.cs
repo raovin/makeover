@@ -9,6 +9,7 @@ namespace MacMakeover.MenuHost;
 internal static class Program
 {
     private const string PipeName = "MacMakeover.MenuHost";
+    private const string SessionPipeMarker = ".Session.";
     private const string MutexName = "Local\\MacMakeover.MenuHost";
     internal const int MaxPipeCommandLength = 64;
     internal const int PipeClientReadTimeoutMilliseconds = 750;
@@ -66,18 +67,11 @@ internal static class Program
         try
         {
             ApplicationConfiguration.Initialize();
-            var before = VolumeService.GetMasterVolume();
-            if (before is null) return 2;
-            var probe = before.Value <= 0.94F ? before.Value + 0.04F : before.Value - 0.04F;
-            VolumeService.SetMasterVolume(probe);
-            Thread.Sleep(120);
-            var changed = VolumeService.GetMasterVolume();
-            VolumeService.SetMasterVolume(before.Value);
-            Thread.Sleep(120);
-            var restored = VolumeService.GetMasterVolume();
-            var changedOk = changed is not null && Math.Abs(changed.Value - probe) <= 0.03F;
-            var restoredOk = restored is not null && Math.Abs(restored.Value - before.Value) <= 0.03F;
-            return changedOk && restoredOk ? 0 : 3;
+            return RunVolumeSelfTest(
+                VolumeService.GetMasterVolume,
+                VolumeService.SetMasterVolume,
+                Thread.Sleep,
+                Log);
         }
         catch (Exception ex)
         {
@@ -85,6 +79,101 @@ internal static class Program
             return 1;
         }
     }
+
+    internal static int RunVolumeSelfTest(
+        Func<float?> readVolume,
+        Action<float> setVolume,
+        Action<int> delay,
+        Action<string> log)
+    {
+        float? original = null;
+        float? changed = null;
+        float? restored = null;
+        var operationFailed = false;
+
+        try
+        {
+            original = readVolume();
+            if (original is null) return 2;
+
+            var probe = original.Value <= 0.94F ? original.Value + 0.04F : original.Value - 0.04F;
+            setVolume(probe);
+            delay(120);
+            changed = readVolume();
+        }
+        catch (Exception exception)
+        {
+            log("Self-test failed: " + exception);
+            operationFailed = true;
+        }
+        finally
+        {
+            if (original is float originalLevel)
+            {
+                try
+                {
+                    setVolume(originalLevel);
+                    delay(120);
+                    restored = readVolume();
+                }
+                catch (Exception exception)
+                {
+                    log("Self-test could not restore the original master volume: " + exception);
+                    operationFailed = true;
+                }
+            }
+        }
+
+        if (original is null) return 2;
+        if (operationFailed) return 1;
+
+        var probeLevel = original.Value <= 0.94F ? original.Value + 0.04F : original.Value - 0.04F;
+        var changedOk = changed is not null && Math.Abs(changed.Value - probeLevel) <= 0.03F;
+        var restoredOk = restored is not null && Math.Abs(restored.Value - original.Value) <= 0.03F;
+        return changedOk && restoredOk ? 0 : 3;
+    }
+
+    internal static bool VolumeRestoreFailureSelfTest()
+    {
+        const float original = 0.62F;
+        var current = original;
+        var readCount = 0;
+        var writeCount = 0;
+        var result = RunVolumeSelfTest(
+            () =>
+            {
+                readCount++;
+                if (readCount == 2) throw new IOException("Simulated post-change read failure.");
+                return current;
+            },
+            value =>
+            {
+                writeCount++;
+                current = value;
+            },
+            _ => { },
+            _ => { });
+
+        return result == 1 && writeCount == 2 && Math.Abs(current - original) <= 0.001F;
+    }
+
+    private static int CurrentSessionId
+    {
+        get
+        {
+            using var process = Process.GetCurrentProcess();
+            return process.SessionId;
+        }
+    }
+
+    internal static string PipeNameForSession(int sessionId) => $"{PipeName}{SessionPipeMarker}{sessionId}";
+
+    private static string CurrentSessionPipeName => PipeNameForSession(CurrentSessionId);
+
+    internal static bool SessionPipeNameSelfTest() =>
+        PipeNameForSession(7) == "MacMakeover.MenuHost.Session.7" &&
+        PipeNameForSession(7) != PipeNameForSession(8) &&
+        PipeNameForSession(0) != PipeName;
 
     private static int RunRegressionTest(bool interactiveAltTab)
     {
@@ -105,6 +194,8 @@ internal static class Program
                 validCommand && normalizedCommand == "network" &&
                 !TryNormalizeCommand("unknown", out _) &&
                 !TryNormalizeCommand(new string('x', MaxPipeCommandLength + 1), out _) &&
+                SessionPipeNameSelfTest() &&
+                VolumeRestoreFailureSelfTest() &&
                 MenuContext.MaxCommandsPerDrain == 1 &&
                 PipeServerCapacity >= 2;
             if (!decisionMatrix) return 4;
@@ -177,7 +268,7 @@ internal static class Program
     }
 
     private static Task RunPipeServerAsync(MenuContext context) =>
-        RunPipeServerAsync(context, PipeName);
+        RunPipeServerAsync(context, CurrentSessionPipeName);
 
     private static async Task RunPipeServerAsync(MenuContext context, string pipeName)
     {
@@ -275,7 +366,7 @@ internal static class Program
     }
 
     internal static bool SendCommand(string command, int timeoutMs)
-        => SendCommand(PipeName, command, timeoutMs);
+        => SendCommand(CurrentSessionPipeName, command, timeoutMs);
 
     private static bool SendCommand(string pipeName, string command, int timeoutMs)
     {

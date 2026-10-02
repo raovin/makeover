@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+  [switch]$SkipLiveAudioCheck
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -118,15 +120,19 @@ foreach ($required in @(
   }
 }
 
-$hostSelfTest = $null
-foreach ($attempt in 1..3) {
-  $hostSelfTest = Start-Process -FilePath (Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe') `
-    -ArgumentList '--self-test' -Wait -PassThru -WindowStyle Hidden
-  if ($hostSelfTest.ExitCode -eq 0) { break }
-  Start-Sleep -Milliseconds 400
-}
-if ($hostSelfTest.ExitCode -ne 0) {
-  $failures.Add("MenuHost Core Audio self-test failed after three attempts with exit code $($hostSelfTest.ExitCode).")
+if ($SkipLiveAudioCheck) {
+  Write-Host 'SKIP: live Core Audio volume test omitted by -SkipLiveAudioCheck.'
+} else {
+  $hostSelfTest = $null
+  foreach ($attempt in 1..3) {
+    $hostSelfTest = Start-Process -FilePath (Join-Path $deploymentRoot 'MacMakeover.MenuHost.exe') `
+      -ArgumentList '--self-test' -Wait -PassThru -WindowStyle Hidden
+    if ($hostSelfTest.ExitCode -eq 0) { break }
+    Start-Sleep -Milliseconds 400
+  }
+  if ($hostSelfTest.ExitCode -ne 0) {
+    $failures.Add("MenuHost Core Audio self-test failed after three attempts with exit code $($hostSelfTest.ExitCode).")
+  }
 }
 
 $traySnapshotPath = Join-Path $env:TEMP "macmakeover-tray-apps-$PID.json"

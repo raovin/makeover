@@ -1,7 +1,5 @@
-# Registers the `macmakeover-apple-menu:` protocol. Opens the resident MenuHost Apple
-# panel via the named pipe (fast, no window); falls back to starting MenuHost with
-# --show apple if the pipe is gone. The old conhost+PowerShell+WPF chain is retired -
-# it was the measured source of Apple-menu lag.
+# Registers the `macmakeover-apple-menu:` protocol. Launching MenuHost with --show
+# routes to the resident host in this Windows session, or starts it here if needed.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -13,9 +11,7 @@ if (-not (Test-Path $menuHostExe)) {
   Write-Warning "MenuHost is not built yet ($menuHostExe). Run: dotnet build tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj -c Release"
 }
 
-$conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-$cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
-$command = '"{0}" --headless "{1}" /c echo apple> \\.\pipe\MacMakeover.MenuHost || start "" "{2}" --show apple' -f $conhost, $cmd, $menuHostExe
+$command = '"{0}" --show apple' -f $menuHostExe
 
 $base = 'HKCU:\Software\Classes\macmakeover-apple-menu'
 New-Item -Path "$base\shell\open\command" -Force | Out-Null

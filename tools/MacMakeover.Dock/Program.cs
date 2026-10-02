@@ -161,6 +161,7 @@ internal static class DockRegressionTests
             if (!TestDockWindowTitle()) return 7;
             if (!TestFileExplorerActivationPolicy()) return 8;
             if (!TestStaleSystemPinPolicy()) return 9;
+            if (!TestPackagedPinIdentity()) return 16;
             if (!TestDisplayRebuildPolicy()) return 10;
             if (!TestExecutableIdentityMatching()) return 11;
             if (!TestDockStateCaptureCache()) return 12;
@@ -675,6 +676,80 @@ internal static class DockRegressionTests
         if (!PinnedApp.IsStaleSystemPin(new UserDockPin("Windows App", "Windows365", @"C:\WindowsApps\Windows365.exe"))) return false;
         if (PinnedApp.IsStaleSystemPin(new UserDockPin("Windows 365", "Windows365", @"C:\WindowsApps\Windows365.exe"))) return false;
         return !PinnedApp.IsStaleSystemPin(new UserDockPin("Sublime Text", "sublime_text", @"C:\Apps\sublime_text.exe"));
+    }
+
+    private static bool TestPackagedPinIdentity()
+    {
+        const string outlookAppId = "Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows";
+        const string oldOutlookPath = @"C:\Program Files\WindowsApps\Microsoft.OutlookForWindows_1.2026.818.100_x64__8wekyb3d8bbwe\olk.exe";
+        const string updatedOutlookPath = @"C:\Program Files\WindowsApps\Microsoft.OutlookForWindows_1.2026.922.300_x64__8wekyb3d8bbwe\olk.exe";
+        var builtInOutlook = new PinnedApp
+        {
+            Name = "Outlook",
+            AppId = outlookAppId,
+            Patterns = [],
+            ProcessNames = ["olk"]
+        };
+        var builtIns = new[] { builtInOutlook };
+
+        // Existing JSON has no AppId; package family resolution ignores the changing version.
+        var legacyJson = JsonSerializer.Deserialize<UserDockPin>(
+            "{\"Name\":\"Microsoft Outlook\",\"ProcessName\":\"olk\",\"ExecutablePath\":\"" + oldOutlookPath.Replace("\\", "\\\\") + "\"}");
+        if (legacyJson is null) return false;
+        var migrated = PinnedApp.CreateUserPin(legacyJson, builtIns);
+        if (migrated?.AppId != outlookAppId || migrated.ExecutablePath != oldOutlookPath) return false;
+        if (migrated.CreateLaunchStartInfo()?.FileName != $"shell:AppsFolder\\{outlookAppId}") return false;
+
+        var runningOutlook = new ProcessIdentity("olk", updatedOutlookPath, outlookAppId);
+        if (!migrated.MatchesProcess(runningOutlook)) return false;
+        if (migrated.MatchesProcess(new ProcessIdentity("olk", updatedOutlookPath, "Other.Package_123!App"))) return false;
+
+        var unavailablePackage = new UserDockPin(
+            "Missing app",
+            "missing",
+            @"C:\Program Files\WindowsApps\Contoso.Missing_1.0.0.0_x64__publisher\missing.exe");
+        var unavailableResolved = PinnedApp.CreateUserPin(unavailablePackage, builtIns);
+        if (unavailableResolved?.AppId is not null || unavailableResolved?.ExecutablePath != unavailablePackage.ExecutablePath) return false;
+        var wrongPublisher = new UserDockPin(
+            "Microsoft Outlook",
+            "olk",
+            @"C:\Program Files\WindowsApps\Microsoft.OutlookForWindows_1.2026.922.300_x64__otherpublisher\olk.exe");
+        var wrongPublisherResolved = PinnedApp.CreateUserPin(wrongPublisher, builtIns);
+        if (wrongPublisherResolved?.AppId is not null || wrongPublisherResolved?.ExecutablePath != wrongPublisher.ExecutablePath) return false;
+        var ambiguousBuiltIns = new[]
+        {
+            builtInOutlook,
+            new PinnedApp
+            {
+                Name = "Outlook second entry",
+                AppId = "Microsoft.OutlookForWindows_8wekyb3d8bbwe!SecondApp",
+                Patterns = [],
+                ProcessNames = ["olk"]
+            }
+        };
+        var ambiguousResolved = PinnedApp.CreateUserPin(
+            new UserDockPin("Microsoft Outlook", "olk", oldOutlookPath),
+            ambiguousBuiltIns);
+        if (ambiguousResolved?.AppId is not null || ambiguousResolved?.ExecutablePath != oldOutlookPath) return false;
+
+        // Unpackaged pins retain executable-path identity and are not assigned a package ID.
+        var win32Pin = new UserDockPin("Sublime Text", "sublime_text", @"C:\Apps\sublime_text.exe");
+        if (PinnedApp.CreateUserPin(win32Pin, builtIns)?.AppId is not null) return false;
+        var chrome = new PinnedApp
+        {
+            Name = "Google Chrome",
+            AppId = null,
+            Patterns = [],
+            ExecutablePath = @"C:\Apps\Chrome\chrome.exe",
+            ProcessNames = ["chrome"]
+        };
+        if (!chrome.MatchesProcess(new ProcessIdentity("chrome", @"C:\Apps\Chrome\chrome.exe"))) return false;
+        if (chrome.MatchesProcess(new ProcessIdentity("chrome", @"C:\Apps\Other\chrome.exe"))) return false;
+
+        // New pin JSON persists the stable identity while keeping old fields readable.
+        var roundTrip = JsonSerializer.Deserialize<UserDockPin>(JsonSerializer.Serialize(
+            new UserDockPin("Microsoft Outlook", "olk", updatedOutlookPath, outlookAppId)));
+        return roundTrip?.AppId == outlookAppId && roundTrip.ExecutablePath == updatedOutlookPath;
     }
 
     private static bool TestDockStateCaptureCache()
@@ -2745,7 +2820,8 @@ internal sealed record DockWindowTarget(
 
 internal sealed record ProcessIdentity(
     string ProcessName,
-    string? ExecutablePath);
+    string? ExecutablePath,
+    string? AppUserModelId = null);
 
 internal static class ProcessIdentityReader
 {
@@ -2754,9 +2830,10 @@ internal static class ProcessIdentityReader
         try
         {
             var processName = process.ProcessName;
+            var executablePath = TryGetExecutablePath(process);
             return string.IsNullOrWhiteSpace(processName)
                 ? null
-                : new ProcessIdentity(processName, TryGetExecutablePath(process));
+                : new ProcessIdentity(processName, executablePath, TryGetApplicationUserModelId(process, executablePath));
         }
         catch (System.ComponentModel.Win32Exception) { }
         catch (ArgumentException) { }
@@ -2771,6 +2848,29 @@ internal static class ProcessIdentityReader
         catch (ArgumentException) { }
         catch (InvalidOperationException) { }
         catch (NotSupportedException) { }
+        return null;
+    }
+
+    private static string? TryGetApplicationUserModelId(Process process, string? executablePath)
+    {
+        // Packaged apps live under WindowsApps. Avoid an extra process query for ordinary Win32 apps.
+        if (string.IsNullOrWhiteSpace(executablePath) ||
+            executablePath.IndexOf("\\WindowsApps\\", StringComparison.OrdinalIgnoreCase) < 0) return null;
+
+        try
+        {
+            uint length = 0;
+            const int ErrorInsufficientBuffer = 122;
+            var result = NativeMethods.GetApplicationUserModelId(process.Handle, ref length, null);
+            if (result != ErrorInsufficientBuffer || length is 0 or > 1024) return null;
+
+            var value = new StringBuilder((int)length);
+            result = NativeMethods.GetApplicationUserModelId(process.Handle, ref length, value);
+            return result == 0 && value.Length > 0 ? value.ToString() : null;
+        }
+        catch (System.ComponentModel.Win32Exception) { }
+        catch (ArgumentException) { }
+        catch (InvalidOperationException) { }
         return null;
     }
 
@@ -2790,7 +2890,8 @@ internal sealed record RunningAppSnapshot(
     string Name,
     string ProcessName,
     string? ExecutablePath,
-    IntPtr[] Windows)
+    IntPtr[] Windows,
+    string? AppUserModelId = null)
 {
     private static readonly HashSet<string> ExcludedProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -2834,7 +2935,7 @@ internal sealed record RunningAppSnapshot(
 
             var processName = identity.ProcessName;
             var executablePath = identity.ExecutablePath;
-            if (ExcludedProcesses.Contains(processName) || IsPinnedProcess(pinnedApps, processName, executablePath)) return true;
+            if (ExcludedProcesses.Contains(processName) || IsPinnedProcess(pinnedApps, identity)) return true;
 
             var title = WindowTitle(window);
             var name = DisplayName(processName, executablePath, title);
@@ -2846,7 +2947,7 @@ internal sealed record RunningAppSnapshot(
                 : ProcessIdentityReader.NormalizeExecutablePath(executablePath) ?? processName;
             if (!groups.TryGetValue(key, out var group))
             {
-                group = new RunningAppAccumulator(key, name, processName, executablePath);
+                group = new RunningAppAccumulator(key, name, processName, executablePath, identity.AppUserModelId);
                 groups.Add(key, group);
             }
             group.Windows.Add(window);
@@ -2866,7 +2967,8 @@ internal sealed record RunningAppSnapshot(
                 group.Name,
                 group.ProcessName,
                 group.ExecutablePath,
-                group.Windows.ToArray()))
+                group.Windows.ToArray(),
+                group.AppUserModelId))
             .ToArray();
     }
 
@@ -2875,6 +2977,9 @@ internal sealed record RunningAppSnapshot(
         string processName,
         string? executablePath) =>
         pinnedApps.Any(app => app.MatchesProcess(processName, executablePath));
+
+    internal static bool IsPinnedProcess(IReadOnlyList<PinnedApp> pinnedApps, ProcessIdentity process) =>
+        pinnedApps.Any(app => app.MatchesProcess(process));
 
     internal static bool IsTaskbarWindow(IntPtr window)
     {
@@ -2937,12 +3042,18 @@ internal sealed record RunningAppSnapshot(
         return string.IsNullOrWhiteSpace(title) ? processName : title;
     }
 
-    private sealed class RunningAppAccumulator(string key, string name, string processName, string? executablePath)
+    private sealed class RunningAppAccumulator(
+        string key,
+        string name,
+        string processName,
+        string? executablePath,
+        string? appUserModelId)
     {
         public string Key { get; } = key;
         public string Name { get; } = name;
         public string ProcessName { get; } = processName;
         public string? ExecutablePath { get; } = executablePath;
+        public string? AppUserModelId { get; } = appUserModelId;
         public List<IntPtr> Windows { get; } = [];
     }
 }
@@ -2958,16 +3069,18 @@ internal sealed class RunningApp
         Name = snapshot.Name;
         ProcessName = snapshot.ProcessName;
         ExecutablePath = snapshot.ExecutablePath;
+        AppUserModelId = snapshot.AppUserModelId;
         _windows = snapshot.Windows;
     }
 
     public string Name { get; private set; }
     public string ProcessName { get; }
     public string? ExecutablePath { get; }
+    public string? AppUserModelId { get; private set; }
     public bool CanPin =>
         !ProcessName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) &&
-        !string.IsNullOrWhiteSpace(ExecutablePath) &&
-        File.Exists(ExecutablePath);
+        (!string.IsNullOrWhiteSpace(AppUserModelId) ||
+         !string.IsNullOrWhiteSpace(ExecutablePath) && File.Exists(ExecutablePath));
     public bool HasClosableWindows() => _windows.Any(NativeMethods.IsWindow);
 
     internal IntPtr[] WindowHandles() =>
@@ -2976,8 +3089,10 @@ internal sealed class RunningApp
     public bool Update(RunningAppSnapshot snapshot)
     {
         var changed = !string.Equals(Name, snapshot.Name, StringComparison.Ordinal) ||
+                      !string.Equals(AppUserModelId, snapshot.AppUserModelId, StringComparison.Ordinal) ||
                       !_windows.SequenceEqual(snapshot.Windows);
         Name = snapshot.Name;
+        AppUserModelId = snapshot.AppUserModelId;
         _windows = snapshot.Windows;
         return changed;
     }
@@ -3080,7 +3195,11 @@ internal sealed class DockPinState
     public List<string> Order { get; init; } = [];
 }
 
-internal sealed record UserDockPin(string Name, string ProcessName, string ExecutablePath);
+internal sealed record UserDockPin(
+    string Name,
+    string ProcessName,
+    string? ExecutablePath,
+    string? AppId = null);
 
 internal static class DockPinStore
 {
@@ -3127,15 +3246,20 @@ internal static class DockPinStore
 
     public static void Pin(RunningApp app)
     {
-        if (!app.CanPin || string.IsNullOrWhiteSpace(app.ExecutablePath)) return;
+        if (!app.CanPin ||
+            string.IsNullOrWhiteSpace(app.ExecutablePath) &&
+            string.IsNullOrWhiteSpace(app.AppUserModelId)) return;
         lock (Sync)
         {
             var state = Load();
             state.Removed.RemoveAll(name => name.Equals(app.Name, StringComparison.OrdinalIgnoreCase));
             state.Added.RemoveAll(pin =>
                 pin.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase) ||
-                pin.ExecutablePath.Equals(app.ExecutablePath, StringComparison.OrdinalIgnoreCase));
-            state.Added.Add(new UserDockPin(app.Name, app.ProcessName, app.ExecutablePath));
+                !string.IsNullOrWhiteSpace(app.ExecutablePath) &&
+                string.Equals(pin.ExecutablePath, app.ExecutablePath, StringComparison.OrdinalIgnoreCase) ||
+                !string.IsNullOrWhiteSpace(app.AppUserModelId) &&
+                string.Equals(pin.AppId, app.AppUserModelId, StringComparison.OrdinalIgnoreCase));
+            state.Added.Add(new UserDockPin(app.Name, app.ProcessName, app.ExecutablePath, app.AppUserModelId));
             Save(state);
         }
         Changed?.Invoke();
@@ -3252,20 +3376,15 @@ internal sealed class PinnedApp
                 Shortcut = shortcut,
                 ProcessNames = Processes.GetValueOrDefault(name, [])
             };
-        }).Where(app => !removed.Contains(app.Name));
+        }).ToArray();
+        var visibleBuiltIn = builtIn.Where(app => !removed.Contains(app.Name));
         var added = state.Added
             .Where(pin => !IsStaleSystemPin(pin) &&
-                          !removed.Contains(pin.Name) &&
-                          !string.IsNullOrWhiteSpace(pin.ExecutablePath))
-            .Select(pin => new PinnedApp
-            {
-                Name = pin.Name,
-                Patterns = [],
-                ExecutablePath = pin.ExecutablePath,
-                ProcessNames = [pin.ProcessName],
-                IsUserPin = true
-            });
-        return builtIn
+                          !removed.Contains(pin.Name))
+            .Select(pin => CreateUserPin(pin, builtIn))
+            .Where(app => app is not null)
+            .Select(app => app!);
+        return visibleBuiltIn
             .Concat(added)
             .DistinctBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
             .OrderBy(app =>
@@ -3277,20 +3396,99 @@ internal sealed class PinnedApp
     }
 
     internal static bool IsStaleSystemPin(UserDockPin pin) =>
-        pin.ProcessName.Equals("TextInputHost", StringComparison.OrdinalIgnoreCase) ||
-        pin.ProcessName.Equals("Windows365", StringComparison.OrdinalIgnoreCase) &&
-        pin.Name.Equals("Windows App", StringComparison.OrdinalIgnoreCase);
+        string.Equals(pin.ProcessName, "TextInputHost", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(pin.ProcessName, "Windows365", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(pin.Name, "Windows App", StringComparison.OrdinalIgnoreCase);
+
+    internal static PinnedApp? CreateUserPin(UserDockPin pin, IReadOnlyList<PinnedApp> builtIn)
+    {
+        if (IsStaleSystemPin(pin)) return null;
+        var appId = pin.AppId ?? ResolveLegacyPackageAppId(pin.ExecutablePath, builtIn);
+        if (string.IsNullOrWhiteSpace(pin.ExecutablePath) && string.IsNullOrWhiteSpace(appId)) return null;
+        if (string.IsNullOrWhiteSpace(pin.ProcessName)) return null;
+
+        return new PinnedApp
+        {
+            Name = pin.Name,
+            AppId = appId,
+            Patterns = [],
+            ExecutablePath = pin.ExecutablePath,
+            ProcessNames = [pin.ProcessName],
+            IsUserPin = true
+        };
+    }
+
+    private static string? ResolveLegacyPackageAppId(string? executablePath, IReadOnlyList<PinnedApp> builtIn)
+    {
+        var family = PackageFamilyFromWindowsAppsPath(executablePath);
+        if (family is null) return null;
+
+        var matches = builtIn
+            .Select(app => app.AppId)
+            .Where(appId =>
+            {
+                if (string.IsNullOrWhiteSpace(appId)) return false;
+                var separator = appId.IndexOf('!');
+                return separator > 0 && appId[..separator].Equals(family, StringComparison.OrdinalIgnoreCase);
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
+    private static string? PackageFamilyFromWindowsAppsPath(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath)) return null;
+        var normalized = executablePath.Replace('/', '\\');
+        const string WindowsAppsMarker = "\\WindowsApps\\";
+        var marker = normalized.LastIndexOf(WindowsAppsMarker, StringComparison.OrdinalIgnoreCase);
+        if (marker < 0) return null;
+
+        var packageStart = marker + WindowsAppsMarker.Length;
+        var packageEnd = normalized.IndexOf('\\', packageStart);
+        if (packageEnd < 0) return null;
+        var packageDirectory = normalized[packageStart..packageEnd];
+        var publisherSeparator = packageDirectory.LastIndexOf("__", StringComparison.Ordinal);
+        if (publisherSeparator <= 0 || publisherSeparator + 2 >= packageDirectory.Length) return null;
+
+        var packageDescriptor = packageDirectory[..publisherSeparator];
+        var publisherId = packageDirectory[(publisherSeparator + 2)..];
+        for (var separator = packageDescriptor.IndexOf('_'); separator >= 0;
+             separator = packageDescriptor.IndexOf('_', separator + 1))
+        {
+            var versionStart = separator + 1;
+            var versionEnd = packageDescriptor.IndexOf('_', versionStart);
+            if (versionEnd <= versionStart || versionEnd == packageDescriptor.Length - 1) continue;
+            var versionText = packageDescriptor[versionStart..versionEnd];
+            if (!Version.TryParse(versionText, out _)) continue;
+
+            var packageName = packageDescriptor[..separator];
+            if (packageName.Length == 0) continue;
+            return $"{packageName}_{publisherId}";
+        }
+        return null;
+    }
 
     public bool IsRunning(IReadOnlySet<string> processes) => ProcessNames.Any(processes.Contains);
 
     public bool IsRunning(IReadOnlyList<ProcessIdentity> processes) =>
-        processes.Any(process => MatchesProcess(process.ProcessName, process.ExecutablePath));
+        processes.Any(MatchesProcess);
 
     public bool MatchesProcess(string processName) => ProcessNames.Contains(processName, StringComparer.OrdinalIgnoreCase);
 
     internal bool MatchesProcess(string processName, string? executablePath)
+        => MatchesProcess(processName, executablePath, appUserModelId: null);
+
+    internal bool MatchesProcess(ProcessIdentity process) =>
+        MatchesProcess(process.ProcessName, process.ExecutablePath, process.AppUserModelId);
+
+    private bool MatchesProcess(string processName, string? executablePath, string? appUserModelId)
     {
         if (!MatchesProcess(processName)) return false;
+        if (IsPackagedAppId && !string.IsNullOrWhiteSpace(appUserModelId))
+        {
+            return AppId!.Equals(appUserModelId, StringComparison.OrdinalIgnoreCase);
+        }
         var expected = ExpectedExecutablePath;
         if (expected is null) return true;
         var candidate = ProcessIdentityReader.NormalizeExecutablePath(executablePath);
@@ -3299,6 +3497,7 @@ internal sealed class PinnedApp
     }
 
     internal bool IsFileExplorer => Name.Equals("File Explorer", StringComparison.OrdinalIgnoreCase);
+    private bool IsPackagedAppId => AppId?.Contains('!') == true;
 
     /// <summary>True for real folder windows only — not the shell desktop (Progman/WorkerW).</summary>
     internal static bool IsExplorerFolderClass(string className) =>
@@ -3333,7 +3532,8 @@ internal sealed class PinnedApp
                 {
                     try
                     {
-                        if (!MatchesProcess(processName, ProcessIdentityReader.TryGetExecutablePath(process))) continue;
+                        var identity = ProcessIdentityReader.TryRead(process) ?? new ProcessIdentity(processName, null);
+                        if (!MatchesProcess(identity)) continue;
                         var window = process.MainWindowHandle;
                         if (window == IntPtr.Zero || !NativeMethods.IsWindow(window)) continue;
                         if (NativeMethods.IsIconic(window))
@@ -3362,7 +3562,9 @@ internal sealed class PinnedApp
             return new ProcessStartInfo(FileExplorerExecutablePath) { UseShellExecute = true };
         }
 
-        var target = ExecutablePath ?? Shortcut ?? (AppId is null ? null : $"shell:AppsFolder\\{AppId}");
+        var target = IsPackagedAppId
+            ? $"shell:AppsFolder\\{AppId}"
+            : ExecutablePath ?? Shortcut ?? (AppId is null ? null : $"shell:AppsFolder\\{AppId}");
         if (target is null) return null;
         return new ProcessStartInfo(target) { UseShellExecute = true };
     }
@@ -3449,7 +3651,8 @@ internal sealed class PinnedApp
                 {
                     try
                     {
-                        if (!MatchesProcess(processName, ProcessIdentityReader.TryGetExecutablePath(process))) continue;
+                        var identity = ProcessIdentityReader.TryRead(process) ?? new ProcessIdentity(processName, null);
+                        if (!MatchesProcess(identity)) continue;
                         if (process.SessionId == currentSessionId) processIds.Add((uint)process.Id);
                     }
                     catch (InvalidOperationException) { }

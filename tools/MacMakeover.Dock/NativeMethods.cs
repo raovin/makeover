@@ -152,6 +152,8 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")] public static extern int GetDIBits(IntPtr deviceContext, IntPtr bitmap, uint firstScanLine, uint scanLineCount, IntPtr bits, ref BitmapInfo info, uint usage);
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetModuleHandle(string? moduleName);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int GetApplicationUserModelId(IntPtr process, ref uint applicationUserModelIdLength, StringBuilder? applicationUserModelId);
 
     public static bool TrySendMessageTimeout(
         IntPtr window,

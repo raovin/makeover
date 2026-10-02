@@ -54,6 +54,7 @@ internal static class Program
         var charging = battery with { OnAcPower = true, Charging = true, PowerMode = PowerModeKind.Performance };
         var pluggedIn = battery with { BatteryPercent = 94, OnAcPower = true, Charging = false, PowerMode = PowerModeKind.Balanced };
         return SystemStateProvider.ClassifyPowerMode(new Guid("961cc777-2547-4f9d-8174-7d86181b8a7a")) == PowerModeKind.Saver &&
+               MenuRouter.SessionPipeNameSelfTest() &&
                SystemStateProvider.ClassifyPowerMode(Guid.Empty) == PowerModeKind.Balanced &&
                SystemStateProvider.ClassifyPowerMode(new Guid("381b4222-f694-41f0-9685-ff5bb260df2e")) == PowerModeKind.Balanced &&
                SystemStateProvider.ClassifyPowerMode(new Guid("ded574b5-45a0-4f42-8737-46345c09c238")) == PowerModeKind.Performance &&

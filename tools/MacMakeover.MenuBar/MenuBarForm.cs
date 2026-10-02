@@ -1553,6 +1553,23 @@ internal sealed class MenuBarForm : Form
 internal static class MenuRouter
 {
     private const string PipeName = "MacMakeover.MenuHost";
+    private const string SessionPipeMarker = ".Session.";
+
+    internal static string PipeNameForSession(int sessionId) => $"{PipeName}{SessionPipeMarker}{sessionId}";
+
+    private static string CurrentSessionPipeName
+    {
+        get
+        {
+            using var process = Process.GetCurrentProcess();
+            return PipeNameForSession(process.SessionId);
+        }
+    }
+
+    internal static bool SessionPipeNameSelfTest() =>
+        PipeNameForSession(7) == "MacMakeover.MenuHost.Session.7" &&
+        PipeNameForSession(7) != PipeNameForSession(8) &&
+        PipeNameForSession(0) != PipeName;
 
     public static void Send(string command)
     {
@@ -1560,7 +1577,7 @@ internal static class MenuRouter
         {
             using var client = new NamedPipeClientStream(
                 ".",
-                PipeName,
+                CurrentSessionPipeName,
                 PipeDirection.Out,
                 PipeOptions.CurrentUserOnly);
             client.Connect(120);

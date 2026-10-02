@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [switch]$SelfTestOnly
 )
 
 Set-StrictMode -Version Latest
@@ -26,15 +27,79 @@ $stuckRectsPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Stuc
 $desktopPolicyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
 $virtualDesktopsPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops'
 
-function Get-RegistryValueSnapshot([string]$Path, [string]$Name) {
-  $key = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+function Get-RegistryValueSnapshot([string]$Path, [string]$Name, [scriptblock]$GetItem = $null) {
+  if ($GetItem) {
+    $key = & $GetItem $Path
+  } else {
+    $key = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+  }
   if (-not $key) { return @{ exists = $false; value = $null; kind = $null } }
   $exists = $key.GetValueNames() -contains $Name
+  $value = $null
+  $kind = $null
+  if ($exists) {
+    # Assign the registry object directly. An if-expression enumerates byte[] values.
+    $value = $key.GetValue($Name)
+    $kind = [string]$key.GetValueKind($Name)
+  }
   return @{
     exists = $exists
-    value = if ($exists) { $key.GetValue($Name) } else { $null }
-    kind = if ($exists) { [string]$key.GetValueKind($Name) } else { $null }
+    value = $value
+    kind = $kind
   }
+}
+
+function Get-RegistrySnapshotValue([hashtable]$Snapshot) {
+  if ($Snapshot.exists) { return $Snapshot.value }
+  return $null
+}
+
+function Get-TaskbarAutoHideFromSnapshot([hashtable]$Snapshot) {
+  $settings = $null
+  if ($Snapshot.exists) {
+    # Keep the registry's byte[] type intact; an if-expression enumerates it.
+    $settings = $Snapshot.value
+  }
+  return [bool]($settings -is [byte[]] -and $settings.Length -gt 8 -and (($settings[8] -band 1) -eq 1))
+}
+
+function Test-ProfileSnapshotFixtures {
+  $enabled = [byte[]](0..8)
+  $enabled[8] = 1
+  $disabled = [byte[]](0..8)
+  $disabled[8] = 0
+  $registryKey = [pscustomobject]@{
+    Values = @{ Settings = $enabled; DisabledSettings = $disabled; MalformedSettings = 'not-binary' }
+    Kinds = @{ Settings = 'Binary'; DisabledSettings = 'Binary'; MalformedSettings = 'String' }
+  }
+  Add-Member -InputObject $registryKey -MemberType ScriptMethod -Name GetValueNames -Value {
+    @($this.Values.Keys)
+  }
+  Add-Member -InputObject $registryKey -MemberType ScriptMethod -Name GetValue -Value {
+    param([string]$Name)
+    return ,$this.Values[$Name]
+  }
+  Add-Member -InputObject $registryKey -MemberType ScriptMethod -Name GetValueKind -Value {
+    param([string]$Name)
+    return $this.Kinds[$Name]
+  }
+  $getFixtureItem = { param([string]$Path) $registryKey }
+  $missing = Get-RegistryValueSnapshot -Path 'fixture:\missing' -Name 'Settings' -GetItem { $null }
+  $missingValue = Get-RegistryValueSnapshot -Path 'fixture:\key' -Name 'NotPresent' -GetItem $getFixtureItem
+  $enabledSnapshot = Get-RegistryValueSnapshot -Path 'fixture:\key' -Name 'Settings' -GetItem $getFixtureItem
+  $disabledSnapshot = Get-RegistryValueSnapshot -Path 'fixture:\key' -Name 'DisabledSettings' -GetItem $getFixtureItem
+  $malformedSnapshot = Get-RegistryValueSnapshot -Path 'fixture:\key' -Name 'MalformedSettings' -GetItem $getFixtureItem
+
+  -not $missing.exists -and
+    -not $missingValue.exists -and
+    (Get-RegistrySnapshotValue $missingValue) -eq $null -and
+    -not (Get-TaskbarAutoHideFromSnapshot $missingValue) -and
+    $enabledSnapshot.value -is [byte[]] -and
+    (Get-TaskbarAutoHideFromSnapshot $enabledSnapshot) -and
+    $disabledSnapshot.value -is [byte[]] -and
+    -not (Get-TaskbarAutoHideFromSnapshot $disabledSnapshot) -and
+    $malformedSnapshot.value -is [string] -and
+    -not (Get-TaskbarAutoHideFromSnapshot $malformedSnapshot)
 }
 
 function Set-MacWallpaper {
@@ -97,14 +162,23 @@ public static class NativeUserWallpaper {
   }
 }
 
+if ($SelfTestOnly) {
+  if (-not (Test-ProfileSnapshotFixtures)) {
+    throw 'Profile registry snapshot fixture failed.'
+  }
+  Write-Host 'PASS: missing, binary, and malformed profile snapshot fixtures.'
+  exit 0
+}
+
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 Remove-Item -LiteralPath $preparedPath -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path -LiteralPath $statePath)) {
-  $stuckRects = (Get-ItemProperty -LiteralPath $stuckRectsPath -ErrorAction SilentlyContinue).Settings
+  $stuckRectsSnapshot = Get-RegistryValueSnapshot $stuckRectsPath 'Settings'
+  $wallpaperSnapshot = Get-RegistryValueSnapshot 'HKCU:\Control Panel\Desktop' 'Wallpaper'
   $state = [ordered]@{
     capturedAt = (Get-Date).ToString('o')
-    taskbarAutoHide = [bool]($stuckRects -and $stuckRects.Length -gt 8 -and (($stuckRects[8] -band 1) -eq 1))
-    wallpaper = (Get-ItemProperty 'HKCU:\Control Panel\Desktop' -Name Wallpaper -ErrorAction SilentlyContinue).Wallpaper
+    taskbarAutoHide = Get-TaskbarAutoHideFromSnapshot $stuckRectsSnapshot
+    wallpaper = Get-RegistrySnapshotValue $wallpaperSnapshot
     wallpaperPolicy = [ordered]@{
       Wallpaper = Get-RegistryValueSnapshot $desktopPolicyPath 'Wallpaper'
       WallpaperStyle = Get-RegistryValueSnapshot $desktopPolicyPath 'WallpaperStyle'

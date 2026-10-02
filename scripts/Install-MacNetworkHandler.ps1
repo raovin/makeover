@@ -1,5 +1,5 @@
 # Registers the `macmakeover-network:` protocol. The toolbar Wi-Fi item's onClick
-# opens this URI, which sends "network" to the resident MenuHost named pipe.
+# opens this URI and routes "network" through the MenuHost in this Windows session.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -11,9 +11,7 @@ if (-not (Test-Path $menuHostExe)) {
   Write-Warning "MenuHost is not built yet ($menuHostExe). Run: dotnet build tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj -c Release"
 }
 
-$conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-$cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
-$command = '"{0}" --headless "{1}" /c echo network> \\.\pipe\MacMakeover.MenuHost || start "" "{2}" --show network' -f $conhost, $cmd, $menuHostExe
+$command = '"{0}" --show network' -f $menuHostExe
 
 $base = 'HKCU:\Software\Classes\macmakeover-network'
 New-Item -Path "$base\shell\open\command" -Force | Out-Null

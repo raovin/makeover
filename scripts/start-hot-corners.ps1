@@ -138,7 +138,7 @@ $script:AppleMenuScriptPath = Join-Path $PSScriptRoot "Show-MacAppleMenu.ps1"
 $script:ControlCenterScriptPath = Join-Path $PSScriptRoot "Show-MacControlCenter.ps1"
 $script:MenuHostProjectPath = Join-Path $script:PackageRoot "tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj"
 $script:MenuHostExePath = Join-Path $script:PackageRoot "tools\MacMakeover.MenuHost\bin\Release\net10.0-windows\MacMakeover.MenuHost.exe"
-$script:MenuHostPipeName = "MacMakeover.MenuHost"
+$script:MenuHostPipeName = "MacMakeover.MenuHost.Session.$($script:CurrentSessionId)"
 $script:MenuInvocations = @()
 $script:WarmMenuRunspaces = @{}
 

@@ -1,5 +1,5 @@
 # Registers the `macmakeover-bluetooth:` protocol. The toolbar Bluetooth item's
-# onClick opens this URI, which sends "bluetooth" to the resident MenuHost pipe.
+# onClick opens this URI and routes "bluetooth" through the MenuHost in this session.
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -11,9 +11,7 @@ if (-not (Test-Path $menuHostExe)) {
   Write-Warning "MenuHost is not built yet ($menuHostExe). Run: dotnet build tools\MacMakeover.MenuHost\MacMakeover.MenuHost.csproj -c Release"
 }
 
-$conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-$cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
-$command = '"{0}" --headless "{1}" /c echo bluetooth> \\.\pipe\MacMakeover.MenuHost || start "" "{2}" --show bluetooth' -f $conhost, $cmd, $menuHostExe
+$command = '"{0}" --show bluetooth' -f $menuHostExe
 
 $base = 'HKCU:\Software\Classes\macmakeover-bluetooth'
 New-Item -Path "$base\shell\open\command" -Force | Out-Null
