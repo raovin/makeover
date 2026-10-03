@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace MacMakeover.MenuBar;
@@ -104,7 +105,10 @@ internal static class Program
             {
                 new QaRenderScenario("normal-1280-11", 1280, 1F, elevenApps),
                 new QaRenderScenario("narrow-800-11", 800, 1F, elevenApps),
+                new QaRenderScenario("highdpi-150-1280-11", 1280, 1.5F, elevenApps),
+                new QaRenderScenario("highdpi-150-800-11", 800, 1.5F, elevenApps),
                 new QaRenderScenario("highdpi-1280-11", 1280, 2F, elevenApps),
+                new QaRenderScenario("highdpi-200-800-11", 800, 2F, elevenApps),
                 new QaRenderScenario("highdpi-1280-32", 1280, 2F, manyApps)
             };
             var manifest = new List<object>(scenarios.Length);
@@ -276,12 +280,354 @@ internal static class Program
             Path.Combine(Path.GetTempPath(), "MacMakeover", "missing-tray-app.exe"));
         var firstSource = TrayIconCache.BuildSourceIdentity(executableIdentity, firstIdentity);
         var changedSource = TrayIconCache.BuildSourceIdentity(executableIdentity, changedIdentity);
+        var capturedSource = TrayIconCache.GetIconSourceIdentity(new TrayAppSnapshot(
+            "missing",
+            "Missing",
+            Path.Combine(Path.GetTempPath(), "MacMakeover", "missing-tray-app.exe"),
+            false,
+            firstIdentity));
 
-        return firstIdentity.Length > 0 &&
-               !firstIdentity.Equals(changedIdentity, StringComparison.OrdinalIgnoreCase) &&
-               !firstSource.Equals(changedSource, StringComparison.OrdinalIgnoreCase) &&
-               TrayIconCache.ShouldRefresh(firstSource, changedSource) &&
-               !TrayIconCache.ShouldRefresh(firstSource, firstSource);
+        var sourceIdentityChecksPassed = firstIdentity.Length > 0 &&
+                                         !firstIdentity.Equals(changedIdentity, StringComparison.OrdinalIgnoreCase) &&
+                                         !firstSource.Equals(changedSource, StringComparison.OrdinalIgnoreCase) &&
+                                         capturedSource.Equals(firstSource, StringComparison.OrdinalIgnoreCase) &&
+                                         TrayIconCache.ShouldRefresh(firstSource, changedSource) &&
+                                         !TrayIconCache.ShouldRefresh(firstSource, firstSource);
+        if (!sourceIdentityChecksPassed)
+        {
+            Console.Error.WriteLine("FAIL: tray icon source identity checks.");
+            return false;
+        }
+        return TrayIconCacheAsyncSelfTest();
+    }
+
+    private static bool TrayIconCacheAsyncSelfTest()
+    {
+        var tests = new (string Name, Func<bool> Run)[]
+        {
+            ("cached Get and delayed UI dispatch", TrayIconCacheCachedGetSelfTest),
+            ("matching and stale queue update with bounded churn", TrayIconCacheQueueSelfTest),
+            ("last-good icon and failed-load retry", TrayIconCacheFailureSelfTest),
+            ("dispatch failure backoff", TrayIconCacheDispatchFailureSelfTest),
+            ("stale callback request identity", TrayIconCacheStaleDispatchCallbackSelfTest),
+            ("dispose during blocked icon load", TrayIconCacheDisposeSelfTest),
+            ("dispose with undrained UI completion", TrayIconCacheUndrainedDispatchDisposeSelfTest)
+        };
+        foreach (var test in tests)
+        {
+            try
+            {
+                if (test.Run()) continue;
+                Console.Error.WriteLine($"FAIL: tray icon cache {test.Name}.");
+                return false;
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"FAIL: tray icon cache {test.Name}: {exception}");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool TrayIconCacheCachedGetSelfTest()
+    {
+        var posted = new ConcurrentQueue<Action>();
+        using var loaderStarted = new ManualResetEventSlim();
+        using var releaseLoader = new ManualResetEventSlim();
+        var loadCount = 0;
+        using var cache = new TrayIconCache(
+            posted.Enqueue,
+            _ =>
+            {
+                Interlocked.Increment(ref loadCount);
+                loaderStarted.Set();
+                releaseLoader.Wait(TimeSpan.FromSeconds(5));
+                return new Bitmap(4, 4);
+            },
+            maximumConcurrentLoads: 1);
+        var app = TestTrayApp("cache", "source-a");
+        if (cache.Get(app) is not null || !loaderStarted.Wait(TimeSpan.FromSeconds(5))) return false;
+        for (var index = 0; index < 8; index++) _ = cache.Get(app);
+        if (loadCount != 1) return false;
+
+        releaseLoader.Set();
+        if (!WaitUntil(() => !posted.IsEmpty)) return false;
+        // BeginInvoke has accepted the result, but the UI has not drained it. Repeated
+        // paints must still coalesce against the in-flight request.
+        for (var index = 0; index < 8; index++) _ = cache.Get(app);
+        if (loadCount != 1 || cache.PendingCompletionCount != 1 || cache.ActiveCount != 1) return false;
+        if (!RunPosted(posted)) return false;
+        var image = cache.Get(app);
+        if (image is null || loadCount != 1) return false;
+        for (var index = 0; index < 8; index++)
+        {
+            if (!ReferenceEquals(cache.Get(app), image)) return false;
+        }
+        return loadCount == 1;
+    }
+
+    private static bool TrayIconCacheQueueSelfTest()
+    {
+        var posted = new ConcurrentQueue<Action>();
+        var loadedSources = new ConcurrentQueue<string>();
+        using var blockerStarted = new ManualResetEventSlim();
+        using var releaseBlocker = new ManualResetEventSlim();
+        using var cache = new TrayIconCache(
+            posted.Enqueue,
+            app =>
+            {
+                loadedSources.Enqueue($"{app.Key}:{app.IconSourceIdentity}");
+                if (app.Key == "block")
+                {
+                    blockerStarted.Set();
+                    releaseBlocker.Wait(TimeSpan.FromSeconds(5));
+                }
+                return new Bitmap(4, 4);
+            },
+            maximumConcurrentLoads: 1,
+            maximumQueuedLoads: 2);
+
+        var blocker = TestTrayApp("block", "block-source");
+        var matching = TestTrayApp("matching", "matching-source");
+        var stale = TestTrayApp("stale", "stale-old");
+        cache.UpdateSnapshot([blocker, matching, stale]);
+        if (cache.Get(blocker) is not null || !blockerStarted.Wait(TimeSpan.FromSeconds(5))) return false;
+        _ = cache.Get(matching);
+        cache.UpdateSnapshot([blocker, matching]);
+        _ = cache.Get(matching);
+        if (cache.QueuedCount != 1) return false; // The matching queued request survives the snapshot.
+
+        for (var index = 0; index < 100; index++)
+        {
+            var transient = TestTrayApp($"transient-{index}", $"source-{index}");
+            cache.UpdateSnapshot([blocker, matching, transient]);
+            _ = cache.Get(transient);
+            if (cache.QueuedCount > 2) return false;
+            cache.UpdateSnapshot([blocker, matching]);
+            if (cache.QueuedCount != 1) return false;
+        }
+
+        cache.UpdateSnapshot([blocker, matching, stale]);
+        _ = cache.Get(stale);
+        if (cache.QueuedCount != 2) return false;
+        var currentStale = stale with { IconSourceIdentity = "stale-new" };
+        cache.UpdateSnapshot([blocker, matching, currentStale]);
+        _ = cache.Get(stale); // An overflow snapshot from before the update cannot roll identity backward.
+        if (cache.QueuedCount != 1) return false;
+        _ = cache.Get(currentStale);
+        if (cache.QueuedCount != 2) return false;
+        cache.UpdateSnapshot([blocker, matching, currentStale]); // Matching request remains; stale one is retained by new identity.
+        if (cache.QueuedCount != 2) return false;
+
+        releaseBlocker.Set();
+        if (!RunPosted(posted)) return false;
+        if (!RunPosted(posted)) return false;
+        if (!RunPosted(posted)) return false;
+
+        var loaded = loadedSources.ToArray();
+        return cache.QueuedCount == 0 && cache.ActiveCount == 0 &&
+               loaded.Contains("block:block-source") &&
+               loaded.Contains("matching:matching-source") &&
+               loaded.Contains("stale:stale-new") &&
+               !loaded.Contains("stale:stale-old") &&
+               !loaded.Any(source => source.StartsWith("transient-", StringComparison.Ordinal));
+    }
+
+    private static bool TrayIconCacheFailureSelfTest()
+    {
+        var posted = new ConcurrentQueue<Action>();
+        var now = DateTime.UtcNow;
+        var loadCount = 0;
+        using var cache = new TrayIconCache(
+            posted.Enqueue,
+            app =>
+            {
+                Interlocked.Increment(ref loadCount);
+                return app.IconSourceIdentity == "good-source" ? new Bitmap(4, 4) : null;
+            },
+            maximumConcurrentLoads: 1,
+            failureRetryDelay: TimeSpan.FromSeconds(1),
+            utcNow: () => now);
+        var good = TestTrayApp("failure", "good-source");
+        _ = cache.Get(good);
+        if (!RunPosted(posted)) return false;
+        var lastGood = cache.Get(good);
+        if (lastGood is null || loadCount != 1) return false;
+
+        var bad = good with { IconSourceIdentity = "failed-source" };
+        if (!ReferenceEquals(cache.Get(bad), lastGood) || !RunPosted(posted)) return false;
+        for (var index = 0; index < 12; index++)
+        {
+            if (!ReferenceEquals(cache.Get(bad), lastGood)) return false;
+        }
+        if (loadCount != 2) return false;
+
+        now += TimeSpan.FromSeconds(2);
+        _ = cache.Get(bad);
+        if (!RunPosted(posted) || loadCount != 3) return false;
+        return ReferenceEquals(cache.Get(bad), lastGood) && loadCount == 3;
+    }
+
+    private static bool TrayIconCacheDispatchFailureSelfTest()
+    {
+        var loadCount = 0;
+        var postCount = 0;
+        var now = DateTime.UtcNow;
+        var images = new ConcurrentBag<Bitmap>();
+        using var cache = new TrayIconCache(
+            _ =>
+            {
+                Interlocked.Increment(ref postCount);
+                throw new InvalidOperationException("Test dispatcher rejected the callback.");
+            },
+            _ =>
+            {
+                Interlocked.Increment(ref loadCount);
+                var bitmap = new Bitmap(4, 4);
+                images.Add(bitmap);
+                return bitmap;
+            },
+            maximumConcurrentLoads: 1,
+            failureRetryDelay: TimeSpan.FromSeconds(1),
+            utcNow: () => now);
+        var app = TestTrayApp("dispatch", "dispatch-source");
+        _ = cache.Get(app);
+        if (!WaitUntil(() => cache.ActiveCount == 0 && cache.PendingCompletionCount == 0 &&
+                             images.Count == 1 && images.All(IsBitmapDisposed))) return false;
+        _ = cache.Get(app);
+        if (loadCount != 1 || postCount != 1) return false;
+        now += TimeSpan.FromSeconds(2);
+        _ = cache.Get(app);
+        if (!WaitUntil(() => cache.ActiveCount == 0 && cache.PendingCompletionCount == 0)) return false;
+        return WaitUntil(() => loadCount == 2 && postCount == 2 && images.Count == 2 && images.All(IsBitmapDisposed));
+    }
+
+    private static bool TrayIconCacheStaleDispatchCallbackSelfTest()
+    {
+        var posted = new ConcurrentQueue<Action>();
+        var loadCount = 0;
+        var postCount = 0;
+        var now = DateTime.UtcNow;
+        Bitmap? first = null;
+        Bitmap? second = null;
+        var cache = new TrayIconCache(
+            action =>
+            {
+                posted.Enqueue(action);
+                if (Interlocked.Increment(ref postCount) == 1)
+                    throw new InvalidOperationException("The first callback is queued, then rejected.");
+            },
+            _ =>
+            {
+                var bitmap = new Bitmap(4, 4);
+                if (Interlocked.Increment(ref loadCount) == 1) Interlocked.Exchange(ref first, bitmap);
+                else Interlocked.Exchange(ref second, bitmap);
+                return bitmap;
+            },
+            maximumConcurrentLoads: 1,
+            failureRetryDelay: TimeSpan.FromSeconds(1),
+            utcNow: () => now);
+        var app = TestTrayApp("stale-dispatch", "same-source");
+        try
+        {
+            cache.UpdateSnapshot([app]);
+            _ = cache.Get(app);
+            if (!WaitUntil(() => cache.ActiveCount == 0 && cache.PendingCompletionCount == 0 &&
+                                 postCount == 1 && first is { } firstImage && IsBitmapDisposed(firstImage)))
+                return false;
+
+            now += TimeSpan.FromSeconds(2);
+            _ = cache.Get(app);
+            if (!WaitUntil(() => cache.PendingCompletionCount == 1 && postCount == 2 && second is not null))
+                return false;
+            if (!RunPosted(posted)) return false; // This exact request was already abandoned.
+            if (cache.ActiveCount != 1 || cache.PendingCompletionCount != 1 ||
+                first is not { } disposedFirst || !IsBitmapDisposed(disposedFirst) ||
+                second is not { } pendingSecond || IsBitmapDisposed(pendingSecond))
+            {
+                return false;
+            }
+
+            if (!RunPosted(posted)) return false;
+            return ReferenceEquals(cache.Get(app), second) &&
+                   cache.ActiveCount == 0 && cache.PendingCompletionCount == 0 && loadCount == 2;
+        }
+        finally
+        {
+            cache.Dispose();
+        }
+    }
+
+    private static bool TrayIconCacheDisposeSelfTest()
+    {
+        var posts = 0;
+        using var loaderStarted = new ManualResetEventSlim();
+        using var releaseLoader = new ManualResetEventSlim();
+        Bitmap? loadedImage = null;
+        using var cache = new TrayIconCache(
+            _ => Interlocked.Increment(ref posts),
+            _ =>
+            {
+                loaderStarted.Set();
+                releaseLoader.Wait(TimeSpan.FromSeconds(5));
+                var bitmap = new Bitmap(4, 4);
+                Interlocked.Exchange(ref loadedImage, bitmap);
+                return bitmap;
+            },
+            maximumConcurrentLoads: 1);
+        _ = cache.Get(TestTrayApp("dispose", "dispose-source"));
+        if (!loaderStarted.Wait(TimeSpan.FromSeconds(5))) return false;
+        cache.Dispose();
+        releaseLoader.Set();
+        if (!WaitUntil(() => loadedImage is { } image && cache.ActiveCount == 0 && IsBitmapDisposed(image))) return false;
+        return posts == 0;
+    }
+
+    private static bool TrayIconCacheUndrainedDispatchDisposeSelfTest()
+    {
+        var posted = new ConcurrentQueue<Action>();
+        Bitmap? loadedImage = null;
+        using var cache = new TrayIconCache(
+            posted.Enqueue,
+            _ =>
+            {
+                var bitmap = new Bitmap(4, 4);
+                Interlocked.Exchange(ref loadedImage, bitmap);
+                return bitmap;
+            },
+            maximumConcurrentLoads: 1);
+        _ = cache.Get(TestTrayApp("undrained", "undrained-source"));
+        if (!WaitUntil(() => cache.PendingCompletionCount == 1 && !posted.IsEmpty)) return false;
+        cache.Dispose();
+        if (cache.PendingCompletionCount != 0 || loadedImage is null || !IsBitmapDisposed(loadedImage)) return false;
+        return posted.TryDequeue(out var lateCallback) && InvokeSafely(lateCallback);
+    }
+
+    private static TrayAppSnapshot TestTrayApp(string key, string identity) =>
+        new(key, key, $"C:\\Apps\\{key}.exe", false, IconSourceIdentity: identity);
+
+    private static bool WaitUntil(Func<bool> condition) => SpinWait.SpinUntil(condition, 5000);
+
+    private static bool RunPosted(ConcurrentQueue<Action> posted)
+    {
+        Action? action = null;
+        if (!SpinWait.SpinUntil(() => posted.TryDequeue(out action), 5000) || action is null) return false;
+        return InvokeSafely(action);
+    }
+
+    private static bool InvokeSafely(Action action)
+    {
+        try { action(); return true; }
+        catch { return false; }
+    }
+
+    private static bool IsBitmapDisposed(Bitmap bitmap)
+    {
+        try { _ = bitmap.GetPixel(0, 0); return false; }
+        catch (ArgumentException) { return true; }
+        catch (ObjectDisposedException) { return true; }
+        catch (InvalidOperationException) { return false; } // GDI+ may briefly report the image busy during disposal.
     }
 
     private static bool TrayLayoutSelfTest()
@@ -292,8 +638,11 @@ internal static class Program
             appCount: 11,
             appSlotWidth: 24,
             overflowButtonWidth: 30);
-        if (normal.VisibleCount != 11 || normal.OverflowCount != 0 || normal.HasOverflow)
+        if (normal.VisibleCount != MenuBarForm.MaximumInlineTrayApps || normal.OverflowCount != 5 || !normal.HasOverflow)
             return false;
+
+        var sixApps = MenuBarForm.ComputeTrayLayout(220, 620, 6, 24, 30);
+        if (sixApps.VisibleCount != 6 || sixApps.OverflowCount != 0 || sixApps.HasOverflow) return false;
 
         var narrow = MenuBarForm.ComputeTrayLayout(
             leftBoundary: 220,
@@ -326,6 +675,7 @@ internal static class Program
             appSlotWidth: 24,
             overflowButtonWidth: 30);
         return many.HasOverflow &&
+               many.VisibleCount == MenuBarForm.MaximumInlineTrayApps &&
                many.VisibleCount + many.OverflowCount == 32 &&
                MenuBarForm.ComputeTrayLayout(100, 100, 5, 24, 30).OverflowButtonWidth >= 4 &&
                MenuBarForm.ComputeTrayLayout(10, 100, 0, 24, 30) == new TrayLayout(0, 0, 0);
@@ -527,6 +877,12 @@ internal static class Program
         {
             return false;
         }
+        var trayIconSourceChanged = baseline with
+        {
+            TrayApps = [trays[0] with { IconSourceIdentity = "updated-icon-source" }, trays[1]]
+        };
+        if (SystemStateProvider.BuildRenderedNotificationToken(trayIconSourceChanged, minuteA) == tokenA)
+            return false;
 
         // Memory paint uses :0; 8.49 still paints as 8 while 8.5 paints as 9.
         var memoryEight = baseline with { UsedMemoryGb = 8.49 };
@@ -1054,6 +1410,11 @@ internal static class Program
     {
         if (MenuBarForm.LogicalHeight != 28 ||
             MenuBarForm.LogicalProviderIconSize != 12 ||
+            MenuBarForm.MaximumInlineTrayApps != 6 ||
+            MenuBarForm.TelemetryTextSlotLogicalWidth(TelemetryKind.Cpu) != 34 ||
+            MenuBarForm.TelemetryTextSlotLogicalWidth(TelemetryKind.Memory) != 58 ||
+            MenuBarForm.TelemetryTextSlotLogicalWidth(TelemetryKind.Network) != 84 ||
+            MenuBarForm.ActionTooltip(BarAction.Bluetooth) != "Open Bluetooth controls" ||
             MenuBarForm.ScaleLogical(MenuBarForm.LogicalHeight, 1.5F) != 42 ||
             MenuBarForm.ComputeTopBarBounds(
                     new Rectangle(0, 0, 1920, 1080),

@@ -10,6 +10,6 @@
     <AssemblyTitle>Vesper Supervisor</AssemblyTitle>
     <Description>Vesper Shell Supervisor</Description>
     <PublishSingleFile>true</PublishSingleFile>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
   </PropertyGroup>
 </Project>

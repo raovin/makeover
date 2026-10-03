@@ -9,7 +9,7 @@
     <Product>Vesper Shell</Product>
     <AssemblyTitle>Vesper Menu Bar</AssemblyTitle>
     <Description>Vesper Shell Menu Bar</Description>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>

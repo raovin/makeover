@@ -67,6 +67,9 @@ internal static class Program
         try
         {
             ApplicationConfiguration.Initialize();
+            if (MenuForm.FormatSliderValue(-0.1F) != "0%" ||
+                MenuForm.FormatSliderValue(0.376F) != "38%" ||
+                MenuForm.FormatSliderValue(1.1F) != "100%") return 3;
             return RunVolumeSelfTest(
                 VolumeService.GetMasterVolume,
                 VolumeService.SetMasterVolume,
@@ -797,17 +800,16 @@ internal sealed class MenuContext : ApplicationContext
 
 internal sealed class MenuForm : Form
 {
-    private readonly Color _panel = Color.FromArgb(30, 35, 46);
-    private readonly Color _panelTop = Color.FromArgb(40, 47, 61);
-    private readonly Color _panelBottom = Color.FromArgb(23, 27, 36);
-    private readonly Color _panelBorder = Color.FromArgb(76, 88, 108);
-    private readonly Color _card = Color.FromArgb(48, 54, 70);
-    private readonly Color _cardBottom = Color.FromArgb(40, 45, 59);
-    private readonly Color _cardHover = Color.FromArgb(62, 70, 89);
-    private readonly Color _hover = Color.FromArgb(59, 116, 239);
-    private readonly Color _separator = Color.FromArgb(78, 87, 103);
-    private readonly Color _primaryText = Color.FromArgb(248, 250, 253);
-    private readonly Color _secondaryText = Color.FromArgb(184, 192, 205);
+    private readonly Color _panel = Color.FromArgb(26, 29, 34);
+    private readonly Color _panelTop = Color.FromArgb(34, 38, 44);
+    private readonly Color _panelBottom = Color.FromArgb(25, 28, 33);
+    private readonly Color _panelBorder = Color.FromArgb(62, 69, 78);
+    private readonly Color _card = Color.FromArgb(41, 45, 51);
+    private readonly Color _cardHover = Color.FromArgb(49, 54, 61);
+    private readonly Color _hover = Color.FromArgb(47, 53, 61);
+    private readonly Color _separator = Color.FromArgb(53, 60, 68);
+    private readonly Color _primaryText = Color.FromArgb(241, 243, 246);
+    private readonly Color _secondaryText = Color.FromArgb(178, 185, 194);
     private readonly List<MenuRow> _rows = [];
     private readonly System.Windows.Forms.Timer _outsideClickTimer;
     private readonly System.Windows.Forms.Timer _systemSwitchTimer;
@@ -934,10 +936,6 @@ internal sealed class MenuForm : Form
     {
         base.OnPaint(e);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using (var brush = new LinearGradientBrush(ClientRectangle, _panelTop, _panelBottom, LinearGradientMode.Vertical))
-        {
-            e.Graphics.FillRectangle(brush, ClientRectangle);
-        }
 
         var y = Padding.Top;
         for (var i = 0; i < _rows.Count; i++)
@@ -1545,11 +1543,11 @@ internal sealed class MenuForm : Form
     private void DrawCard(Graphics graphics, Rectangle rect, MenuRow row, bool hovered)
     {
         var cardRect = Rectangle.Inflate(rect, -LogicalToDeviceUnits(2), -LogicalToDeviceUnits(3));
-        using (var brush = new LinearGradientBrush(cardRect, hovered ? _cardHover : _card, _cardBottom, LinearGradientMode.Vertical))
         using (var path = RoundedRect(cardRect, LogicalToDeviceUnits(8)))
         {
+            using var brush = new SolidBrush(hovered ? _cardHover : _card);
             graphics.FillPath(brush, path);
-            using var pen = new Pen(Color.FromArgb(hovered ? 86 : 52, 255, 255, 255));
+            using var pen = new Pen(Color.FromArgb(hovered ? 58 : 40, 210, 216, 224));
             graphics.DrawPath(pen, path);
         }
 
@@ -1562,26 +1560,26 @@ internal sealed class MenuForm : Form
     private void DrawIconCard(Graphics graphics, Rectangle rect, MenuRow row, bool hovered)
     {
         var cardRect = Rectangle.Inflate(rect, -LogicalToDeviceUnits(2), -LogicalToDeviceUnits(3));
-        using (var brush = new LinearGradientBrush(cardRect, hovered ? _cardHover : _card, _cardBottom, LinearGradientMode.Vertical))
         using (var path = RoundedRect(cardRect, LogicalToDeviceUnits(12)))
         {
+            using var brush = new SolidBrush(hovered ? _cardHover : _card);
             graphics.FillPath(brush, path);
-            using var pen = new Pen(Color.FromArgb(hovered ? 90 : 54, 255, 255, 255));
+            using var pen = new Pen(Color.FromArgb(hovered ? 58 : 40, 210, 216, 224));
             graphics.DrawPath(pen, path);
         }
 
-        // Circular icon chip: accent blue when the feature is active, muted gray otherwise.
+        // Circular icon chip: a muted slate tint distinguishes an active feature.
         var chipSize = LogicalToDeviceUnits(30);
         var chipRect = new Rectangle(
             cardRect.Left + LogicalToDeviceUnits(10),
             cardRect.Top + (cardRect.Height - chipSize) / 2,
             chipSize,
             chipSize);
-        using (var chipBrush = new LinearGradientBrush(chipRect, row.Active ? Color.FromArgb(73, 140, 255) : Color.FromArgb(96, 104, 124), row.Active ? Color.FromArgb(35, 92, 215) : Color.FromArgb(70, 77, 94), LinearGradientMode.Vertical))
+        using (var chipBrush = new SolidBrush(row.Active ? Color.FromArgb(73, 99, 132) : Color.FromArgb(77, 84, 94)))
         {
             graphics.FillEllipse(chipBrush, chipRect);
         }
-        using (var chipPen = new Pen(Color.FromArgb(70, 255, 255, 255)))
+        using (var chipPen = new Pen(Color.FromArgb(44, 210, 216, 224)))
         {
             graphics.DrawEllipse(chipPen, chipRect);
         }
@@ -1601,15 +1599,33 @@ internal sealed class MenuForm : Form
     {
         if (row.Slider is not { } slider) return;
 
-        var labelRect = new Rectangle(rect.Left + LogicalToDeviceUnits(12), rect.Top + LogicalToDeviceUnits(2), rect.Width - LogicalToDeviceUnits(24), LogicalToDeviceUnits(18));
+        var labelLeft = rect.Left + LogicalToDeviceUnits(12);
+        var valueWidth = LogicalToDeviceUnits(42);
+        var labelRect = new Rectangle(
+            labelLeft,
+            rect.Top + LogicalToDeviceUnits(2),
+            Math.Max(0, rect.Right - labelLeft - LogicalToDeviceUnits(12) - valueWidth - LogicalToDeviceUnits(8)),
+            LogicalToDeviceUnits(18));
         TextRenderer.DrawText(graphics, row.Label, _smallBoldFont, labelRect, _primaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        var valueRect = new Rectangle(
+            rect.Right - LogicalToDeviceUnits(12) - valueWidth,
+            labelRect.Top,
+            valueWidth,
+            labelRect.Height);
+        TextRenderer.DrawText(
+            graphics,
+            FormatSliderValue(slider.Value),
+            _smallFont,
+            valueRect,
+            _secondaryText,
+            TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
 
         var track = SliderTrackRect(rect);
-        using (var backBrush = new LinearGradientBrush(track, Color.FromArgb(82, 255, 255, 255), Color.FromArgb(48, 255, 255, 255), LinearGradientMode.Vertical))
+        using (var backBrush = new SolidBrush(Color.FromArgb(68, 76, 86)))
         using (var backPath = RoundedRect(track, track.Height / 2))
         {
             graphics.FillPath(backBrush, backPath);
-            using var trackPen = new Pen(Color.FromArgb(36, 255, 255, 255));
+            using var trackPen = new Pen(Color.FromArgb(35, 210, 216, 224));
             graphics.DrawPath(trackPen, backPath);
         }
 
@@ -1617,21 +1633,24 @@ internal sealed class MenuForm : Form
         var usable = track.Width - track.Height;
         var knobCx = track.Left + knobRadius + (int)(Math.Clamp(slider.Value, 0f, 1f) * usable);
         var filled = new Rectangle(track.Left, track.Top, knobCx + knobRadius - track.Left, track.Height);
-        using (var fillBrush = new LinearGradientBrush(filled, Color.FromArgb(252, 254, 255), Color.FromArgb(214, 226, 245), LinearGradientMode.Vertical))
+        using (var fillBrush = new SolidBrush(Color.FromArgb(177, 191, 208)))
         using (var fillPath = RoundedRect(filled, track.Height / 2))
         {
             graphics.FillPath(fillBrush, fillPath);
         }
 
         var glyphRect = new Rectangle(track.Left, track.Top, track.Height, track.Height);
-        TextRenderer.DrawText(graphics, slider.Glyph, _iconFont, glyphRect, Color.FromArgb(74, 78, 92), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(graphics, slider.Glyph, _iconFont, glyphRect, Color.FromArgb(40, 45, 52), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
 
         var knobRect = new Rectangle(knobCx - knobRadius, track.Top, track.Height, track.Height);
-        using var knobBrush = new SolidBrush(Color.White);
+        using var knobBrush = new SolidBrush(Color.FromArgb(232, 236, 241));
         graphics.FillEllipse(knobBrush, knobRect);
-        using var knobPen = new Pen(Color.FromArgb(75, 0, 0, 0));
+        using var knobPen = new Pen(Color.FromArgb(72, 20, 23, 28));
         graphics.DrawEllipse(knobPen, knobRect);
     }
+
+    internal static string FormatSliderValue(float value) =>
+        $"{Math.Round(Math.Clamp(value, 0F, 1F) * 100F).ToString(System.Globalization.CultureInfo.InvariantCulture)}%";
 
     private Rectangle SliderTrackRect(Rectangle rowRect)
     {

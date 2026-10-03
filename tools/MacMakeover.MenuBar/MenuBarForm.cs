@@ -213,6 +213,7 @@ internal sealed class MenuBarForm : Form
     internal const int LogicalHeight = 28;
     internal const int LogicalCornerHitSize = 8;
     internal const int LogicalProviderIconSize = 12;
+    internal const int MaximumInlineTrayApps = 6;
     private const int LogicalTelemetryIconSize = 11;
     private readonly Screen _screen;
     private readonly SystemStateProvider _state;
@@ -220,7 +221,7 @@ internal sealed class MenuBarForm : Form
     private readonly string? _previewPower;
     private readonly List<(Rectangle Bounds, BarAction Action)> _hits = [];
     private readonly List<(Rectangle Bounds, TrayAppSnapshot App)> _trayHits = [];
-    private readonly TrayIconCache _trayIcons = new();
+    private readonly TrayIconCache _trayIcons;
     private readonly ToolTip _toolTip = new() { InitialDelay = 400, ReshowDelay = 100, AutoPopDelay = 5000 };
     private readonly CancellationTokenSource _lifetimeCts = new();
     private Typography? _typography;
@@ -241,8 +242,12 @@ internal sealed class MenuBarForm : Form
     private Rectangle? _trayOverflowBounds;
     private IReadOnlyList<TrayAppSnapshot> _trayOverflowApps = [];
     private ContextMenuStrip? _trayOverflowMenu;
+    private readonly Dictionary<string, ToolStripMenuItem> _trayOverflowItems = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Image> _trayOverflowImages = new(StringComparer.OrdinalIgnoreCase);
     private float? _renderScaleOverride;
     private int _managedResourcesDisposed;
+    private int _clockFullSlotWidth;
+    private int _clockCompactSlotWidth;
 
     public MenuBarForm(Screen screen, SystemStateProvider state, bool preview, string? previewPower)
     {
@@ -250,6 +255,9 @@ internal sealed class MenuBarForm : Form
         _state = state;
         _preview = preview;
         _previewPower = previewPower;
+        _trayIcons = new TrayIconCache(PostTrayIconCompletion);
+        _trayIcons.IconUpdated += OnTrayIconUpdated;
+        _trayIcons.UpdateSnapshot(_state.Snapshot.TrayApps);
         if (preview) Text = "MacMakeover Menu Bar Preview";
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
@@ -502,9 +510,53 @@ internal sealed class MenuBarForm : Form
 
     private void OnStateChanged(object? sender, EventArgs e)
     {
-        if (IsDisposed || !IsHandleCreated) return;
+        if (IsDisposed) return;
+        _trayIcons.UpdateSnapshot(_state.Snapshot.TrayApps);
+        if (!IsHandleCreated) return;
         try { BeginInvoke(new Action(Invalidate)); }
         catch (InvalidOperationException) { }
+    }
+
+    private void PostTrayIconCompletion(Action callback)
+    {
+        if (IsDisposed || !IsHandleCreated) throw new InvalidOperationException("Menu bar is no longer available.");
+        BeginInvoke(callback);
+    }
+
+    private void OnTrayIconUpdated(string key)
+    {
+        if (IsDisposed) return;
+        if (_trayOverflowItems.TryGetValue(key, out var menuItem))
+        {
+            var app = _state.Snapshot.TrayApps.FirstOrDefault(candidate =>
+                candidate.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+            menuItem.Enabled = app is not null;
+            if (app is not null)
+            {
+                menuItem.Text = app.Name;
+                menuItem.ToolTipText = app.ExecutablePath;
+            }
+            SetOverflowItemImage(menuItem, app is null ? null : _trayIcons.Get(app));
+        }
+        Invalidate();
+    }
+
+    private void SetOverflowItemImage(ToolStripMenuItem menuItem, Image? source)
+    {
+        var key = menuItem.Tag as string;
+        var replacement = source is null ? null : new Bitmap(source);
+        _trayOverflowImages.Remove(key ?? string.Empty, out var previous);
+        menuItem.Image = replacement;
+        previous?.Dispose();
+        if (key is not null && replacement is not null) _trayOverflowImages[key] = replacement;
+    }
+
+    private void ReleaseOverflowItemImages()
+    {
+        foreach (var menuItem in _trayOverflowItems.Values) menuItem.Image = null;
+        foreach (var image in _trayOverflowImages.Values) image.Dispose();
+        _trayOverflowImages.Clear();
+        _trayOverflowItems.Clear();
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -547,6 +599,7 @@ internal sealed class MenuBarForm : Form
 
     private void RenderFrame(Graphics graphics, SystemSnapshot snapshot)
     {
+        _trayIcons.UpdateSnapshot(snapshot.TrayApps);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
         var client = new Rectangle(0, 0, Width, Height);
@@ -614,18 +667,16 @@ internal sealed class MenuBarForm : Form
         x = DrawRightItem(graphics, x, "\uEA8F", _iconFont, BarAction.Notifications, Scale(28));
         var now = DateTime.Now;
         var dateText = now.ToString("ddd d MMM HH:mm");
-        var dateWidth = TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(12);
+        var dateWidth = _clockFullSlotWidth;
         var trailingControlsWidth = Scale(28) + Scale(28) + Scale(27) + Scale(29);
         var projectedNetworkLeft = x - dateWidth - trailingControlsWidth;
         if (snapshot.TrayApps.Count > 0 &&
             projectedNetworkLeft - (leftEnd + Scale(8)) < Scale(20))
         {
-            // Preserve a reachable tray-overflow control on compact/high-DPI bars by
-            // reducing the calendar label before allowing tray items to crowd it.
+            // Preserve a reachable tray-overflow control on compact/high-DPI bars with
+            // a genuinely shorter clock slot while keeping width stable within each mode.
             dateText = now.ToString("HH:mm");
-            dateWidth = Math.Max(
-                Scale(28),
-                TextRenderer.MeasureText(dateText, _textFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(12));
+            dateWidth = _clockCompactSlotWidth;
         }
         x = DrawRightItem(graphics, x, dateText, _textFont, BarAction.Calendar, dateWidth);
         x = DrawRightItem(graphics, x, "\uE713", _iconFont, BarAction.ControlCenter, Scale(28));
@@ -674,7 +725,7 @@ internal sealed class MenuBarForm : Form
             using var path = RoundedRectangle(inset, Scale(4));
             graphics.FillPath(hover, path);
         }
-        var image = _trayIcons.Get(app);
+        var image = _renderScaleOverride is null ? _trayIcons.Get(app) : null;
         if (image is not null)
         {
             var size = Scale(14);
@@ -714,21 +765,23 @@ internal sealed class MenuBarForm : Form
         int networkLeft,
         int appCount,
         int appSlotWidth,
-        int overflowButtonWidth)
+        int overflowButtonWidth,
+        int maximumInlineApps = MaximumInlineTrayApps)
     {
         appCount = Math.Max(0, appCount);
         appSlotWidth = Math.Max(1, appSlotWidth);
         overflowButtonWidth = Math.Max(1, overflowButtonWidth);
+        maximumInlineApps = Math.Max(0, maximumInlineApps);
         var available = Math.Max(0, networkLeft - leftBoundary);
         if (appCount == 0) return new(0, 0, 0);
-        if ((long)appCount * appSlotWidth <= available)
+        if (appCount <= maximumInlineApps && (long)appCount * appSlotWidth <= available)
             return new(appCount, 0, 0);
 
         var actualOverflowWidth = available == 0
             ? Math.Max(4, overflowButtonWidth / 2)
             : Math.Min(overflowButtonWidth, available);
         var visible = Math.Min(
-            appCount,
+            Math.Min(appCount, maximumInlineApps),
             Math.Max(0, (available - actualOverflowWidth) / appSlotWidth));
         return new(visible, appCount - visible, actualOverflowWidth);
     }
@@ -800,14 +853,14 @@ internal sealed class MenuBarForm : Form
         var powerMode = PowerModeLabel(snapshot.PowerMode);
         // Keep a permanent slot between the battery and its label so AC status never
         // shifts the rest of the centered telemetry group when power is connected.
-        var batteryWidth = TextRenderer.MeasureText(battery, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(34);
-        var powerModeWidth = TextRenderer.MeasureText(powerMode, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(6);
+        var batteryWidth = TextRenderer.MeasureText("100%", _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width + Scale(34);
+        var powerModeWidth = Enum.GetValues<PowerModeKind>()
+            .Select(PowerModeLabel)
+            .Max(label => TextRenderer.MeasureText(label, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width) + Scale(6);
         TelemetrySegment[]? segments = null;
         var groupWidth = 0;
         var candidateWidths = candidates
-            .Select(candidate => candidate.Sum(MeasureTelemetry) +
-                                 Math.Max(0, candidate.Length) * Scale(17) + batteryWidth +
-                                 Scale(17) + powerModeWidth)
+            .Select(candidate => MeasureTelemetryGroup(candidate, batteryWidth, powerModeWidth))
             .ToArray();
         var selectedCandidate = SelectTelemetryCandidateIndex(candidateWidths, available);
         if (selectedCandidate >= 0)
@@ -821,21 +874,42 @@ internal sealed class MenuBarForm : Form
         var maximumX = rightStart - groupWidth - Scale(8);
         if (maximumX < minimumX) return;
         var x = CalculateTelemetryX(Width, groupWidth, leftEnd, rightStart, Scale(8));
-        foreach (var segment in segments)
+        for (var index = 0; index < segments.Length; index++)
         {
+            var segment = segments[index];
             var width = MeasureTelemetry(segment);
             DrawTelemetry(graphics, segment, new Rectangle(x, 0, width, Height));
-            x += width + Scale(8);
-            DrawTelemetrySeparator(graphics, x);
-            x += Scale(9);
+            x += width;
+            var hasNext = index + 1 < segments.Length;
+            var groupBoundary = hasNext && IsTelemetryGroupBoundary(segment.Kind, segments[index + 1].Kind);
+            var gap = Scale(hasNext && !groupBoundary ? 9 : 18);
+            if (!hasNext || groupBoundary) DrawTelemetrySeparator(graphics, x + gap / 2);
+            x += gap;
         }
 
         DrawBattery(graphics, new Rectangle(x, 0, batteryWidth, Height), snapshot, battery);
-        x += batteryWidth + Scale(8);
-        DrawTelemetrySeparator(graphics, x);
-        x += Scale(9);
+        x += batteryWidth;
+        var powerGap = Scale(18);
+        DrawTelemetrySeparator(graphics, x + powerGap / 2);
+        x += powerGap;
         DrawPowerMode(graphics, new Rectangle(x, 0, powerModeWidth, Height), snapshot.PowerMode, powerMode);
     }
+
+    private int MeasureTelemetryGroup(IReadOnlyList<TelemetrySegment> segments, int batteryWidth, int powerModeWidth)
+    {
+        var width = segments.Sum(MeasureTelemetry);
+        for (var index = 0; index < segments.Count; index++)
+        {
+            var hasNext = index + 1 < segments.Count;
+            var groupBoundary = hasNext && IsTelemetryGroupBoundary(segments[index].Kind, segments[index + 1].Kind);
+            width += Scale(hasNext && !groupBoundary ? 9 : 18);
+        }
+        return width + batteryWidth + Scale(18) + powerModeWidth;
+    }
+
+    private static bool IsTelemetryGroupBoundary(TelemetryKind previous, TelemetryKind next) =>
+        previous is not (TelemetryKind.Codex or TelemetryKind.Claude or TelemetryKind.Grok or TelemetryKind.Gemini) &&
+        next is TelemetryKind.Codex or TelemetryKind.Claude or TelemetryKind.Grok or TelemetryKind.Gemini;
 
     internal static int SelectTelemetryCandidateIndex(
         IReadOnlyList<int> candidateWidths,
@@ -864,7 +938,15 @@ internal sealed class MenuBarForm : Form
     private int MeasureTelemetry(TelemetrySegment segment) =>
         Scale(TelemetryIconSize(segment.Kind)) +
         Scale(3) +
-        TextRenderer.MeasureText(segment.Text, _smallFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+        Scale(TelemetryTextSlotLogicalWidth(segment.Kind));
+
+    internal static int TelemetryTextSlotLogicalWidth(TelemetryKind kind) => kind switch
+    {
+        TelemetryKind.Cpu => 34,
+        TelemetryKind.Memory => 58,
+        TelemetryKind.Network => 84,
+        _ => 38
+    };
 
     private static int TelemetryIconSize(TelemetryKind kind) =>
         kind is TelemetryKind.Codex or TelemetryKind.Claude or TelemetryKind.Grok or TelemetryKind.Gemini
@@ -935,7 +1017,7 @@ internal sealed class MenuBarForm : Form
         var textRect = new Rectangle(icon.Right + Scale(3), area.Top, area.Right - icon.Right - Scale(3), area.Height);
         TextRenderer.DrawText(graphics, segment.Text, _smallFont, textRect, color,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
-            TextFormatFlags.NoPadding);
+            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
     }
 
     private void DrawOpenAiMark(Graphics graphics, Rectangle icon, Color color)
@@ -1095,8 +1177,8 @@ internal sealed class MenuBarForm : Form
 
     private void DrawTelemetrySeparator(Graphics graphics, int x)
     {
-        using var pen = new Pen(Color.FromArgb(68, 186, 195, 205), Math.Max(1F, ScaleValue(0.5F)));
-        graphics.DrawLine(pen, x, Scale(5), x, Height - Scale(5));
+        using var pen = new Pen(Color.FromArgb(38, 186, 195, 205), Math.Max(1F, ScaleValue(0.5F)));
+        graphics.DrawLine(pen, x, Scale(8), x, Height - Scale(8));
     }
 
     private void DrawBattery(Graphics graphics, Rectangle area, SystemSnapshot snapshot, string label)
@@ -1250,8 +1332,32 @@ internal sealed class MenuBarForm : Form
     private static string FormatRate(long bytesPerSecond) =>
         SystemStateProvider.FormatNetworkRate(bytesPerSecond);
 
+    internal static string ActionTooltip(BarAction action) => action switch
+    {
+        BarAction.Apple => "Open Apple menu",
+        BarAction.Network => "Open network controls",
+        BarAction.Bluetooth => "Open Bluetooth controls",
+        BarAction.Volume => "Open volume controls",
+        BarAction.ControlCenter => "Open Control Center",
+        BarAction.Notifications => "Open notifications",
+        BarAction.Calendar => "Open calendar",
+        _ => "Open control"
+    };
+
     private void OnMouseMove(object? sender, MouseEventArgs e)
     {
+        if (IsShowDesktopCorner(e.Location, ClientSize, Scale(LogicalCornerHitSize)))
+        {
+            if (_toolTip.GetToolTip(this) == "Show desktop") return;
+            _hovered = null;
+            _hoveredTrayKey = null;
+            _trayOverflowHovered = false;
+            Cursor = Cursors.Hand;
+            _toolTip.SetToolTip(this, "Show desktop");
+            Invalidate();
+            return;
+        }
+
         if (_trayOverflowBounds is { } overflow && overflow.Contains(e.Location))
         {
             if (_trayOverflowHovered) return;
@@ -1278,11 +1384,12 @@ internal sealed class MenuBarForm : Form
         }
         var hovered = _hits.FirstOrDefault(hit => hit.Bounds.Contains(e.Location)).Action;
         BarAction? next = _hits.Any(hit => hit.Bounds.Contains(e.Location)) ? hovered : null;
-        if (_hovered == next && _hoveredTrayKey is null && !_trayOverflowHovered) return;
+        if (_hovered == next && _hoveredTrayKey is null && !_trayOverflowHovered &&
+            _toolTip.GetToolTip(this) != "Show desktop") return;
         _hovered = next;
         _hoveredTrayKey = null;
         _trayOverflowHovered = false;
-        _toolTip.SetToolTip(this, string.Empty);
+        _toolTip.SetToolTip(this, next is { } action ? ActionTooltip(action) : string.Empty);
         Cursor = next is null ? Cursors.Default : Cursors.Hand;
         Invalidate();
     }
@@ -1351,15 +1458,32 @@ internal sealed class MenuBarForm : Form
 
     private void ShowTrayOverflowMenu()
     {
+        var overflowKeys = _trayOverflowApps
+            .Select(app => app.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _trayOverflowApps = _state.Snapshot.TrayApps
+            .Where(app => overflowKeys.Contains(app.Key))
+            .ToArray();
         if (_trayOverflowApps.Count == 0) return;
 
-        _trayOverflowMenu?.Dispose();
+        if (_trayOverflowMenu is not null)
+        {
+            ReleaseOverflowItemImages();
+            _trayOverflowMenu.Dispose();
+        }
         var menu = new ContextMenuStrip
         {
-            ShowImageMargin = false,
-            ShowCheckMargin = false
+            ShowImageMargin = true,
+            ShowCheckMargin = false,
+            BackColor = Color.FromArgb(30, 34, 40),
+            ForeColor = Color.FromArgb(238, 241, 245),
+            Renderer = new ToolStripProfessionalRenderer(new OverflowMenuColorTable())
         };
         _trayOverflowMenu = menu;
+        menu.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_trayOverflowMenu, menu)) ReleaseOverflowItemImages();
+        };
         menu.Items.Add(new ToolStripMenuItem($"{_trayOverflowApps.Count} more tray apps")
         {
             Enabled = false
@@ -1370,9 +1494,18 @@ internal sealed class MenuBarForm : Form
         {
             var appItem = new ToolStripMenuItem(app.Name)
             {
+                Tag = app.Key,
                 ToolTipText = app.ExecutablePath
             };
-            var openItem = new ToolStripMenuItem("Open");
+            appItem.BackColor = menu.BackColor;
+            appItem.ForeColor = menu.ForeColor;
+            _trayOverflowItems[app.Key] = appItem;
+            SetOverflowItemImage(appItem, _trayIcons.Get(app));
+            var openItem = new ToolStripMenuItem("Open")
+            {
+                BackColor = menu.BackColor,
+                ForeColor = menu.ForeColor
+            };
             openItem.Click += (_, _) => TryActivateTrayApp(app);
             appItem.DropDownItems.Add(openItem);
 
@@ -1527,7 +1660,50 @@ internal sealed class MenuBarForm : Form
         _semiboldFont = _typography.Emphasis;
         _smallFont = _typography.Telemetry;
         _iconFont = _typography.Icon;
+        _clockFullSlotWidth = MeasureClockSlotWidth("ddd d MMM HH:mm", _textFont);
+        _clockCompactSlotWidth = MeasureClockSlotWidth("HH:mm", _textFont);
         AppLog.Write($"Typography {_screen.DeviceName} text={_textFont.Name}; emphasis={_semiboldFont.Name}; telemetry={_smallFont.Name}; dpi={DeviceDpi}; visualScale={VisualScale:0.##}");
+    }
+
+    private int MeasureClockSlotWidth(string format, Font font)
+    {
+        IEnumerable<string> samples;
+        if (format == "ddd d MMM HH:mm")
+        {
+            var dateFormat = CultureInfo.CurrentCulture.DateTimeFormat;
+            var dayNames = dateFormat.AbbreviatedDayNames.Where(name => !string.IsNullOrWhiteSpace(name));
+            var monthNames = dateFormat.AbbreviatedMonthNames.Where(name => !string.IsNullOrWhiteSpace(name));
+            samples = dayNames.SelectMany(day => monthNames.Select(month => $"{day} 30 {month} 23:59"));
+        }
+        else
+        {
+            samples = ["23:59"];
+        }
+
+        var widest = samples
+            .Select(sample => TextRenderer.MeasureText(sample, font, Size.Empty, TextFormatFlags.NoPadding).Width)
+            .DefaultIfEmpty(0)
+            .Max();
+        return widest + Scale(12);
+    }
+
+    private sealed class OverflowMenuColorTable : ProfessionalColorTable
+    {
+        private static readonly Color Background = Color.FromArgb(30, 34, 40);
+        private static readonly Color Hover = Color.FromArgb(49, 55, 63);
+        private static readonly Color Border = Color.FromArgb(59, 66, 75);
+
+        public override Color ToolStripDropDownBackground => Background;
+        public override Color ImageMarginGradientBegin => Background;
+        public override Color ImageMarginGradientMiddle => Background;
+        public override Color ImageMarginGradientEnd => Background;
+        public override Color MenuBorder => Border;
+        public override Color MenuItemBorder => Border;
+        public override Color MenuItemSelected => Hover;
+        public override Color MenuItemPressedGradientBegin => Hover;
+        public override Color MenuItemPressedGradientMiddle => Hover;
+        public override Color MenuItemPressedGradientEnd => Hover;
+        public override Color SeparatorDark => Border;
     }
 
     protected override void Dispose(bool disposing)
@@ -1536,6 +1712,8 @@ internal sealed class MenuBarForm : Form
         {
             _state.Changed -= OnStateChanged;
             _lifetimeCts.Cancel();
+            _trayIcons.IconUpdated -= OnTrayIconUpdated;
+            ReleaseOverflowItemImages();
             _trayOverflowMenu?.Dispose();
             _appleMark?.Dispose();
             _claudeMark?.Dispose();

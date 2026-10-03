@@ -10,7 +10,8 @@ internal sealed record TrayAppSnapshot(
     string ExecutablePath,
     bool Promoted,
     string IconSnapshotIdentity = "",
-    Guid? IconGuid = null);
+    Guid? IconGuid = null,
+    string IconSourceIdentity = "");
 
 internal static class TrayAppProvider
 {
@@ -35,7 +36,10 @@ internal static class TrayAppProvider
             var registrations = Registrations();
             var runningPaths = FindRunningCandidatePaths(registrations, Process.GetProcesses);
 
-            return _capture = SelectLive(registrations, runningPaths);
+            var liveApps = SelectLive(registrations, runningPaths);
+            return _capture = liveApps
+                .Select(app => app with { IconSourceIdentity = TrayIconCache.GetIconSourceIdentity(app) })
+                .ToArray();
         }
     }
 
@@ -331,43 +335,318 @@ internal static class TrayAppProvider
 
 internal sealed class TrayIconCache : IDisposable
 {
+    private const int MaximumCachedImages = 96;
+    private const int MaximumConcurrentLoads = 2;
+    private const int MaximumQueuedLoads = 64;
+    private readonly object _gate = new();
     private readonly Dictionary<string, CacheEntry> _images = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _desiredSources = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, LinkedListNode<IconRequest>> _queuedRequests = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IconRequest> _activeRequests = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PendingCompletion> _pendingCompletions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, FailedAttempt> _failedAttempts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<IconRequest> _queue = new();
+    private readonly Action<Action> _postToUi;
+    private readonly Func<TrayAppSnapshot, Image?> _loader;
+    private readonly TimeSpan _failureRetryDelay;
+    private readonly Func<DateTime> _utcNow;
+    private long _useSequence;
+    private bool _disposed;
+    private bool _hasPublishedSnapshot;
 
+    internal event Action<string>? IconUpdated;
+
+    internal TrayIconCache(
+        Action<Action> postToUi,
+        Func<TrayAppSnapshot, Image?>? loader = null,
+        int maximumConcurrentLoads = MaximumConcurrentLoads,
+        int maximumQueuedLoads = MaximumQueuedLoads,
+        TimeSpan? failureRetryDelay = null,
+        Func<DateTime>? utcNow = null)
+    {
+        _postToUi = postToUi;
+        _loader = loader ?? LoadIcon;
+        MaximumConcurrentLoadsForInstance = Math.Clamp(maximumConcurrentLoads, 1, 4);
+        MaximumQueuedLoadsForInstance = Math.Clamp(maximumQueuedLoads, 1, 128);
+        _failureRetryDelay = failureRetryDelay ?? TimeSpan.FromSeconds(30);
+        _utcNow = utcNow ?? (() => DateTime.UtcNow);
+    }
+
+    private int MaximumConcurrentLoadsForInstance { get; }
+    private int MaximumQueuedLoadsForInstance { get; }
+    internal int QueuedCount { get { lock (_gate) return _queue.Count; } }
+    internal int ActiveCount { get { lock (_gate) return _activeRequests.Count; } }
+    internal int PendingCompletionCount { get { lock (_gate) return _pendingCompletions.Count; } }
+
+    /// <summary>Returns an owned cache image and only enqueues work on a miss.</summary>
     public Image? Get(TrayAppSnapshot app)
     {
-        var liveIconPath = GetLiveIconPath(app);
-        var preferredIconPath = liveIconPath ?? app.ExecutablePath;
-        var sourceIdentity = BuildSourceIdentity(
-            GetSourceIdentity(preferredIconPath),
-            liveIconPath is null ? app.IconSnapshotIdentity : string.Empty);
+        Image? image = null;
+        var cachedSourceIdentity = string.Empty;
         if (_images.TryGetValue(app.Key, out var cached))
         {
-            if (!ShouldRefresh(cached.SourceIdentity, sourceIdentity))
-            {
-                return cached.Image;
-            }
-
-            cached.Image?.Dispose();
-            _images.Remove(app.Key);
+            cached.LastUse = ++_useSequence;
+            image = cached.Image;
+            cachedSourceIdentity = cached.SourceIdentity;
         }
 
-        // NotifyIconSettings stores the current tray artwork independently of the
-        // executable. Prefer it whenever present so an app can refresh its tray
-        // icon without changing the executable on disk.
-        var image = liveIconPath is null ? TryLoadIconSnapshot(app.Key) : TryLoadIconFile(liveIconPath);
-        if (image is null && File.Exists(app.ExecutablePath))
+        lock (_gate)
         {
-            try
+            if (_disposed) return null;
+            if (!_hasPublishedSnapshot)
             {
-                using var icon = Icon.ExtractAssociatedIcon(app.ExecutablePath);
-                using var source = icon?.ToBitmap();
-                if (source is not null) image = new Bitmap(source);
+                if (!string.IsNullOrWhiteSpace(app.IconSourceIdentity))
+                    _desiredSources[app.Key] = app.IconSourceIdentity;
             }
-            catch (ArgumentException) { }
+            if (!_desiredSources.TryGetValue(app.Key, out var desired) ||
+                ShouldRefresh(app.IconSourceIdentity, desired)) return image;
+            if (!ShouldRefresh(cachedSourceIdentity, app.IconSourceIdentity)) return image;
+            if (_failedAttempts.TryGetValue(app.Key, out var failed))
+            {
+                if (!ShouldRefresh(failed.SourceIdentity, app.IconSourceIdentity) &&
+                    _utcNow() < failed.RetryAfterUtc) return image;
+                _failedAttempts.Remove(app.Key);
+            }
+            QueueLoadLocked(app, app.IconSourceIdentity);
         }
 
-        _images[app.Key] = new CacheEntry(sourceIdentity, image);
         return image;
+    }
+
+    /// <summary>Refreshes source identities before painting so stale work cannot win a race.</summary>
+    internal void UpdateSnapshot(IReadOnlyList<TrayAppSnapshot> apps)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _hasPublishedSnapshot = true;
+            _desiredSources.Clear();
+            foreach (var app in apps)
+            {
+                if (!string.IsNullOrWhiteSpace(app.IconSourceIdentity))
+                    _desiredSources[app.Key] = app.IconSourceIdentity;
+            }
+
+            foreach (var pair in _queuedRequests.ToArray())
+            {
+                var request = pair.Value.Value;
+                if (!_desiredSources.TryGetValue(pair.Key, out var desired) ||
+                    ShouldRefresh(request.SourceIdentity, desired))
+                {
+                    _queue.Remove(pair.Value);
+                    _queuedRequests.Remove(pair.Key);
+                }
+            }
+
+            foreach (var pair in _failedAttempts.ToArray())
+            {
+                if (!_desiredSources.TryGetValue(pair.Key, out var desired) ||
+                    ShouldRefresh(pair.Value.SourceIdentity, desired))
+                    _failedAttempts.Remove(pair.Key);
+            }
+        }
+    }
+
+    private void QueueLoadLocked(TrayAppSnapshot app, string sourceIdentity)
+    {
+        if (_activeRequests.TryGetValue(app.Key, out var active) &&
+            !ShouldRefresh(active.SourceIdentity, sourceIdentity)) return;
+        if (_queuedRequests.TryGetValue(app.Key, out var queued))
+        {
+            if (!ShouldRefresh(queued.Value.SourceIdentity, sourceIdentity)) return;
+            queued.Value = new IconRequest(app, sourceIdentity);
+            return;
+        }
+        if (_queuedRequests.Count >= MaximumQueuedLoadsForInstance) return;
+
+        var request = new IconRequest(app, sourceIdentity);
+        var node = _queue.AddLast(request);
+        _queuedRequests.Add(app.Key, node);
+        StartQueuedLoadsLocked();
+    }
+
+    private void StartQueuedLoadsLocked()
+    {
+        var candidates = _queue.Count;
+        while (_activeRequests.Count < MaximumConcurrentLoadsForInstance && candidates-- > 0)
+        {
+            var node = _queue.First;
+            if (node is null) break;
+            _queue.RemoveFirst();
+            var request = node.Value;
+            var key = request.App.Key;
+            if (!_queuedRequests.TryGetValue(key, out var queuedNode) ||
+                !ReferenceEquals(queuedNode, node)) continue;
+            if (_activeRequests.ContainsKey(key))
+            {
+                var moved = _queue.AddLast(request);
+                _queuedRequests[key] = moved;
+                continue;
+            }
+
+            _queuedRequests.Remove(key);
+            if (!_desiredSources.TryGetValue(key, out var desired) ||
+                ShouldRefresh(request.SourceIdentity, desired)) continue;
+
+            _activeRequests.Add(key, request);
+            ThreadPool.QueueUserWorkItem(
+                static state =>
+                {
+                    var job = ((TrayIconCache Cache, IconRequest Request))state!;
+                    job.Cache.LoadInBackground(job.Request);
+                },
+                (this, request));
+        }
+    }
+
+    private void LoadInBackground(IconRequest request)
+    {
+        Image? image = null;
+        try
+        {
+            image = _loader(request.App);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Write($"Could not load tray icon for {request.App.Name}: {exception.Message}");
+        }
+
+        bool shouldPost;
+        lock (_gate)
+        {
+            shouldPost = !_disposed &&
+                         _desiredSources.TryGetValue(request.App.Key, out var desired) &&
+                         !ShouldRefresh(request.SourceIdentity, desired);
+            if (shouldPost)
+            {
+                _pendingCompletions[request.App.Key] = new PendingCompletion(request, image);
+                image = null; // Ownership transfers to the cache until the UI accepts or rejects it.
+            }
+            else
+            {
+                _activeRequests.Remove(request.App.Key);
+                StartQueuedLoadsLocked();
+            }
+        }
+
+        if (!shouldPost)
+        {
+            image?.Dispose();
+            return;
+        }
+
+        try
+        {
+            _postToUi(() => CompleteOnUi(request));
+        }
+        catch (InvalidOperationException)
+        {
+            AbandonRequest(request);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Write("Could not dispatch tray icon completion: " + exception.Message);
+            AbandonRequest(request);
+        }
+    }
+
+    private void AbandonRequest(IconRequest request)
+    {
+        Image? abandonedImage = null;
+        lock (_gate)
+        {
+            if (_pendingCompletions.TryGetValue(request.App.Key, out var pending) &&
+                ReferenceEquals(pending.Request, request))
+            {
+                abandonedImage = pending.Image;
+                _pendingCompletions.Remove(request.App.Key);
+            }
+            if (_activeRequests.TryGetValue(request.App.Key, out var active) &&
+                ReferenceEquals(active, request))
+            {
+                _activeRequests.Remove(request.App.Key);
+            }
+            if (!_disposed &&
+                _desiredSources.TryGetValue(request.App.Key, out var desired) &&
+                !ShouldRefresh(request.SourceIdentity, desired))
+            {
+                _failedAttempts[request.App.Key] = new FailedAttempt(
+                    request.SourceIdentity,
+                    _utcNow() + _failureRetryDelay,
+                    ++_useSequence);
+                TrimFailedAttempts();
+            }
+            StartQueuedLoadsLocked();
+        }
+        abandonedImage?.Dispose();
+    }
+
+    private void CompleteOnUi(IconRequest request)
+    {
+        Image? image = null;
+        var accepted = false;
+        lock (_gate)
+        {
+            if (!_pendingCompletions.TryGetValue(request.App.Key, out var pending) ||
+                !ReferenceEquals(pending.Request, request)) return;
+
+            image = pending.Image;
+            _pendingCompletions.Remove(request.App.Key);
+            if (_activeRequests.TryGetValue(request.App.Key, out var active) &&
+                ReferenceEquals(active, request))
+            {
+                _activeRequests.Remove(request.App.Key);
+            }
+            accepted = !_disposed &&
+                       _desiredSources.TryGetValue(request.App.Key, out var desired) &&
+                       !ShouldRefresh(request.SourceIdentity, desired);
+            if (accepted && image is null)
+            {
+                _failedAttempts[request.App.Key] = new FailedAttempt(
+                    request.SourceIdentity,
+                    _utcNow() + _failureRetryDelay,
+                    ++_useSequence);
+                TrimFailedAttempts();
+            }
+            else if (accepted)
+            {
+                _failedAttempts.Remove(request.App.Key);
+            }
+            StartQueuedLoadsLocked();
+        }
+
+        if (!accepted)
+        {
+            image?.Dispose();
+            return;
+        }
+        if (image is null) return; // A failed refresh keeps the last good image.
+        if (_images.TryGetValue(request.App.Key, out var previous)) previous.Image.Dispose();
+        _images[request.App.Key] = new CacheEntry(image, request.SourceIdentity, ++_useSequence);
+        TrimImageCache();
+        try { IconUpdated?.Invoke(request.App.Key); }
+        catch (Exception exception) { AppLog.Write("Tray icon update callback failed: " + exception.Message); }
+    }
+
+    private void TrimImageCache()
+    {
+        while (_images.Count > MaximumCachedImages)
+        {
+            var oldest = _images.MinBy(pair => pair.Value.LastUse);
+            if (oldest.Value is null) return;
+            oldest.Value.Image.Dispose();
+            _images.Remove(oldest.Key);
+        }
+    }
+
+    private void TrimFailedAttempts()
+    {
+        while (_failedAttempts.Count > MaximumCachedImages)
+        {
+            var oldest = _failedAttempts.MinBy(pair => pair.Value.Sequence);
+            if (oldest.Value is null) return;
+            _failedAttempts.Remove(oldest.Key);
+        }
     }
 
     private static string? GetLiveIconPath(TrayAppSnapshot app)
@@ -401,6 +680,15 @@ internal sealed class TrayIconCache : IDisposable
 
     internal static string BuildSourceIdentity(string executableIdentity, string? iconSnapshotIdentity) =>
         $"{executableIdentity}|IconSnapshot:{iconSnapshotIdentity ?? string.Empty}";
+
+    internal static string GetIconSourceIdentity(TrayAppSnapshot app)
+    {
+        var liveIconPath = GetLiveIconPath(app);
+        var preferredIconPath = liveIconPath ?? app.ExecutablePath;
+        return BuildSourceIdentity(
+            GetSourceIdentity(preferredIconPath),
+            liveIconPath is null ? app.IconSnapshotIdentity : string.Empty);
+    }
 
     internal static string GetIconSnapshotIdentity(byte[]? snapshot)
     {
@@ -438,19 +726,70 @@ internal sealed class TrayIconCache : IDisposable
                 ? $"{file.FullName}|{file.Length}|{file.LastWriteTimeUtc.Ticks}"
                 : executablePath;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or
+                                   NotSupportedException or System.Security.SecurityException)
         {
             return executablePath;
         }
     }
 
-    public void Dispose()
+    private static Image? LoadIcon(TrayAppSnapshot app)
     {
-        foreach (var entry in _images.Values) entry.Image?.Dispose();
-        _images.Clear();
+        var liveIconPath = GetLiveIconPath(app);
+        var image = liveIconPath is null
+            ? TryLoadIconSnapshot(app.Key)
+            : TryLoadIconFile(liveIconPath);
+        if (image is not null) return image;
+
+        try
+        {
+            if (!File.Exists(app.ExecutablePath)) return null;
+            using var icon = Icon.ExtractAssociatedIcon(app.ExecutablePath);
+            using var source = icon?.ToBitmap();
+            return source is null ? null : new Bitmap(source);
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or
+                                         NotSupportedException or System.Security.SecurityException or
+                                         System.Runtime.InteropServices.ExternalException)
+        {
+            return null;
+        }
     }
 
-    private sealed record CacheEntry(string SourceIdentity, Image? Image);
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _desiredSources.Clear();
+            _queuedRequests.Clear();
+            _queue.Clear();
+            _activeRequests.Clear();
+            var pendingImages = _pendingCompletions.Values
+                .Select(completion => completion.Image)
+                .Where(image => image is not null)
+                .Cast<Image>()
+                .ToArray();
+            _pendingCompletions.Clear();
+            _failedAttempts.Clear();
+            foreach (var image in pendingImages) image.Dispose();
+        }
+        foreach (var entry in _images.Values) entry.Image.Dispose();
+        _images.Clear();
+        IconUpdated = null;
+    }
+
+    private sealed record IconRequest(TrayAppSnapshot App, string SourceIdentity);
+    private sealed record PendingCompletion(IconRequest Request, Image? Image);
+    private sealed record FailedAttempt(string SourceIdentity, DateTime RetryAfterUtc, long Sequence);
+
+    private sealed class CacheEntry(Image image, string sourceIdentity, long lastUse)
+    {
+        internal Image Image { get; } = image;
+        internal string SourceIdentity { get; } = sourceIdentity;
+        internal long LastUse { get; set; } = lastUse;
+    }
 }
 
 internal static class TrayAppLauncher

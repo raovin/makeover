@@ -161,6 +161,8 @@ internal static class DockRegressionTests
             if (!TestDockWindowTitle()) return 7;
             if (!TestFileExplorerActivationPolicy()) return 8;
             if (!TestStaleSystemPinPolicy()) return 9;
+            if (!TestDockPointerInput()) return 17;
+            if (!DockHoverAnimationTests.Run()) return 18;
             if (!TestPackagedPinIdentity()) return 16;
             if (!TestDisplayRebuildPolicy()) return 10;
             if (!TestExecutableIdentityMatching()) return 11;
@@ -678,6 +680,57 @@ internal static class DockRegressionTests
         return !PinnedApp.IsStaleSystemPin(new UserDockPin("Sublime Text", "sublime_text", @"C:\Apps\sublime_text.exe"));
     }
 
+    private static bool TestDockPointerInput()
+    {
+        var pointer = new DockPointerState();
+        var threshold = new Size(10, 8);
+        var start = new Point(40, 20);
+
+        if (!pointer.Press(2, MouseButtons.Left, canReorder: false, start, threshold)) return false;
+        var sameItemClick = pointer.Complete(2, MouseButtons.Left);
+        if (sameItemClick.ActivateIndex != 2 || sameItemClick.ContextMenuIndex >= 0) return false;
+
+        if (!pointer.Press(2, MouseButtons.Left, canReorder: false, start, threshold)) return false;
+        if (pointer.Complete(3, MouseButtons.Left).ActivateIndex >= 0) return false;
+        if (!pointer.Press(2, MouseButtons.Left, canReorder: false, start, threshold)) return false;
+        if (pointer.Complete(-1, MouseButtons.Left).ActivateIndex >= 0) return false;
+
+        if (!pointer.Press(1, MouseButtons.Right, canReorder: false, start, threshold)) return false;
+        if (pointer.Complete(1, MouseButtons.Right).ContextMenuIndex != 1) return false;
+        if (!pointer.Press(1, MouseButtons.Right, canReorder: false, start, threshold)) return false;
+        if (pointer.Complete(2, MouseButtons.Right).ContextMenuIndex >= 0) return false;
+
+        if (!pointer.Press(4, MouseButtons.Left, canReorder: true, start, threshold)) return false;
+        if (pointer.Track(new Point(44, 23))) return false;
+        if (!pointer.Track(new Point(45, 20))) return false;
+        pointer.MarkReordered(6);
+        var reordered = pointer.Complete(6, MouseButtons.Left);
+        if (!reordered.WasDragging || !reordered.WasReordered || reordered.ActivateIndex >= 0) return false;
+
+        if (!pointer.Press(4, MouseButtons.Left, canReorder: true, start, threshold)) return false;
+        if (!pointer.Track(new Point(45, 20))) return false;
+        if (pointer.Complete(4, MouseButtons.Left).ActivateIndex >= 0) return false;
+
+        if (!pointer.Press(4, MouseButtons.Left, canReorder: true, start, threshold)) return false;
+        pointer.Cancel(); // Capture loss, item removal, and disposal use this same reset path.
+        var cancelled = pointer.Complete(4, MouseButtons.Left);
+        if (cancelled.ActivateIndex >= 0 || cancelled.ContextMenuIndex >= 0 || cancelled.WasDragging) return false;
+
+        var lostCapture = new DockPointerState();
+        if (!lostCapture.Press(4, MouseButtons.Left, canReorder: true, start, threshold)) return false;
+        if (!lostCapture.Track(new Point(45, 20))) return false;
+        lostCapture.MarkReordered(6);
+        lostCapture.Cancel();
+        var afterCaptureLoss = lostCapture.Complete(6, MouseButtons.Left);
+        if (afterCaptureLoss.ActivateIndex >= 0 || afterCaptureLoss.WasReordered) return false;
+
+        var items = new List<int> { 3, 1, 2, 99 };
+        var pins = new List<int> { 3, 1, 2 };
+        DockPointerOrder.Restore(items, pins, [1, 2, 3], item => item != 99);
+        return items.SequenceEqual([1, 2, 3, 99]) && pins.SequenceEqual([1, 2, 3]) &&
+               DockPointerState.HasCrossedDragThreshold(start, new Point(45, 20), threshold);
+    }
+
     private static bool TestPackagedPinIdentity()
     {
         const string outlookAppId = "Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows";
@@ -868,7 +921,7 @@ internal static class DockRegressionTests
             using (var graphics = Graphics.FromImage(surface))
             {
                 item.SetLayout(new Rectangle(0, 0, 64, 64), 1F);
-                item.Draw(graphics, hovered: false);
+                item.Draw(graphics);
                 if (!item.IsRunning || item.Name != "No Icon") return false;
             }
 
@@ -1867,6 +1920,230 @@ internal static class DockStateCapture
         IReadOnlyDictionary<uint, ProcessIdentity> ByProcessId);
 }
 
+internal readonly record struct DockPointerCompletion(
+    int ActivateIndex,
+    int ContextMenuIndex,
+    bool WasDragging,
+    bool WasReordered);
+
+/// <summary>Pure pointer-sequence state so press, capture-loss, and drag cases can be tested without launching apps.</summary>
+internal sealed class DockPointerState
+{
+    private bool _canReorder;
+    private Point _start;
+    private Size _dragThreshold;
+
+    internal int PressedItemIndex { get; private set; } = -1;
+    internal int DraggedItemIndex { get; private set; } = -1;
+    internal MouseButtons PressedButton { get; private set; }
+    internal bool IsDragging { get; private set; }
+    internal bool WasReordered { get; private set; }
+    internal bool HasPress => PressedItemIndex >= 0;
+
+    internal bool Press(int itemIndex, MouseButtons button, bool canReorder, Point location, Size dragThreshold)
+    {
+        Cancel();
+        if (itemIndex < 0 || button is not (MouseButtons.Left or MouseButtons.Right)) return false;
+        PressedItemIndex = itemIndex;
+        PressedButton = button;
+        _canReorder = canReorder && button == MouseButtons.Left;
+        _start = location;
+        _dragThreshold = new Size(Math.Max(1, dragThreshold.Width), Math.Max(1, dragThreshold.Height));
+        return true;
+    }
+
+    internal bool Track(Point location)
+    {
+        if (!HasPress || !_canReorder || IsDragging ||
+            !HasCrossedDragThreshold(_start, location, _dragThreshold)) return false;
+        IsDragging = true;
+        DraggedItemIndex = PressedItemIndex;
+        return true;
+    }
+
+    internal void MarkReordered(int newIndex)
+    {
+        if (!IsDragging || newIndex < 0) return;
+        DraggedItemIndex = newIndex;
+        WasReordered = true;
+    }
+
+    internal DockPointerCompletion Complete(int releasedItemIndex, MouseButtons button)
+    {
+        var sameItem = HasPress && releasedItemIndex == PressedItemIndex && button == PressedButton;
+        var result = new DockPointerCompletion(
+            sameItem && !IsDragging && PressedButton == MouseButtons.Left ? PressedItemIndex : -1,
+            sameItem && !IsDragging && PressedButton == MouseButtons.Right ? PressedItemIndex : -1,
+            IsDragging,
+            WasReordered);
+        Cancel();
+        return result;
+    }
+
+    internal void Cancel()
+    {
+        PressedItemIndex = -1;
+        DraggedItemIndex = -1;
+        PressedButton = MouseButtons.None;
+        _canReorder = false;
+        _start = Point.Empty;
+        _dragThreshold = Size.Empty;
+        IsDragging = false;
+        WasReordered = false;
+    }
+
+    internal static bool HasCrossedDragThreshold(Point start, Point current, Size threshold)
+    {
+        var safe = new Size(Math.Max(1, threshold.Width), Math.Max(1, threshold.Height));
+        var dragRectangle = new Rectangle(
+            start.X - safe.Width / 2,
+            start.Y - safe.Height / 2,
+            safe.Width,
+            safe.Height);
+        return !dragRectangle.Contains(current);
+    }
+}
+
+internal static class DockPointerOrder
+{
+    internal static void Restore<T>(
+        IList<T> items,
+        IList<T> pinnedItems,
+        IReadOnlyList<T> originalPinnedItems,
+        Func<T, bool> isPinned)
+    {
+        var existing = items.ToHashSet();
+        var restoredPins = originalPinnedItems.Where(existing.Contains).ToArray();
+        var runningItems = items.Where(item => !isPinned(item)).ToArray();
+
+        pinnedItems.Clear();
+        foreach (var item in restoredPins) pinnedItems.Add(item);
+        items.Clear();
+        foreach (var item in restoredPins) items.Add(item);
+        foreach (var item in runningItems) items.Add(item);
+    }
+}
+
+internal sealed class DockHoverAnimation
+{
+    private const double DurationMilliseconds = 120;
+    private float _from;
+    private float _target;
+    private long _startedAt;
+
+    internal float Progress { get; private set; }
+    internal bool IsSettled => Progress == _target;
+
+    internal bool SetTarget(bool hovered, long timestamp)
+    {
+        var target = hovered ? 1F : 0F;
+        if (_target == target) return false;
+        _from = Progress;
+        _target = target;
+        _startedAt = timestamp;
+        return true;
+    }
+
+    internal bool Advance(long timestamp)
+    {
+        if (IsSettled) return false;
+        var elapsedMilliseconds = Math.Max(0, timestamp - _startedAt) * 1000D / Stopwatch.Frequency;
+        var linear = (float)Math.Clamp(elapsedMilliseconds / DurationMilliseconds, 0D, 1D);
+        var eased = linear * linear * (3F - 2F * linear);
+        var next = _from + (_target - _from) * eased;
+        if (linear >= 1F)
+        {
+            var changed = Progress != _target;
+            Progress = _target;
+            return changed;
+        }
+        if (Math.Abs(next - Progress) < 0.0001F) return false;
+        Progress = next;
+        return true;
+    }
+
+    internal void Snap(bool hovered)
+    {
+        _target = hovered ? 1F : 0F;
+        _from = _target;
+        Progress = _target;
+        _startedAt = 0;
+    }
+}
+
+internal static class DockHoverAnimationTests
+{
+    internal static bool Run()
+    {
+        var animation = new DockHoverAnimation();
+        var start = Stopwatch.GetTimestamp();
+        if (!animation.SetTarget(true, start)) return false;
+        if (!animation.Advance(start + Stopwatch.Frequency / 20)) return false;
+        var beforeRepeatedMove = animation.Progress;
+        if (beforeRepeatedMove <= 0F || beforeRepeatedMove >= 1F) return false;
+        if (animation.SetTarget(true, start + Stopwatch.Frequency / 20)) return false;
+        if (!animation.Advance(start + Stopwatch.Frequency * 7 / 100)) return false;
+        if (animation.Progress <= beforeRepeatedMove) return false;
+
+        var fadeStart = start + Stopwatch.Frequency * 7 / 100;
+        if (!animation.SetTarget(false, fadeStart)) return false;
+        if (!animation.Advance(fadeStart + Stopwatch.Frequency * 12 / 100)) return false;
+        return animation.Progress == 0F && animation.IsSettled;
+    }
+}
+
+internal static class DockPointerMetrics
+{
+    private const int SmCxDrag = 68;
+    private const int SmCyDrag = 69;
+
+    [DllImport("user32.dll", EntryPoint = "GetDpiForWindow")]
+    private static extern uint GetDpiForWindow(IntPtr window);
+
+    [DllImport("user32.dll", EntryPoint = "GetSystemMetricsForDpi")]
+    private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+
+    internal static Size DragThreshold(IntPtr window)
+    {
+        try
+        {
+            var dpi = GetDpiForWindow(window);
+            if (dpi > 0)
+            {
+                var width = GetSystemMetricsForDpi(SmCxDrag, dpi);
+                var height = GetSystemMetricsForDpi(SmCyDrag, dpi);
+                if (width > 0 && height > 0) return new Size(width, height);
+            }
+        }
+        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { }
+        return SystemInformation.DragSize;
+    }
+}
+
+internal static class DockAnimationSettings
+{
+    private const uint SpiGetClientAreaAnimation = 0x1042;
+
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(
+        uint action,
+        uint parameter,
+        [MarshalAs(UnmanagedType.Bool)] out bool value,
+        uint flags);
+
+    internal static bool IsEnabled()
+    {
+        try
+        {
+            return SystemParametersInfo(SpiGetClientAreaAnimation, 0, out var enabled, 0) && enabled;
+        }
+        catch (EntryPointNotFoundException) { return true; }
+        catch (DllNotFoundException) { return true; }
+    }
+}
+
 internal sealed class DockForm : Form
 {
     private const int LogicalHeight = 48;
@@ -1881,12 +2158,12 @@ internal sealed class DockForm : Form
     private readonly Dictionary<string, DockItem> _runningItems = new(StringComparer.OrdinalIgnoreCase);
     private readonly ToolTip _toolTip = new() { InitialDelay = 450, ReshowDelay = 100, AutoPopDelay = 5000 };
     private readonly System.Windows.Forms.Timer _stateTimer = new() { Interval = 1000 };
+    private readonly System.Windows.Forms.Timer _hoverAnimationTimer = new() { Interval = 15 };
+    private readonly DockPointerState _pointer = new();
+    private List<DockItem>? _dragOriginalPinnedItems;
     private Rectangle _frame;
     private float _visualScale = 1F;
     private int _hoveredItem = -1;
-    private int _draggedItemIndex = -1;
-    private Point _dragStartPoint;
-    private bool _isDragging;
     private int _refreshInFlight;
     private int _refreshQueued;
     private int _refreshGeneration;
@@ -1913,11 +2190,16 @@ internal sealed class DockForm : Form
             _items.Add(item);
             _pinnedItems.Add(item);
         }
-        if (preview && previewHover) _hoveredItem = Math.Min(4, _items.Count - 1);
+        if (preview && previewHover)
+        {
+            _hoveredItem = Math.Min(4, _items.Count - 1);
+            if (_hoveredItem >= 0) _items[_hoveredItem].SnapHoverTarget(true);
+        }
         MouseMove += OnDockMouseMove;
         MouseLeave += OnDockMouseLeave;
         MouseDown += OnDockMouseDown;
         MouseUp += OnDockMouseUp;
+        MouseCaptureChanged += OnDockMouseCaptureChanged;
         Shown += (_, _) =>
         {
             Location = _screen.Bounds.Location;
@@ -1930,6 +2212,7 @@ internal sealed class DockForm : Form
         DpiChanged += (_, _) => BeginInvoke(new Action(PositionDock));
         _stateTimer.Tick += (_, _) => RefreshDockState();
         _stateTimer.Start();
+        _hoverAnimationTimer.Tick += OnHoverAnimationTick;
         DockPinStore.Changed += OnPinsChanged;
     }
 
@@ -2013,15 +2296,10 @@ internal sealed class DockForm : Form
         WallpaperSlice.Draw(e.Graphics, ClientRectangle, _screen.Bounds, Bounds.Top);
         if (_frame.Width <= 0 || _frame.Height <= 0) return;
         using var framePath = Rounded(_frame, (int)Math.Round(14 * _visualScale));
-        using var brush = new LinearGradientBrush(_frame, Color.FromArgb(250, 38, 44, 52), Color.FromArgb(252, 15, 18, 23), LinearGradientMode.Vertical);
+        using var brush = new LinearGradientBrush(_frame, Color.FromArgb(250, 38, 42, 48), Color.FromArgb(252, 24, 27, 32), LinearGradientMode.Vertical);
         e.Graphics.FillPath(brush, framePath);
-        var edgeInset = (int)Math.Round(15 * _visualScale);
-        using var top = new Pen(Color.FromArgb(150, 137, 151, 166), Math.Max(1, _visualScale));
-        e.Graphics.DrawLine(top, _frame.Left + edgeInset, _frame.Top + 1, _frame.Right - edgeInset, _frame.Top + 1);
-        using var edge = new Pen(Color.FromArgb(110, 83, 96, 110), Math.Max(1, _visualScale));
-        e.Graphics.DrawArc(edge, _frame.Left, _frame.Top, _frame.Height, _frame.Height, 90, 180);
-        e.Graphics.DrawArc(edge, _frame.Right - _frame.Height, _frame.Top, _frame.Height, _frame.Height, 270, 180);
-        e.Graphics.DrawLine(edge, _frame.Left + _frame.Height / 2, _frame.Bottom - 1, _frame.Right - _frame.Height / 2, _frame.Bottom - 1);
+        using var outline = new Pen(Color.FromArgb(54, 208, 214, 222), Math.Max(1, _visualScale));
+        e.Graphics.DrawPath(outline, framePath);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -2032,44 +2310,43 @@ internal sealed class DockForm : Form
         e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
         for (var index = 0; index < _items.Count; index++)
         {
-            _items[index].Draw(e.Graphics, index == _hoveredItem);
+            _items[index].Draw(e.Graphics);
         }
     }
 
     private void OnDockMouseDown(object? sender, MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left)
-        {
-            var targetIndex = _items.FindIndex(item => item.Bounds.Contains(e.Location));
-            if (targetIndex >= 0 && _items[targetIndex].IsPinned)
-            {
-                _draggedItemIndex = targetIndex;
-                _dragStartPoint = e.Location;
-                _isDragging = false;
-            }
-        }
+        if (_pointer.HasPress) CancelPointerGesture();
+        var targetIndex = _items.FindIndex(item => item.Bounds.Contains(e.Location));
+        if (targetIndex < 0 || !_pointer.Press(
+                targetIndex,
+                e.Button,
+                _items[targetIndex].IsPinned,
+                e.Location,
+                DockPointerMetrics.DragThreshold(Handle))) return;
+        Capture = true;
     }
 
     private void OnDockMouseMove(object? sender, MouseEventArgs e)
     {
-        if (_draggedItemIndex >= 0 && e.Button == MouseButtons.Left)
+        if (_pointer.HasPress && _pointer.PressedButton == MouseButtons.Left)
         {
-            if (!_isDragging && (Math.Abs(e.Location.X - _dragStartPoint.X) > 4 || Math.Abs(e.Location.Y - _dragStartPoint.Y) > 4))
+            if (_pointer.Track(e.Location) && _dragOriginalPinnedItems is null)
             {
-                _isDragging = true;
+                _dragOriginalPinnedItems = _pinnedItems.ToList();
             }
-
-            if (_isDragging)
+            if (_pointer.IsDragging)
             {
                 var newIndex = _items.FindIndex(item => e.Location.X < item.Bounds.Right);
                 if (newIndex < 0) newIndex = _items.Count - 1;
 
-                if (newIndex != _draggedItemIndex && newIndex >= 0 && newIndex < _items.Count)
+                var draggedIndex = _pointer.DraggedItemIndex;
+                if (newIndex != draggedIndex && newIndex >= 0 && newIndex < _items.Count)
                 {
-                    var item = _items[_draggedItemIndex];
+                    var item = _items[draggedIndex];
                     if (item.IsPinned && _items[newIndex].IsPinned)
                     {
-                        _items.RemoveAt(_draggedItemIndex);
+                        _items.RemoveAt(draggedIndex);
                         _items.Insert(newIndex, item);
                         
                         var pinnedOldIndex = _pinnedItems.IndexOf(item);
@@ -2084,7 +2361,7 @@ internal sealed class DockForm : Form
                             _pinnedItems.Insert(Math.Min(newPinnedIndex, _pinnedItems.Count), item);
                         }
                         
-                        _draggedItemIndex = newIndex;
+                        _pointer.MarkReordered(newIndex);
                         PositionDock();
                     }
                 }
@@ -2092,47 +2369,128 @@ internal sealed class DockForm : Form
             return;
         }
 
-        var next = _items.FindIndex(item => item.Bounds.Contains(e.Location));
-        if (next == _hoveredItem) return;
-        _hoveredItem = next;
-        Cursor = next >= 0 ? Cursors.Hand : Cursors.Default;
-        _toolTip.SetToolTip(this, next >= 0 ? _items[next].Name : string.Empty);
-        Invalidate();
+        SetHoveredItem(_items.FindIndex(item => item.Bounds.Contains(e.Location)));
     }
 
     private void OnDockMouseLeave(object? sender, EventArgs e)
     {
-        if (_hoveredItem < 0) return;
-        _hoveredItem = -1;
-        Cursor = Cursors.Default;
-        _toolTip.SetToolTip(this, string.Empty);
-        Invalidate();
+        SetHoveredItem(-1);
     }
 
     private void OnDockMouseUp(object? sender, MouseEventArgs e)
     {
-        if (_isDragging)
+        var releasedIndex = _items.FindIndex(candidate => candidate.Bounds.Contains(e.Location));
+        var completion = _pointer.Complete(releasedIndex, e.Button);
+
+        if (completion.WasReordered && _frame.Contains(e.Location))
         {
-            _isDragging = false;
-            _draggedItemIndex = -1;
+            _dragOriginalPinnedItems = null;
             DockPinStore.Reorder(_pinnedItems.Where(i => i.IsPinned).Select(i => i.Name));
+        }
+        else if (completion.WasDragging && !_frame.Contains(e.Location))
+        {
+            RestoreDragOrder();
+        }
+        else
+        {
+            _dragOriginalPinnedItems = null;
+        }
+
+        if (Capture) Capture = false;
+
+        if (completion.WasReordered)
+        {
             return;
         }
-        _draggedItemIndex = -1;
-
-        var item = _items.FirstOrDefault(candidate => candidate.Bounds.Contains(e.Location));
-        if (item is null) return;
-
-        if (e.Button == MouseButtons.Left)
+        if (completion.ActivateIndex >= 0 && completion.ActivateIndex < _items.Count)
         {
-            item.ActivateOrLaunch();
+            _items[completion.ActivateIndex].ActivateOrLaunch();
         }
-        else if (e.Button == MouseButtons.Right)
+        else if (completion.ContextMenuIndex >= 0 && completion.ContextMenuIndex < _items.Count)
         {
+            var item = _items[completion.ContextMenuIndex];
             var menu = BuildContextMenu(item);
             DisposeAfterClose(this, menu);
             menu.Show(this, e.Location);
         }
+    }
+
+    private void OnDockMouseCaptureChanged(object? sender, EventArgs e)
+    {
+        if (!Capture) CancelPointerGesture();
+    }
+
+    private void CancelPointerGesture(bool restoreDrag = true)
+    {
+        if (restoreDrag && _pointer.IsDragging) RestoreDragOrder();
+        else _dragOriginalPinnedItems = null;
+        _pointer.Cancel();
+        if (Capture) Capture = false;
+    }
+
+    private void RestoreDragOrder()
+    {
+        var original = _dragOriginalPinnedItems;
+        _dragOriginalPinnedItems = null;
+        if (original is null) return;
+
+        DockPointerOrder.Restore(_items, _pinnedItems, original, item => item.IsPinned);
+        PositionDock();
+    }
+
+    private void SetHoveredItem(int next)
+    {
+        if (next < 0 || next >= _items.Count) next = -1;
+        if (next == _hoveredItem) return;
+        _hoveredItem = next;
+        Cursor = next >= 0 ? Cursors.Hand : Cursors.Default;
+        _toolTip.SetToolTip(this, next >= 0 ? _items[next].Name : string.Empty);
+
+        var startedAt = Stopwatch.GetTimestamp();
+        var needsAnimation = false;
+        var animate = DockAnimationSettings.IsEnabled();
+        foreach (var (item, index) in _items.Select((item, index) => (item, index)))
+        {
+            if (!item.SetHoverTarget(index == next, startedAt)) continue;
+            if (!animate)
+            {
+                item.SnapHoverTarget(index == next);
+                InvalidateDockItem(item);
+            }
+            else needsAnimation = true;
+        }
+
+        if (needsAnimation)
+        {
+            if (!_hoverAnimationTimer.Enabled) _hoverAnimationTimer.Start();
+        }
+        else
+        {
+            _hoverAnimationTimer.Stop();
+        }
+    }
+
+    private void OnHoverAnimationTick(object? sender, EventArgs e)
+    {
+        var timestamp = Stopwatch.GetTimestamp();
+        var isSettling = false;
+        foreach (var item in _items)
+        {
+            if (item.AdvanceHover(timestamp))
+            {
+                InvalidateDockItem(item);
+            }
+            isSettling |= !item.IsHoverSettled;
+        }
+
+        if (!isSettling) _hoverAnimationTimer.Stop();
+    }
+
+    private void InvalidateDockItem(DockItem item)
+    {
+        var bounds = item.Bounds;
+        bounds.Inflate((int)Math.Ceiling(5 * _visualScale), (int)Math.Ceiling(5 * _visualScale));
+        Invalidate(bounds);
     }
 
     internal static ContextMenuOutsideClickMonitor DisposeAfterClose(Control dispatcher, ContextMenuStrip menu)
@@ -2225,6 +2583,9 @@ internal sealed class DockForm : Form
     private void ReloadPins()
     {
         Interlocked.Increment(ref _refreshGeneration);
+        CancelPointerGesture();
+        _hoverAnimationTimer.Stop();
+        _hoveredItem = -1;
         foreach (var item in _items) item.Dispose();
         _items.Clear();
         _pinnedItems.Clear();
@@ -2236,7 +2597,6 @@ internal sealed class DockForm : Form
             _items.Add(item);
             _pinnedItems.Add(item);
         }
-        _hoveredItem = -1;
         RefreshDockState();
         PositionDock();
     }
@@ -2326,6 +2686,13 @@ internal sealed class DockForm : Form
 
             var layoutChanged = false;
             var currentKeys = new HashSet<string>(snapshots.Select(snapshot => snapshot.Key), StringComparer.OrdinalIgnoreCase);
+            var membershipChanged = _runningItems.Keys.Any(key => !currentKeys.Contains(key)) ||
+                                    snapshots.Any(snapshot => !_runningItems.ContainsKey(snapshot.Key));
+            if (membershipChanged)
+            {
+                CancelPointerGesture();
+                SetHoveredItem(-1);
+            }
             foreach (var staleKey in _runningItems.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
             {
                 var stale = _runningItems[staleKey];
@@ -2371,8 +2738,11 @@ internal sealed class DockForm : Form
         if (disposing)
         {
             Interlocked.Increment(ref _refreshGeneration);
+            CancelPointerGesture(restoreDrag: false);
             DockPinStore.Changed -= OnPinsChanged;
             _stateTimer.Dispose();
+            _hoverAnimationTimer.Stop();
+            _hoverAnimationTimer.Dispose();
             _toolTip.Dispose();
             foreach (var item in _items) item.Dispose();
         }
@@ -2687,6 +3057,7 @@ internal sealed class DockItem : IDisposable
     private readonly PinnedApp? _pinnedApp;
     private RunningApp? _runningApp;
     private readonly Image? _icon;
+    private readonly DockHoverAnimation _hoverAnimation = new();
     private float _visualScale = 1F;
     private bool _running;
 
@@ -2709,6 +3080,8 @@ internal sealed class DockItem : IDisposable
     public bool IsPinned => _pinnedApp is not null;
     public bool CanPin => _runningApp is { CanPin: true };
     public bool CanClose => _pinnedApp?.HasClosableWindows() ?? _runningApp?.HasClosableWindows() ?? false;
+    public float HoverProgress => _hoverAnimation.Progress;
+    public bool IsHoverSettled => _hoverAnimation.IsSettled;
 
     public IReadOnlyList<DockWindowTarget> OpenWindows()
     {
@@ -2755,6 +3128,13 @@ internal sealed class DockItem : IDisposable
         _visualScale = visualScale;
     }
 
+    public bool SetHoverTarget(bool hovered, long timestamp) =>
+        _hoverAnimation.SetTarget(hovered, timestamp);
+
+    public bool AdvanceHover(long timestamp) => _hoverAnimation.Advance(timestamp);
+
+    public void SnapHoverTarget(bool hovered) => _hoverAnimation.Snap(hovered);
+
     public void ActivateOrLaunch()
     {
         if (_pinnedApp is not null) _pinnedApp.ActivateOrLaunch();
@@ -2776,22 +3156,23 @@ internal sealed class DockItem : IDisposable
         if (_pinnedApp is not null) DockPinStore.Unpin(_pinnedApp);
     }
 
-    public void Draw(Graphics graphics, bool hovered)
+    public void Draw(Graphics graphics)
     {
         var scale = _visualScale;
+        var hoverProgress = _hoverAnimation.Progress;
         if (_icon != null)
         {
-            var preferredSize = (int)Math.Round((hovered ? 30 : 28) * scale);
+            var preferredSize = (int)Math.Round((28 + 3 * hoverProgress) * scale);
             var size = Math.Max(4, Math.Min(preferredSize, Bounds.Width - (int)Math.Round(6 * scale)));
             var x = Bounds.Left + (Bounds.Width - size) / 2;
-            var y = Bounds.Top + (Bounds.Height - size) / 2 - (int)Math.Round((hovered ? 3 : 2) * scale);
+            var y = Bounds.Top + (Bounds.Height - size) / 2 - (int)Math.Round((2 + 2 * hoverProgress) * scale);
             graphics.DrawImage(_icon, new Rectangle(x, y, size, size));
         }
         else
         {
-            var size = Math.Max(4, Math.Min((int)Math.Round(28 * scale), Bounds.Width - (int)Math.Round(6 * scale)));
+            var size = Math.Max(4, Math.Min((int)Math.Round((28 + 3 * hoverProgress) * scale), Bounds.Width - (int)Math.Round(6 * scale)));
             var x = Bounds.Left + (Bounds.Width - size) / 2;
-            var y = Bounds.Top + (Bounds.Height - size) / 2 - (int)Math.Round(2 * scale);
+            var y = Bounds.Top + (Bounds.Height - size) / 2 - (int)Math.Round((2 + 2 * hoverProgress) * scale);
             using var tile = new SolidBrush(Color.FromArgb(255, 57, 66, 78));
             graphics.FillEllipse(tile, x, y, size, size);
             using var font = new Font("Segoe UI Semibold", 9.5f * scale, FontStyle.Bold, GraphicsUnit.Pixel);
